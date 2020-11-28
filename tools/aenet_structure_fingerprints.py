@@ -9,7 +9,7 @@ Parse aenet training set file and write out structure fingerprints
 import pandas as pd
 import argparse
 
-from aenet.trnset import TrnSet
+from aenet.trainset import TrnSet
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -27,7 +27,8 @@ def analyze(training_set_file, moment, output_file):
     with open(output_file, 'a') as fp:
         s = ts.read_next_structure()
         dim = s.max_descriptor_length
-        columns = list(range(dim*moment*ts.num_types)) + ["energy"] + ["path"]
+        columns = list(range(dim*moment*ts.num_types)
+                       ) + ["energy"] + ["path"]
         sfp = s.moment_fingerprint(ts.atom_types, moment=2)
         df = pd.DataFrame([sfp + [s.energy] + [s.path]], columns=columns)
         df.to_csv(fp, header=True)

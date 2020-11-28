@@ -1,17 +1,23 @@
 """
-Insert module description here.
+Classes for interacting with aenet training set files.
+
+Currently, only training set fuiles in ASCII format are supported.
+
 """
 
-from typing import List, Set
+from typing import List
 import numpy as np
+import scipy.stats
 
-__author__ = "The aenet Development Team"
+from .serialize import Serializable
+
+__author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
 __date__ = "2020-11-21"
 __version__ = "0.1"
 
 
-class AtomicStructure(object):
+class AtomicStructure(Serializable):
     """
     Class to hold all information of an atomic structure.
 
@@ -19,8 +25,12 @@ class AtomicStructure(object):
 
     path (str): Path to the original structure file
     energy (float): Total energy of the structure
-    atom_types (Set[str]): Set of atom types (chemical symbols)
-    atoms (dict)
+    atom_types (List[str]): List of atom types (chemical symbols)
+    atoms (List[dict]): Atomic information as dictionary with the keys
+         {"type": atom_type,
+          "fingerprint": fingerprint,
+          "coords": coords,
+          "forces": forces}
 
     Properties:
 
@@ -29,8 +39,8 @@ class AtomicStructure(object):
 
     """
 
-    def __init__(self, path: str, energy: float, atom_types: Set[str],
-                 atoms: dict):
+    def __init__(self, path: str, energy: float, atom_types: List[str],
+                 atoms: List[dict]):
         self.path = path
         self.energy = energy
         self.atom_types = atom_types
@@ -38,10 +48,11 @@ class AtomicStructure(object):
 
     def __str__(self):
         out = "AtomicStructure Info:\n"
-        out += "  Path      : {}\n".format(self.path)
-        out += "  Energy    : {:.6e}\n".format(self.energy)
-        out += "  Atom types: "
-        out += " ".join(sorted(self.atom_types))
+        out += "  Path           : {}\n".format(self.path)
+        out += "  Energy         : {:.6e}\n".format(self.energy)
+        out += "  Atom types     : "
+        out += " ".join(sorted(self.atom_types)) + "\n"
+        out += "  Number of atoms: {}".format(len(self.atoms))
         return out
 
     @property
@@ -210,7 +221,7 @@ class TrnSet(object):
         self._fp.readline()
         self._fp.readline()
 
-    def read_next_structure(self):
+    def read_next_structure(self, read_coords=False, read_forces=False):
         """
         Read next atomic structure from file.
 
@@ -227,17 +238,27 @@ class TrnSet(object):
             int(N) for N in self._fp.readline().strip().split()]
         energy = float(self._fp.readline().strip())
         atoms = []
+        coords = forces = None
         for i in range(num_atoms):
             # lowest atom type index is zero (unlike in Fortran)
             atom_type = int(self._fp.readline().strip()) - 1
             # skip coordinates, forces, and descriptor dimension
-            self._fp.readline()
-            self._fp.readline()
+            if read_coords:
+                coords = [float(val) for val in self._fp.readline().split()]
+            else:
+                self._fp.readline()
+            if read_forces:
+                forces = [float(val) for val in self._fp.readline().split()]
+            else:
+                self._fp.readline()
             self._fp.readline()
             # read descriptor
             fingerprint = [
                 float(v) for v in self._fp.readline().strip().split()]
-            atoms.append({"type": atom_type, "fingerprint": fingerprint})
+            atoms.append({"type": atom_type,
+                          "fingerprint": fingerprint,
+                          "coords": coords,
+                          "forces": forces})
         atom_types = sorted(set([a["type"] for a in atoms]))
         atom_types = [self.atom_types[i] for i in atom_types]
         structure = AtomicStructure(path, energy, atom_types, atoms)
