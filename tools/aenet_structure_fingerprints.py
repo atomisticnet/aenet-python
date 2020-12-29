@@ -28,14 +28,16 @@ def analyze(training_set_file, moment, output_file):
         s = ts.read_next_structure()
         dim = s.max_descriptor_length
         columns = list(range(dim*moment*ts.num_types)
-                       ) + ["energy"] + ["path"]
+                       ) + ["num_atoms", "energy", "path"]
         sfp = s.moment_fingerprint(ts.atom_types, moment=2)
-        df = pd.DataFrame([sfp + [s.energy] + [s.path]], columns=columns)
+        df = pd.DataFrame([sfp + [s.num_atoms, s.energy, s.path]],
+                          columns=columns)
         df.to_csv(fp, header=True)
         for i in range(ts.num_structures - 1):
             s = ts.read_next_structure()
             sfp = s.moment_fingerprint(ts.atom_types, moment=2)
-            df = pd.DataFrame([sfp + [s.energy] + [s.path]], columns=columns)
+            df = pd.DataFrame([sfp + [s.num_atoms, s.energy, s.path]],
+                              columns=columns)
             df.to_csv(fp, header=False)
 
 

@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+
+"""
+Python interface to the atomic energy network (aenet) package.
+
+The command-line tool 'aenet' is an umbrella for a collection of tools.
+Access the help text and manuals of the sub-tools with
+
+$ aenet <tool> --help
+
+"""
+
+import argparse
+import aenet.commandline as cmd
+
+__author__ = "The aenet developers"
+__email__ = "aenet@atomistic.net"
+__date__ = "2020-11-30"
+__version__ = "0.1"
+
+
+if (__name__ == "__main__"):
+    parser = argparse.ArgumentParser(
+        description=__doc__+"\n{} {}".format(__date__, __author__),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    subparsers = parser.add_subparsers()
+    cmd.discover(subparsers)
+    args = parser.parse_args()
+    try:
+        args.run(args)
+    except AttributeError:
+        parser.print_help()

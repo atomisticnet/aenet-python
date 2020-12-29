@@ -56,6 +56,10 @@ class AtomicStructure(Serializable):
         return out
 
     @property
+    def num_atoms(self):
+        return len(self.atoms)
+
+    @property
     def max_descriptor_length(self):
         """
         Dimension of longest fingerprint among all atoms of the atomic

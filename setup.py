@@ -37,6 +37,7 @@ setup(
     ],
     keywords=['materials science', 'machine learning'],
     packages=find_packages(exclude=['tests']),
-    scripts=glob.glob(os.path.join("scripts", "*.py")),
+    scripts=[os.path.join("scripts", "aenet")
+             ] + glob.glob(os.path.join("scripts", "*.py")),
     install_requires=['numpy']
 )
