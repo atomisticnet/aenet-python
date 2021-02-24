@@ -21,8 +21,9 @@ __version__ = "0.1"
 
 def clustering(data_file, num_dimensions, num_clusters):
     print("Reading data.")
-    df = pd.read_csv(data_file)
-    # Don't use the last two columns, which are the energy and the path
+    df = pd.read_csv(data_file, header=0)
+    # Don't use the last three columns, which are the number of atoms,
+    # the energy, and the path
     dim = len(df.columns) - 3
     x = df.iloc[:, :dim].values
 
@@ -72,8 +73,8 @@ if (__name__ == "__main__"):
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument(
-        "data_file",
-        help="File with structure fingerprints.")
+        "csv_file",
+        help="File with structure fingerprints in CSV format.")
 
     parser.add_argument(
         "-d", "--num-dimensions",
@@ -89,4 +90,4 @@ if (__name__ == "__main__"):
 
     args = parser.parse_args()
 
-    clustering(args.data_file, args.num_dimensions, args.num_clusters)
+    clustering(args.csv_file, args.num_dimensions, args.num_clusters)

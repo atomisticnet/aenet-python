@@ -13,7 +13,20 @@ __email__ = "aenet@atomistic.net"
 __date__ = "2020-11-28"
 
 DEFAULT = {
-    "aenet_install_dir": None
+    "aenet_install_dir": None,
+    "matplotlib_rc_params": {
+        "font.size": 14,
+        "legend.frameon": False,
+        "xtick.top": True,
+        "xtick.direction": "in",
+        "xtick.minor.visible": True,
+        "xtick.major.size": 8,
+        "xtick.minor.size": 4,
+        "ytick.right": True,
+        "ytick.direction": "in",
+        "ytick.minor.visible": True,
+        "ytick.major.size": 8,
+        "ytick.minor.size": 4}
 }
 
 PATHS = [
