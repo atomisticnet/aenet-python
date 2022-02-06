@@ -17,7 +17,7 @@ __date__ = "2020-10-31"
 __version__ = "0.1"
 
 
-def analyze(training_set_file, moment, output_file):
+def analyze(training_set_file, moment, output_file, atom_types):
 
     ts = TrnSet.from_ascii_file(training_set_file)
     print(ts)
@@ -26,16 +26,15 @@ def analyze(training_set_file, moment, output_file):
 
     with open(output_file, 'a') as fp:
         s = ts.read_next_structure()
-        dim = s.max_descriptor_length
-        columns = list(range(dim*moment*ts.num_types)
-                       ) + ["num_atoms", "energy", "path"]
-        sfp = s.moment_fingerprint(ts.atom_types, moment=2)
+        sfp = s.moment_fingerprint(sel_atom_types=atom_types, moment=moment)
+        columns = list(range(len(sfp))) + ["num_atoms", "energy", "path"]
         df = pd.DataFrame([sfp + [s.num_atoms, s.energy, s.path]],
                           columns=columns)
         df.to_csv(fp, header=True)
         for i in range(ts.num_structures - 1):
             s = ts.read_next_structure()
-            sfp = s.moment_fingerprint(ts.atom_types, moment=2)
+            sfp = s.moment_fingerprint(sel_atom_types=atom_types,
+                                       moment=moment)
             df = pd.DataFrame([sfp + [s.num_atoms, s.energy, s.path]],
                               columns=columns)
             df.to_csv(fp, header=False)
@@ -63,9 +62,17 @@ def main():
         type=str,
         default="structures.csv")
 
+    parser.add_argument(
+        "-t", "--atom-types",
+        help="Selected atom types (default: use all).",
+        type=str,
+        default=None,
+        nargs="+")
+
     args = parser.parse_args()
 
-    analyze(args.training_set_file, args.moment, args.output_file)
+    analyze(args.training_set_file, args.moment, args.output_file,
+            args.atom_types)
 
 
 if (__name__ == "__main__"):

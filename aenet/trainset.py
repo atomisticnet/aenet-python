@@ -71,7 +71,17 @@ class AtomicStructure(Serializable):
             max_length = max(max_length, len(a['fingerprint']))
         return max_length
 
-    def moment_fingerprint(self, all_atom_types: List[str], moment=2):
+    @property
+    def composition(self):
+        comp = {}
+        types = [a['type'] for a in self.atoms]
+        for i, t in enumerate(self.atom_types):
+            n = types.count(i)
+            if n > 0:
+                comp[t] = n
+        return comp
+
+    def moment_fingerprint(self, sel_atom_types: List[str] = None, moment=2):
         """
         Calculate a fingerprint for a collection of atoms using a moment
         expansion for each atom type.
@@ -80,9 +90,13 @@ class AtomicStructure(Serializable):
         each species have the same length.
 
         """
+        if sel_atom_types is None:
+            sel_atom_types = self.atom_types
         dimension = self.max_descriptor_length
         structure_fingerprint = []
-        for i, s in enumerate(all_atom_types):
+        for i, s in enumerate(self.atom_types):
+            if s not in sel_atom_types:
+                continue
             atomic_fingerprints = [
                 a['fingerprint'] for a in self.atoms if a['type'] == i]
             if len(atomic_fingerprints) == 0:
@@ -263,7 +277,7 @@ class TrnSet(object):
                           "fingerprint": fingerprint,
                           "coords": coords,
                           "forces": forces})
-        atom_types = sorted(set([a["type"] for a in atoms]))
-        atom_types = [self.atom_types[i] for i in atom_types]
-        structure = AtomicStructure(path, energy, atom_types, atoms)
+        # atom_types = sorted(set([a["type"] for a in atoms]))
+        # atom_types = [self.atom_types[i] for i in atom_types]
+        structure = AtomicStructure(path, energy, self.atom_types, atoms)
         return structure
