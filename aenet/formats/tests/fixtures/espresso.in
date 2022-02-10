@@ -1,0 +1,41 @@
+&control
+  calculation  = 'scf'
+  restart_mode = 'from_scratch'
+  prefix       = 'au'
+  pseudo_dir   = '/home/nongnuch/Pot.pw'
+  outdir       = '.'
+  tprnfor      = .true.
+  tstress      = .true.
+  wf_collect   = .true.
+/
+
+&system
+  ibrav       =   2
+  celldm(1)   =   7.7
+  nat         =   1
+  ntyp        =   1
+  ecutwfc     =  40
+  ecutrho     = 200
+  nspin       = 2
+  starting_magnetization(1) = 0.6
+  occupations = 'smearing'
+  smearing    = 'gauss'
+  degauss     =   0.010
+/
+
+&electrons
+  diagonalization  = 'david'
+  electron_maxstep = 100
+  conv_thr_init    =   1.0d-3
+  conv_thr         =   1.0d-7
+  mixing_beta      =   0.7d0
+/
+
+ATOMIC_SPECIES
+Au  196.966569  au_pbe_v1.uspp.F.UPF
+
+ATOMIC_POSITIONS (crystal)
+Au  0.000  0.000  0.000
+
+K_POINTS automatic
+  12 12 12  1  1  1

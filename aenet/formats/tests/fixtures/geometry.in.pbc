@@ -1,0 +1,76 @@
+  lattice_vector         9.03328156        0.00000000        0.00000000
+  lattice_vector         1.80734715        8.85056338        0.00000000
+  lattice_vector         0.01463727        0.00675914       25.81424533
+
+            atom         3.54654505        6.67334530        0.17339652  Au
+            atom         7.15935083        2.24815272        0.17340805  Au
+            atom         5.22642487        4.35750568        0.35543960  Cu
+            atom         8.83940656       -0.06774288        0.35541899  Cu
+            atom         4.39489507        1.85151366        0.85848248  Au
+            atom         9.81533956        6.27687149        0.85847153  Au
+            atom         2.60467593        4.04427774        0.85857287  Au
+            atom         8.02506254        8.46963378        0.85855751  Au
+            atom         1.71991192        1.49472992        1.46959940  Au
+            atom         7.14032211        5.92003025        1.46962056  Au
+            atom         5.40297544        8.18901381        1.69485945  Cu
+            atom         9.01590124        3.76376605        1.69485166  Cu
+            atom         4.52920224        5.64052434        2.58186772  Au
+            atom         8.14210721        1.21525847        2.58183533  Au
+            atom         2.73111317        7.84284117        2.58177993  Au
+            atom         6.34403844        3.41756260        2.58179031  Au
+            atom         1.81431084        5.25936393        3.36107565  Au
+constrain_relaxation .true.
+            atom         5.42727805        0.83408224        3.36107565  Au
+constrain_relaxation .true.
+            atom         3.62138949        3.04673507        3.36269778  Cu
+constrain_relaxation .true.
+            atom         9.04170385        7.47201676        3.36269778  Cu
+constrain_relaxation .true.
+            atom         2.71803205        0.46560957        4.18668188  Au
+constrain_relaxation .true.
+            atom         8.13834641        4.89089126        4.18668188  Au
+constrain_relaxation .true.
+            atom         0.91170321        2.67803627        4.18707600  Au
+constrain_relaxation .true.
+            atom         6.33201757        7.10331796        4.18707600  Au
+constrain_relaxation .true.
+            atom         5.42878567        4.52238025        5.01226276  Au
+constrain_relaxation .true.
+            atom         9.04175287        0.09709856        5.01226276  Au
+constrain_relaxation .true.
+            atom         3.62289711        6.73503307        5.01388489  Cu
+constrain_relaxation .true.
+            atom         7.23586432        2.30975138        5.01388489  Cu
+constrain_relaxation .true.
+            atom         2.71953968        4.15390757        5.83786899  Au
+constrain_relaxation .true.
+            atom         8.13985403        8.57918926        5.83786899  Au
+constrain_relaxation .true.
+            atom         4.52617804        1.94105259        5.83826311  Au
+constrain_relaxation .true.
+            atom         9.94649240        6.36633428        5.83826311  Au
+constrain_relaxation .true.
+            atom         5.43029329        8.21067825        6.66344987  Au
+constrain_relaxation .true.
+            atom         9.04326049        3.78539656        6.66344987  Au
+constrain_relaxation .true.
+            atom         1.81705758        1.57276770        6.66507200  Cu
+constrain_relaxation .true.
+            atom         7.23737194        5.99804939        6.66507200  Cu
+constrain_relaxation .true.
+            atom         2.71606378        7.82939511        7.44378508  Au
+            atom         6.32895051        3.40413648        7.44373201  Au
+            atom         4.51368628        5.62753865        7.44388375  Au
+            atom         8.12661884        1.20225089        7.44387175  Au
+            atom         3.71729157        3.12455010        8.55570708  Au
+            atom         9.13770014        7.54989746        8.55579232  Au
+            atom         1.84195331        5.28084067        8.33019558  Cu
+            atom         5.45487891        0.85558832        8.33019836  Cu
+            atom         1.04223669        2.76804844        9.16691219  Au
+            atom         6.46264550        7.19339879        9.16689611  Au
+            atom         2.83291708        0.57482612        9.16703238  Au
+            atom         8.25331499        5.00021210        9.16696296  Au
+            atom         3.69852135        6.79667213        9.85171729  Au
+            atom         7.31133656        2.37149225        9.85180038  Au
+            atom         5.63141814        4.68724047        9.66998062  Cu
+            atom         9.24435965        0.26195519        9.67000935  Cu

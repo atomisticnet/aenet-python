@@ -1,0 +1,4680 @@
+{
+  "_source": "http://v.web.umkc.edu/vanhornj/shannonradii.htm; R. D. Shannon Acta Cryst. A32, 751-767.",
+  "_notes": {
+    "R": "from r3 vs V plots",
+    "C": "calculated from bond length - bond strength equations",
+    "E": "estimated",
+    "?": "doubtful",
+    "*": "most reliable",
+    "M": "from metallic oxides",
+    "A": "Ahrens (1952) ionic radius; L. H. Ahrens. Published in 1952 Geochim. Cosmochim. Acta, 2, Pages 155-169.",
+    "P": "Pauling (1960) crystal radius; The Nature of the Chemical Bond, L. Pauling. Published in 1961 by Ithaca: Cornell University Press"
+  },
+  "Ru": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.82,
+      "notes": "",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "4d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.76,
+      "notes": "RM",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "4d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.705,
+      "notes": "ER",
+      "ion": 0.565,
+      "spin_state": "",
+      "configuration": "4d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.52,
+      "notes": "",
+      "ion": 0.38,
+      "spin_state": "",
+      "configuration": "4d 1",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 8,
+      "crystal": 0.5,
+      "notes": "",
+      "ion": 0.36,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 4
+    }
+  ],
+  "Re": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.77,
+      "notes": "RM",
+      "ion": 0.63,
+      "spin_state": "",
+      "configuration": "5d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.72,
+      "notes": "E",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "5d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.69,
+      "notes": "E",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "5d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.52,
+      "notes": "",
+      "ion": 0.38,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.67,
+      "notes": "",
+      "ion": 0.53,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    }
+  ],
+  "Ra": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.62,
+      "notes": "R",
+      "ion": 1.48,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.84,
+      "notes": "R",
+      "ion": 1.7,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 12
+    }
+  ],
+  "Rb": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.66,
+      "notes": "",
+      "ion": 1.52,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.7,
+      "notes": "",
+      "ion": 1.56,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.75,
+      "notes": "",
+      "ion": 1.61,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.77,
+      "notes": "E",
+      "ion": 1.63,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.8,
+      "notes": "",
+      "ion": 1.66,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.83,
+      "notes": "",
+      "ion": 1.69,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 11
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.86,
+      "notes": "",
+      "ion": 1.72,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 12
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.97,
+      "notes": "",
+      "ion": 1.83,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 14
+    }
+  ],
+  "Rh": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.805,
+      "notes": "R",
+      "ion": 0.665,
+      "spin_state": "",
+      "configuration": "4d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.74,
+      "notes": "RM",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "4d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.69,
+      "notes": "",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "4d 4",
+      "coordination": 6
+    }
+  ],
+  "Be": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.3,
+      "notes": "",
+      "ion": 0.16,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.41,
+      "notes": "* ",
+      "ion": 0.27,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.59,
+      "notes": "C",
+      "ion": 0.45,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 6
+    }
+  ],
+  "Ba": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.49,
+      "notes": "",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.52,
+      "notes": "C",
+      "ion": 1.38,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.56,
+      "notes": "",
+      "ion": 1.42,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.61,
+      "notes": "",
+      "ion": 1.47,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.66,
+      "notes": "",
+      "ion": 1.52,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.71,
+      "notes": "",
+      "ion": 1.57,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 11
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.75,
+      "notes": "C",
+      "ion": 1.61,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 12
+    }
+  ],
+  "Bi": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.1,
+      "notes": "C",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.17,
+      "notes": "R *",
+      "ion": 1.03,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.31,
+      "notes": "R",
+      "ion": 1.17,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.9,
+      "notes": "E",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    }
+  ],
+  "Bk": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.1,
+      "notes": "R",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "5f 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.97,
+      "notes": "R",
+      "ion": 0.83,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.07,
+      "notes": "R",
+      "ion": 0.93,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 8
+    }
+  ],
+  "Br": [
+    {
+      "oxidation_state": -1,
+      "crystal": 1.82,
+      "notes": "P",
+      "ion": 1.96,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.73,
+      "notes": "",
+      "ion": 0.59,
+      "spin_state": "",
+      "configuration": "4p 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.45,
+      "notes": "",
+      "ion": 0.31,
+      "spin_state": "",
+      "configuration": "4s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.39,
+      "notes": "",
+      "ion": 0.25,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.53,
+      "notes": "A",
+      "ion": 0.39,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    }
+  ],
+  "D": [
+    {
+      "oxidation_state": 1,
+      "crystal": 0.04,
+      "notes": "",
+      "ion": -0.1,
+      "spin_state": "",
+      "configuration": "1s 0",
+      "coordination": 2
+    }
+  ],
+  "H": [
+    {
+      "oxidation_state": 1,
+      "crystal": -0.24,
+      "notes": "",
+      "ion": -0.38,
+      "spin_state": "",
+      "configuration": "1s 0",
+      "coordination": 1
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": -0.04,
+      "notes": "",
+      "ion": -0.18,
+      "spin_state": "",
+      "configuration": "1s 0",
+      "coordination": 2
+    }
+  ],
+  "P": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.58,
+      "notes": "A",
+      "ion": 0.44,
+      "spin_state": "",
+      "configuration": "3s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.31,
+      "notes": "*",
+      "ion": 0.17,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.43,
+      "notes": "",
+      "ion": 0.29,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.52,
+      "notes": "C",
+      "ion": 0.38,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    }
+  ],
+  "Os": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.77,
+      "notes": "RM",
+      "ion": 0.63,
+      "spin_state": "",
+      "configuration": "5d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.715,
+      "notes": "E",
+      "ion": 0.575,
+      "spin_state": "",
+      "configuration": "5d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.63,
+      "notes": "",
+      "ion": 0.49,
+      "spin_state": "",
+      "configuration": "5d 2",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.685,
+      "notes": "E",
+      "ion": 0.545,
+      "spin_state": "",
+      "configuration": "5d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.665,
+      "notes": "E",
+      "ion": 0.525,
+      "spin_state": "",
+      "configuration": "5d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 8,
+      "crystal": 0.53,
+      "notes": "",
+      "ion": 0.39,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 4
+    }
+  ],
+  "OH": [
+    {
+      "oxidation_state": -1,
+      "crystal": 1.18,
+      "notes": "",
+      "ion": 1.32,
+      "spin_state": "",
+      "configuration": "",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.2,
+      "notes": "",
+      "ion": 1.34,
+      "spin_state": "",
+      "configuration": "",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.21,
+      "notes": "E",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.23,
+      "notes": "E",
+      "ion": 1.37,
+      "spin_state": "",
+      "configuration": "",
+      "coordination": 6
+    }
+  ],
+  "Ge": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.87,
+      "notes": "A",
+      "ion": 0.73,
+      "spin_state": "",
+      "configuration": "4s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.53,
+      "notes": "*",
+      "ion": 0.39,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.67,
+      "notes": "R*",
+      "ion": 0.53,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    }
+  ],
+  "Gd": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.078,
+      "notes": "R",
+      "ion": 0.938,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.14,
+      "notes": "",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.193,
+      "notes": "R",
+      "ion": 1.053,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.247,
+      "notes": "RC",
+      "ion": 1.107,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 9
+    }
+  ],
+  "Ga": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.61,
+      "notes": "*",
+      "ion": 0.47,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.69,
+      "notes": "",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.76,
+      "notes": "R*",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    }
+  ],
+  "Pr": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.13,
+      "notes": "R",
+      "ion": 0.99,
+      "spin_state": "",
+      "configuration": "4f 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.266,
+      "notes": "R",
+      "ion": 1.126,
+      "spin_state": "",
+      "configuration": "4f 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.319,
+      "notes": "R",
+      "ion": 1.179,
+      "spin_state": "",
+      "configuration": "4f 2",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.99,
+      "notes": "R",
+      "ion": 0.85,
+      "spin_state": "",
+      "configuration": "4f 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.1,
+      "notes": "R",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "4f 1",
+      "coordination": 8
+    }
+  ],
+  "Pt": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.74,
+      "notes": "",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "5d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.94,
+      "notes": "A",
+      "ion": 0.8,
+      "spin_state": "",
+      "configuration": "5d 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.765,
+      "notes": "R",
+      "ion": 0.625,
+      "spin_state": "",
+      "configuration": "5d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.71,
+      "notes": "ER",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "5d 5",
+      "coordination": 6
+    }
+  ],
+  "Pu": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.14,
+      "notes": "R",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "5f 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.0,
+      "notes": "R",
+      "ion": 0.86,
+      "spin_state": "",
+      "configuration": "5f 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.1,
+      "notes": "",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "5f 4",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.88,
+      "notes": "E",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "5f 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.85,
+      "notes": "R",
+      "ion": 0.71,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 6
+    }
+  ],
+  "C": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.06,
+      "notes": "",
+      "ion": -0.08,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.29,
+      "notes": "P",
+      "ion": 0.15,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.3,
+      "notes": "A",
+      "ion": 0.16,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 6
+    }
+  ],
+  "Pb": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.12,
+      "notes": "C",
+      "ion": 0.98,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.33,
+      "notes": "",
+      "ion": 1.19,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.37,
+      "notes": "C",
+      "ion": 1.23,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.43,
+      "notes": "C",
+      "ion": 1.29,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.49,
+      "notes": "C",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.54,
+      "notes": "C",
+      "ion": 1.4,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.59,
+      "notes": "C",
+      "ion": 1.45,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 11
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.63,
+      "notes": "",
+      "ion": 1.49,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 12
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.79,
+      "notes": "E",
+      "ion": 0.65,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.87,
+      "notes": "E",
+      "ion": 0.73,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.915,
+      "notes": "R",
+      "ion": 0.775,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.08,
+      "notes": "R",
+      "ion": 0.94,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 8
+    }
+  ],
+  "Pa": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.18,
+      "notes": "E",
+      "ion": 1.04,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.04,
+      "notes": "R",
+      "ion": 0.9,
+      "spin_state": "",
+      "configuration": "6d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.15,
+      "notes": "",
+      "ion": 1.01,
+      "spin_state": "",
+      "configuration": "6d 1",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.92,
+      "notes": "",
+      "ion": 0.78,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 1.05,
+      "notes": "",
+      "ion": 0.91,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 1.09,
+      "notes": "",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 9
+    }
+  ],
+  "Pd": [
+    {
+      "oxidation_state": 1,
+      "crystal": 0.73,
+      "notes": "",
+      "ion": 0.59,
+      "spin_state": "",
+      "configuration": "4d 9",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.78,
+      "notes": "",
+      "ion": 0.64,
+      "spin_state": "",
+      "configuration": "4d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.0,
+      "notes": "",
+      "ion": 0.86,
+      "spin_state": "",
+      "configuration": "4d 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.9,
+      "notes": "",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "4d 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.755,
+      "notes": "R",
+      "ion": 0.615,
+      "spin_state": "",
+      "configuration": "4d 6",
+      "coordination": 6
+    }
+  ],
+  "Xe": [
+    {
+      "oxidation_state": 8,
+      "crystal": 0.54,
+      "notes": "",
+      "ion": 0.4,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 8,
+      "crystal": 0.62,
+      "notes": "",
+      "ion": 0.48,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    }
+  ],
+  "Po": [
+    {
+      "oxidation_state": 4,
+      "crystal": 1.08,
+      "notes": "R",
+      "ion": 0.94,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.22,
+      "notes": "R",
+      "ion": 1.08,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.81,
+      "notes": "A",
+      "ion": 0.67,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    }
+  ],
+  "Pm": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.11,
+      "notes": "R",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "4f 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.233,
+      "notes": "R",
+      "ion": 1.093,
+      "spin_state": "",
+      "configuration": "4f 4",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.284,
+      "notes": "R",
+      "ion": 1.144,
+      "spin_state": "",
+      "configuration": "4f 4",
+      "coordination": 9
+    }
+  ],
+  "Ho": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.041,
+      "notes": "R",
+      "ion": 0.901,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.155,
+      "notes": "R",
+      "ion": 1.015,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.212,
+      "notes": "R",
+      "ion": 1.072,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.26,
+      "notes": "",
+      "ion": 1.12,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 10
+    }
+  ],
+  "Hf": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.72,
+      "notes": "R",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.85,
+      "notes": "R",
+      "ion": 0.71,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.9,
+      "notes": "",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.97,
+      "notes": "",
+      "ion": 0.83,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 8
+    }
+  ],
+  "Hg": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.11,
+      "notes": "",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.33,
+      "notes": "",
+      "ion": 1.19,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.83,
+      "notes": "",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.1,
+      "notes": "",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.16,
+      "notes": "",
+      "ion": 1.02,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.28,
+      "notes": "R",
+      "ion": 1.14,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 8
+    }
+  ],
+  "Mg": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.71,
+      "notes": "",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.8,
+      "notes": "",
+      "ion": 0.66,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.86,
+      "notes": "*",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.03,
+      "notes": "C",
+      "ion": 0.89,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 8
+    }
+  ],
+  "K": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.51,
+      "notes": "",
+      "ion": 1.37,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.52,
+      "notes": "",
+      "ion": 1.38,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.6,
+      "notes": "",
+      "ion": 1.46,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.65,
+      "notes": "",
+      "ion": 1.51,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.69,
+      "notes": "",
+      "ion": 1.55,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.73,
+      "notes": "",
+      "ion": 1.59,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.78,
+      "notes": "",
+      "ion": 1.64,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 12
+    }
+  ],
+  "Mn": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.8,
+      "notes": "",
+      "ion": 0.66,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.89,
+      "notes": "C",
+      "ion": 0.75,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.81,
+      "notes": "E",
+      "ion": 0.67,
+      "spin_state": "LS",
+      "configuration": "3d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.97,
+      "notes": "R*",
+      "ion": 0.83,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.04,
+      "notes": "C",
+      "ion": 0.9,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.1,
+      "notes": "R",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "3d 5",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.72,
+      "notes": "",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "3d 4",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.72,
+      "notes": "R",
+      "ion": 0.58,
+      "spin_state": "LS",
+      "configuration": "3d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.785,
+      "notes": "R*",
+      "ion": 0.645,
+      "spin_state": "HS",
+      "configuration": "3d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.53,
+      "notes": "R",
+      "ion": 0.39,
+      "spin_state": "",
+      "configuration": "3d 3",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.67,
+      "notes": "R*",
+      "ion": 0.53,
+      "spin_state": "",
+      "configuration": "3d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.47,
+      "notes": "R",
+      "ion": 0.33,
+      "spin_state": "",
+      "configuration": "3d 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.395,
+      "notes": "",
+      "ion": 0.255,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.39,
+      "notes": "",
+      "ion": 0.25,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.6,
+      "notes": "A",
+      "ion": 0.46,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    }
+  ],
+  "O": [
+    {
+      "oxidation_state": -2,
+      "crystal": 1.21,
+      "notes": "A",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": -2,
+      "crystal": 1.22,
+      "notes": "",
+      "ion": 1.36,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": -2,
+      "crystal": 1.24,
+      "notes": "",
+      "ion": 1.38,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": -2,
+      "crystal": 1.26,
+      "notes": "",
+      "ion": 1.4,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": -2,
+      "crystal": 1.28,
+      "notes": "",
+      "ion": 1.42,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 8
+    }
+  ],
+  "S": [
+    {
+      "oxidation_state": -2,
+      "crystal": 1.7,
+      "notes": "P",
+      "ion": 1.84,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.51,
+      "notes": "A",
+      "ion": 0.37,
+      "spin_state": "",
+      "configuration": "3s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.26,
+      "notes": "*",
+      "ion": 0.12,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.43,
+      "notes": "C",
+      "ion": 0.29,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    }
+  ],
+  "W": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.8,
+      "notes": "RM",
+      "ion": 0.66,
+      "spin_state": "",
+      "configuration": "5d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.76,
+      "notes": "R",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "5d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.56,
+      "notes": "*",
+      "ion": 0.42,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.65,
+      "notes": "",
+      "ion": 0.51,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.74,
+      "notes": "*",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    }
+  ],
+  "Zn": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.74,
+      "notes": "*",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.82,
+      "notes": "*",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.88,
+      "notes": "R*",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.04,
+      "notes": "C",
+      "ion": 0.9,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 8
+    }
+  ],
+  "Eu": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.31,
+      "notes": "",
+      "ion": 1.17,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.34,
+      "notes": "",
+      "ion": 1.2,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.39,
+      "notes": "",
+      "ion": 1.25,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.44,
+      "notes": "",
+      "ion": 1.3,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.49,
+      "notes": "",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.087,
+      "notes": "R",
+      "ion": 0.947,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.15,
+      "notes": "",
+      "ion": 1.01,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.206,
+      "notes": "R",
+      "ion": 1.066,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.26,
+      "notes": "R",
+      "ion": 1.12,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 9
+    }
+  ],
+  "Zr": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.73,
+      "notes": "R",
+      "ion": 0.59,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.8,
+      "notes": "C",
+      "ion": 0.66,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.86,
+      "notes": "R*",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.92,
+      "notes": "*",
+      "ion": 0.78,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.98,
+      "notes": "*",
+      "ion": 0.84,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.03,
+      "notes": "",
+      "ion": 0.89,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 9
+    }
+  ],
+  "Er": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.03,
+      "notes": "R",
+      "ion": 0.89,
+      "spin_state": "",
+      "configuration": "4f 11",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.085,
+      "notes": "",
+      "ion": 0.945,
+      "spin_state": "",
+      "configuration": "4f 11",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.144,
+      "notes": "R",
+      "ion": 1.004,
+      "spin_state": "",
+      "configuration": "4f 11",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.202,
+      "notes": "R",
+      "ion": 1.062,
+      "spin_state": "",
+      "configuration": "4f 11",
+      "coordination": 9
+    }
+  ],
+  "Ni": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.69,
+      "notes": "",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "3d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.63,
+      "notes": "",
+      "ion": 0.49,
+      "spin_state": "",
+      "configuration": "3d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.77,
+      "notes": "E",
+      "ion": 0.63,
+      "spin_state": "",
+      "configuration": "3d 8",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.83,
+      "notes": "R*",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "3d 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.7,
+      "notes": "R*",
+      "ion": 0.56,
+      "spin_state": "LS",
+      "configuration": "3d 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.74,
+      "notes": "E",
+      "ion": 0.6,
+      "spin_state": "HS",
+      "configuration": "3d 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.62,
+      "notes": "R",
+      "ion": 0.48,
+      "spin_state": "LS",
+      "configuration": "3d 6",
+      "coordination": 6
+    }
+  ],
+  "No": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.24,
+      "notes": "E",
+      "ion": 1.1,
+      "spin_state": "",
+      "configuration": "5f 14",
+      "coordination": 6
+    }
+  ],
+  "Na": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.13,
+      "notes": "",
+      "ion": 0.99,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.14,
+      "notes": "",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.16,
+      "notes": "",
+      "ion": 1.02,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.26,
+      "notes": "",
+      "ion": 1.12,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.32,
+      "notes": "",
+      "ion": 1.18,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.38,
+      "notes": "C",
+      "ion": 1.24,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.53,
+      "notes": "",
+      "ion": 1.39,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 12
+    }
+  ],
+  "Nb": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.86,
+      "notes": "",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "4d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.82,
+      "notes": "RE",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "4d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.93,
+      "notes": "",
+      "ion": 0.79,
+      "spin_state": "",
+      "configuration": "4d 1",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.62,
+      "notes": "C",
+      "ion": 0.48,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.78,
+      "notes": "",
+      "ion": 0.64,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.83,
+      "notes": "C",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.88,
+      "notes": "",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 8
+    }
+  ],
+  "Nd": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.43,
+      "notes": "",
+      "ion": 1.29,
+      "spin_state": "",
+      "configuration": "4f 4",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.49,
+      "notes": "",
+      "ion": 1.35,
+      "spin_state": "",
+      "configuration": "4f 4",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.123,
+      "notes": "R",
+      "ion": 0.983,
+      "spin_state": "",
+      "configuration": "4f 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.249,
+      "notes": "R*",
+      "ion": 1.109,
+      "spin_state": "",
+      "configuration": "4f 3",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.303,
+      "notes": "R",
+      "ion": 1.163,
+      "spin_state": "",
+      "configuration": "4f 3",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.41,
+      "notes": "E",
+      "ion": 1.27,
+      "spin_state": "",
+      "configuration": "4f 3",
+      "coordination": 12
+    }
+  ],
+  "Te(-2)": [
+    {
+      "oxidation_state": -2,
+      "crystal": 2.07,
+      "notes": "P",
+      "ion": 2.21,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    }
+  ],
+  "Np": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.24,
+      "notes": "",
+      "ion": 1.1,
+      "spin_state": "",
+      "configuration": "5f 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.15,
+      "notes": "",
+      "ion": 1.01,
+      "spin_state": "",
+      "configuration": "5f 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.01,
+      "notes": "R",
+      "ion": 0.87,
+      "spin_state": "",
+      "configuration": "5f 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.12,
+      "notes": "R",
+      "ion": 0.98,
+      "spin_state": "",
+      "configuration": "5f 3",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.89,
+      "notes": "R",
+      "ion": 0.75,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.86,
+      "notes": "",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "5f 1 ",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.85,
+      "notes": "R",
+      "ion": 0.71,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    }
+  ],
+  "Fr": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.94,
+      "notes": "A",
+      "ion": 1.8,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    }
+  ],
+  "Fe": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.77,
+      "notes": "",
+      "ion": 0.63,
+      "spin_state": "HS",
+      "configuration": "3d 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.78,
+      "notes": "",
+      "ion": 0.64,
+      "spin_state": "HS",
+      "configuration": "3d 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.75,
+      "notes": "E",
+      "ion": 0.61,
+      "spin_state": "LS",
+      "configuration": "3d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.92,
+      "notes": "R*",
+      "ion": 0.78,
+      "spin_state": "HS",
+      "configuration": "3d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.06,
+      "notes": "C",
+      "ion": 0.92,
+      "spin_state": "HS",
+      "configuration": "3d 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.63,
+      "notes": "*",
+      "ion": 0.49,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.72,
+      "notes": "",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "3d 5",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.69,
+      "notes": "R",
+      "ion": 0.55,
+      "spin_state": "LS",
+      "configuration": "3d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.785,
+      "notes": "R*",
+      "ion": 0.645,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.92,
+      "notes": "",
+      "ion": 0.78,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.725,
+      "notes": "R",
+      "ion": 0.585,
+      "spin_state": "",
+      "configuration": "3d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.39,
+      "notes": "R",
+      "ion": 0.25,
+      "spin_state": "",
+      "configuration": "3d2",
+      "coordination": 4
+    }
+  ],
+  "B": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.15,
+      "notes": "* ",
+      "ion": 0.01,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.25,
+      "notes": "* ",
+      "ion": 0.11,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.41,
+      "notes": "C",
+      "ion": 0.27,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 6
+    }
+  ],
+  "F": [
+    {
+      "oxidation_state": -1,
+      "crystal": 1.145,
+      "notes": "",
+      "ion": 1.285,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.16,
+      "notes": "",
+      "ion": 1.3,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.17,
+      "notes": "",
+      "ion": 1.31,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": -1,
+      "crystal": 1.19,
+      "notes": "",
+      "ion": 1.33,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.22,
+      "notes": "A",
+      "ion": 0.08,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 6
+    }
+  ],
+  "Sr": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.32,
+      "notes": "",
+      "ion": 1.18,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.35,
+      "notes": "",
+      "ion": 1.21,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.4,
+      "notes": "",
+      "ion": 1.26,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.45,
+      "notes": "",
+      "ion": 1.31,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.5,
+      "notes": "C",
+      "ion": 1.36,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.58,
+      "notes": "C",
+      "ion": 1.44,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 12
+    }
+  ],
+  "N": [
+    {
+      "oxidation_state": -3,
+      "crystal": 1.32,
+      "notes": "",
+      "ion": 1.46,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.3,
+      "notes": "A",
+      "ion": 0.16,
+      "spin_state": "",
+      "configuration": "2s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.044,
+      "notes": "",
+      "ion": -0.104,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.27,
+      "notes": "A",
+      "ion": 0.13,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 4
+    }
+  ],
+  "Si": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.4,
+      "notes": "*",
+      "ion": 0.26,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.54,
+      "notes": "R*",
+      "ion": 0.4,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    }
+  ],
+  "Sn": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.69,
+      "notes": "R",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.76,
+      "notes": "C",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.83,
+      "notes": "R*",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.89,
+      "notes": "",
+      "ion": 0.75,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.95,
+      "notes": "C",
+      "ion": 0.81,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 8
+    }
+  ],
+  "Sm": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.36,
+      "notes": "",
+      "ion": 1.22,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.41,
+      "notes": "",
+      "ion": 1.27,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.46,
+      "notes": "",
+      "ion": 1.32,
+      "spin_state": "",
+      "configuration": "4f 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.098,
+      "notes": "R",
+      "ion": 0.958,
+      "spin_state": "",
+      "configuration": "4f 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.16,
+      "notes": "E",
+      "ion": 1.02,
+      "spin_state": "",
+      "configuration": "4f 5",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.219,
+      "notes": "R",
+      "ion": 1.079,
+      "spin_state": "",
+      "configuration": "4f 5",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.272,
+      "notes": "R",
+      "ion": 1.132,
+      "spin_state": "",
+      "configuration": "4f 5",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.38,
+      "notes": "C",
+      "ion": 1.24,
+      "spin_state": "",
+      "configuration": "4f 5",
+      "coordination": 12
+    }
+  ],
+  "V": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.93,
+      "notes": "",
+      "ion": 0.79,
+      "spin_state": "",
+      "configuration": "3d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.78,
+      "notes": "R*",
+      "ion": 0.64,
+      "spin_state": "",
+      "configuration": "3d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.67,
+      "notes": "",
+      "ion": 0.53,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.72,
+      "notes": "R*",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.86,
+      "notes": "E",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.495,
+      "notes": "R*",
+      "ion": 0.355,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.6,
+      "notes": "*",
+      "ion": 0.46,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.68,
+      "notes": "",
+      "ion": 0.54,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    }
+  ],
+  "Sc": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.885,
+      "notes": "R*",
+      "ion": 0.745,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.01,
+      "notes": "R*",
+      "ion": 0.87,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 8
+    }
+  ],
+  "Sb": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.9,
+      "notes": "",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.94,
+      "notes": "",
+      "ion": 0.8,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.9,
+      "notes": "A",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.74,
+      "notes": "*",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    }
+  ],
+  "Se": [
+    {
+      "oxidation_state": -2,
+      "crystal": 1.84,
+      "notes": "P",
+      "ion": 1.98,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.64,
+      "notes": "A",
+      "ion": 0.5,
+      "spin_state": "",
+      "configuration": "4s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.42,
+      "notes": "*",
+      "ion": 0.28,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.56,
+      "notes": "C",
+      "ion": 0.42,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    }
+  ],
+  "Co": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.72,
+      "notes": "",
+      "ion": 0.58,
+      "spin_state": "HS",
+      "configuration": "3d 7",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.81,
+      "notes": "C",
+      "ion": 0.67,
+      "spin_state": "",
+      "configuration": "3d 7",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.79,
+      "notes": "R",
+      "ion": 0.65,
+      "spin_state": "LS",
+      "configuration": "3d 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.885,
+      "notes": "R*",
+      "ion": 0.745,
+      "spin_state": "HS",
+      "configuration": "3d 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.04,
+      "notes": "",
+      "ion": 0.9,
+      "spin_state": "",
+      "configuration": "3d 7",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.685,
+      "notes": "R*",
+      "ion": 0.545,
+      "spin_state": "LS",
+      "configuration": "3d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.75,
+      "notes": "",
+      "ion": 0.61,
+      "spin_state": "HS",
+      "configuration": "3d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.54,
+      "notes": "",
+      "ion": 0.4,
+      "spin_state": "",
+      "configuration": "3d 5",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.67,
+      "notes": "R",
+      "ion": 0.53,
+      "spin_state": "HS",
+      "configuration": "3d 5",
+      "coordination": 6
+    }
+  ],
+  "Cm": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.11,
+      "notes": "R",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.99,
+      "notes": "R",
+      "ion": 0.85,
+      "spin_state": "",
+      "configuration": "5f 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.09,
+      "notes": "R",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "5f 6",
+      "coordination": 8
+    }
+  ],
+  "Cl": [
+    {
+      "oxidation_state": -1,
+      "crystal": 1.67,
+      "notes": "P",
+      "ion": 1.81,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.26,
+      "notes": "",
+      "ion": 0.12,
+      "spin_state": "",
+      "configuration": "3s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.22,
+      "notes": "*",
+      "ion": 0.08,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.41,
+      "notes": "A",
+      "ion": 0.27,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    }
+  ],
+  "Ca": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.14,
+      "notes": "",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.2,
+      "notes": "*",
+      "ion": 1.06,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.26,
+      "notes": "*",
+      "ion": 1.12,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.32,
+      "notes": "",
+      "ion": 1.18,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.37,
+      "notes": "C",
+      "ion": 1.23,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.4,
+      "notes": "C",
+      "ion": 1.34,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 12
+    }
+  ],
+  "Cf": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.09,
+      "notes": "R",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "6d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.961,
+      "notes": "R",
+      "ion": 0.821,
+      "spin_state": "",
+      "configuration": "5f 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.06,
+      "notes": "",
+      "ion": 0.92,
+      "spin_state": "",
+      "configuration": "5f 8",
+      "coordination": 8
+    }
+  ],
+  "Ce": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.15,
+      "notes": "R",
+      "ion": 1.01,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.21,
+      "notes": "E",
+      "ion": 1.07,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.283,
+      "notes": "R",
+      "ion": 1.143,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.336,
+      "notes": "R",
+      "ion": 1.196,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.39,
+      "notes": "",
+      "ion": 1.25,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.48,
+      "notes": "C",
+      "ion": 1.34,
+      "spin_state": "",
+      "configuration": "6s 1",
+      "coordination": 12
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.01,
+      "notes": "R",
+      "ion": 0.87,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.11,
+      "notes": "R",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.21,
+      "notes": "",
+      "ion": 1.07,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.28,
+      "notes": "",
+      "ion": 1.14,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 12
+    }
+  ],
+  "Cd": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.92,
+      "notes": "",
+      "ion": 0.78,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.01,
+      "notes": "",
+      "ion": 0.87,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.09,
+      "notes": "",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.17,
+      "notes": "C",
+      "ion": 1.03,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.24,
+      "notes": "C",
+      "ion": 1.1,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.45,
+      "notes": "",
+      "ion": 1.31,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 12
+    }
+  ],
+  "Tm": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.17,
+      "notes": "",
+      "ion": 1.03,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.23,
+      "notes": "",
+      "ion": 1.09,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.02,
+      "notes": "R",
+      "ion": 0.88,
+      "spin_state": "",
+      "configuration": "4f 12",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.134,
+      "notes": "R",
+      "ion": 0.994,
+      "spin_state": "",
+      "configuration": "4f 12",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.192,
+      "notes": "R",
+      "ion": 1.052,
+      "spin_state": "",
+      "configuration": "4f 12",
+      "coordination": 9
+    }
+  ],
+  "Cs": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.81,
+      "notes": "",
+      "ion": 1.67,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.88,
+      "notes": "",
+      "ion": 1.74,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.92,
+      "notes": "",
+      "ion": 1.78,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.95,
+      "notes": "",
+      "ion": 1.81,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.99,
+      "notes": "",
+      "ion": 1.85,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 11
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 2.02,
+      "notes": "",
+      "ion": 1.88,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 12
+    }
+  ],
+  "Cr": [
+    {
+      "oxidation_state": 2,
+      "crystal": 0.87,
+      "notes": "E",
+      "ion": 0.73,
+      "spin_state": "LS",
+      "configuration": "3d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.94,
+      "notes": "R",
+      "ion": 0.8,
+      "spin_state": "HS",
+      "configuration": "3d 4",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.755,
+      "notes": "R*",
+      "ion": 0.615,
+      "spin_state": "",
+      "configuration": "3d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.55,
+      "notes": "",
+      "ion": 0.41,
+      "spin_state": "",
+      "configuration": "3d 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.69,
+      "notes": "R",
+      "ion": 0.55,
+      "spin_state": "",
+      "configuration": "3d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.485,
+      "notes": "R",
+      "ion": 0.345,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.63,
+      "notes": "ER",
+      "ion": 0.49,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.71,
+      "notes": "",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.4,
+      "notes": "",
+      "ion": 0.26,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.58,
+      "notes": "C",
+      "ion": 0.44,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    }
+  ],
+  "Cu": [
+    {
+      "oxidation_state": 1,
+      "crystal": 0.6,
+      "notes": "",
+      "ion": 0.46,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 0.74,
+      "notes": "E",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 0.91,
+      "notes": "E",
+      "ion": 0.77,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.71,
+      "notes": "",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "3d 9",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.71,
+      "notes": "*",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "3d 9",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.79,
+      "notes": "*",
+      "ion": 0.65,
+      "spin_state": "",
+      "configuration": "3d 9",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.87,
+      "notes": "",
+      "ion": 0.73,
+      "spin_state": "",
+      "configuration": "3d 9",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.68,
+      "notes": "",
+      "ion": 0.54,
+      "spin_state": "LS",
+      "configuration": "3d 8",
+      "coordination": 6
+    }
+  ],
+  "La": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.172,
+      "notes": "R",
+      "ion": 1.032,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.24,
+      "notes": "",
+      "ion": 1.1,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.3,
+      "notes": "R",
+      "ion": 1.16,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.356,
+      "notes": "R",
+      "ion": 1.216,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.41,
+      "notes": "",
+      "ion": 1.27,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.5,
+      "notes": "C",
+      "ion": 1.36,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 12
+    }
+  ],
+  "Li": [
+    {
+      "oxidation_state": 1,
+      "crystal": 0.73,
+      "notes": "*",
+      "ion": 0.59,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 0.9,
+      "notes": "*",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.06,
+      "notes": "C",
+      "ion": 0.92,
+      "spin_state": "",
+      "configuration": "1s 2",
+      "coordination": 8
+    }
+  ],
+  "Tl": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.64,
+      "notes": "R",
+      "ion": 1.5,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.73,
+      "notes": "R",
+      "ion": 1.59,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.84,
+      "notes": "RE",
+      "ion": 1.7,
+      "spin_state": "",
+      "configuration": "6s 2",
+      "coordination": 12
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.89,
+      "notes": "",
+      "ion": 0.75,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.025,
+      "notes": "R",
+      "ion": 0.885,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.12,
+      "notes": "C",
+      "ion": 0.98,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 8
+    }
+  ],
+  "Lu": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.001,
+      "notes": "R",
+      "ion": 0.861,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.117,
+      "notes": "R",
+      "ion": 0.977,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.172,
+      "notes": "R",
+      "ion": 1.032,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 9
+    }
+  ],
+  "Th": [
+    {
+      "oxidation_state": 4,
+      "crystal": 1.08,
+      "notes": "C",
+      "ion": 0.94,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.19,
+      "notes": "RC",
+      "ion": 1.05,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.23,
+      "notes": "*",
+      "ion": 1.09,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.27,
+      "notes": "E",
+      "ion": 1.13,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 10
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.32,
+      "notes": "C",
+      "ion": 1.18,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 11
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.35,
+      "notes": "C",
+      "ion": 1.21,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 12
+    }
+  ],
+  "Ti": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.0,
+      "notes": "E",
+      "ion": 0.86,
+      "spin_state": "",
+      "configuration": "3d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.81,
+      "notes": "R*",
+      "ion": 0.67,
+      "spin_state": "",
+      "configuration": "3d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.56,
+      "notes": "C",
+      "ion": 0.42,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.65,
+      "notes": "C",
+      "ion": 0.51,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.745,
+      "notes": "R*",
+      "ion": 0.605,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.88,
+      "notes": "C",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "3p 6",
+      "coordination": 8
+    }
+  ],
+  "Te": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.66,
+      "notes": "",
+      "ion": 0.52,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.8,
+      "notes": "",
+      "ion": 0.66,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.11,
+      "notes": "",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.57,
+      "notes": "C",
+      "ion": 0.43,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.7,
+      "notes": "*",
+      "ion": 0.56,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    }
+  ],
+  "Tb": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.063,
+      "notes": "R",
+      "ion": 0.923,
+      "spin_state": "",
+      "configuration": "4f 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.12,
+      "notes": "E",
+      "ion": 0.98,
+      "spin_state": "",
+      "configuration": "4f 8",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.18,
+      "notes": "R",
+      "ion": 1.04,
+      "spin_state": "",
+      "configuration": "4f 8",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.235,
+      "notes": "R",
+      "ion": 1.095,
+      "spin_state": "",
+      "configuration": "4f 8",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.9,
+      "notes": "R",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.02,
+      "notes": "",
+      "ion": 0.88,
+      "spin_state": "",
+      "configuration": "4f 7",
+      "coordination": 8
+    }
+  ],
+  "Tc": [
+    {
+      "oxidation_state": 4,
+      "crystal": 0.785,
+      "notes": "RM",
+      "ion": 0.645,
+      "spin_state": "",
+      "configuration": "4d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.74,
+      "notes": "ER",
+      "ion": 0.6,
+      "spin_state": "",
+      "configuration": "4d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.51,
+      "notes": "",
+      "ion": 0.37,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.7,
+      "notes": "A",
+      "ion": 0.56,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    }
+  ],
+  "Ta": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.86,
+      "notes": "E",
+      "ion": 0.72,
+      "spin_state": "",
+      "configuration": "5d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.82,
+      "notes": "E",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "5d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.78,
+      "notes": "",
+      "ion": 0.64,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.83,
+      "notes": "",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.88,
+      "notes": "",
+      "ion": 0.74,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 8
+    }
+  ],
+  "Yb": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.16,
+      "notes": "",
+      "ion": 1.02,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.22,
+      "notes": "E",
+      "ion": 1.08,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.28,
+      "notes": "",
+      "ion": 1.14,
+      "spin_state": "",
+      "configuration": "4f 14",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.008,
+      "notes": "R*",
+      "ion": 0.868,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.065,
+      "notes": "E",
+      "ion": 0.925,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.125,
+      "notes": "R",
+      "ion": 0.985,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.182,
+      "notes": "R",
+      "ion": 1.042,
+      "spin_state": "",
+      "configuration": "4f 13",
+      "coordination": 9
+    }
+  ],
+  "Dy": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.21,
+      "notes": "",
+      "ion": 1.07,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.27,
+      "notes": "",
+      "ion": 1.13,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.33,
+      "notes": "",
+      "ion": 1.19,
+      "spin_state": "",
+      "configuration": "4f 10",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.052,
+      "notes": "R",
+      "ion": 0.912,
+      "spin_state": "",
+      "configuration": "4f 9",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.11,
+      "notes": "",
+      "ion": 0.97,
+      "spin_state": "",
+      "configuration": "4f 9",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.167,
+      "notes": "R",
+      "ion": 1.027,
+      "spin_state": "",
+      "configuration": "4f 9",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.223,
+      "notes": "R",
+      "ion": 1.083,
+      "spin_state": "",
+      "configuration": "4f 9",
+      "coordination": 9
+    }
+  ],
+  "I": [
+    {
+      "oxidation_state": -1,
+      "crystal": 2.06,
+      "notes": "A",
+      "ion": 2.2,
+      "spin_state": "",
+      "configuration": "5p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.58,
+      "notes": "*",
+      "ion": 0.44,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 3
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 1.09,
+      "notes": "",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "5s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.56,
+      "notes": "",
+      "ion": 0.42,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 7,
+      "crystal": 0.67,
+      "notes": "",
+      "ion": 0.53,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    }
+  ],
+  "U": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.165,
+      "notes": "R",
+      "ion": 1.025,
+      "spin_state": "",
+      "configuration": "5f 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.03,
+      "notes": "",
+      "ion": 0.89,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.09,
+      "notes": "E",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.14,
+      "notes": "R*",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.19,
+      "notes": "",
+      "ion": 1.05,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.31,
+      "notes": "E",
+      "ion": 1.17,
+      "spin_state": "",
+      "configuration": "5f 2",
+      "coordination": 12
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.9,
+      "notes": "",
+      "ion": 0.76,
+      "spin_state": "",
+      "configuration": "5f 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.98,
+      "notes": "E",
+      "ion": 0.84,
+      "spin_state": "",
+      "configuration": "5f 1",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.59,
+      "notes": "",
+      "ion": 0.45,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.66,
+      "notes": "",
+      "ion": 0.52,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.87,
+      "notes": "*",
+      "ion": 0.73,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.95,
+      "notes": "E",
+      "ion": 0.81,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 1.0,
+      "notes": "",
+      "ion": 0.86,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 8
+    }
+  ],
+  "Y": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.04,
+      "notes": "R*",
+      "ion": 0.9,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.1,
+      "notes": "",
+      "ion": 0.96,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.159,
+      "notes": "R*",
+      "ion": 1.019,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.215,
+      "notes": "R",
+      "ion": 1.075,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 9
+    }
+  ],
+  "Ac": [
+    {
+      "oxidation_state": 3,
+      "crystal": 1.26,
+      "notes": "R",
+      "ion": 1.12,
+      "spin_state": "",
+      "configuration": "6p 6",
+      "coordination": 6
+    }
+  ],
+  "Ag": [
+    {
+      "oxidation_state": 1,
+      "crystal": 0.81,
+      "notes": "",
+      "ion": 0.67,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 2
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.14,
+      "notes": "C",
+      "ion": 1.0,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.16,
+      "notes": "",
+      "ion": 1.02,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.23,
+      "notes": "C",
+      "ion": 1.09,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.29,
+      "notes": "C",
+      "ion": 1.15,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.36,
+      "notes": "",
+      "ion": 1.22,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 1,
+      "crystal": 1.42,
+      "notes": "",
+      "ion": 1.28,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 0.93,
+      "notes": "",
+      "ion": 0.79,
+      "spin_state": "",
+      "configuration": "4d 9",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.08,
+      "notes": "",
+      "ion": 0.94,
+      "spin_state": "",
+      "configuration": "4d 9",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.81,
+      "notes": "",
+      "ion": 0.67,
+      "spin_state": "",
+      "configuration": "4d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.89,
+      "notes": "R",
+      "ion": 0.75,
+      "spin_state": "",
+      "configuration": "4d 8",
+      "coordination": 6
+    }
+  ],
+  "Ir": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.82,
+      "notes": "E",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "5d 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.765,
+      "notes": "R",
+      "ion": 0.625,
+      "spin_state": "",
+      "configuration": "5d 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.71,
+      "notes": "EM",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "5d 4",
+      "coordination": 6
+    }
+  ],
+  "Am": [
+    {
+      "oxidation_state": 2,
+      "crystal": 1.35,
+      "notes": "",
+      "ion": 1.21,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 7
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.4,
+      "notes": "",
+      "ion": 1.26,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 2,
+      "crystal": 1.45,
+      "notes": "",
+      "ion": 1.31,
+      "spin_state": "",
+      "configuration": "5f 7",
+      "coordination": 9
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.115,
+      "notes": "R",
+      "ion": 0.975,
+      "spin_state": "",
+      "configuration": "5f 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.23,
+      "notes": "",
+      "ion": 1.09,
+      "spin_state": "",
+      "configuration": "5f 6",
+      "coordination": 8
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.99,
+      "notes": "R",
+      "ion": 0.85,
+      "spin_state": "",
+      "configuration": "5f 5",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 1.09,
+      "notes": "",
+      "ion": 0.95,
+      "spin_state": "",
+      "configuration": "5f 5",
+      "coordination": 8
+    }
+  ],
+  "Al": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.53,
+      "notes": "* ",
+      "ion": 0.39,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.62,
+      "notes": "",
+      "ion": 0.48,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.675,
+      "notes": "R *",
+      "ion": 0.535,
+      "spin_state": "",
+      "configuration": "2p 6",
+      "coordination": 6
+    }
+  ],
+  "As": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.72,
+      "notes": "A",
+      "ion": 0.58,
+      "spin_state": "",
+      "configuration": "4s 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.475,
+      "notes": "R *",
+      "ion": 0.335,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.6,
+      "notes": "C *",
+      "ion": 0.46,
+      "spin_state": "",
+      "configuration": "3d 10",
+      "coordination": 6
+    }
+  ],
+  "Au": [
+    {
+      "oxidation_state": 1,
+      "crystal": 1.51,
+      "notes": "A",
+      "ion": 1.37,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.82,
+      "notes": "",
+      "ion": 0.68,
+      "spin_state": "",
+      "configuration": "5d 8",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.99,
+      "notes": "A",
+      "ion": 0.85,
+      "spin_state": "",
+      "configuration": "5d 8",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.71,
+      "notes": "",
+      "ion": 0.57,
+      "spin_state": "",
+      "configuration": "5d 6",
+      "coordination": 6
+    }
+  ],
+  "At": [
+    {
+      "oxidation_state": 7,
+      "crystal": 0.76,
+      "notes": "A",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "5d 10",
+      "coordination": 6
+    }
+  ],
+  "In": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.76,
+      "notes": "",
+      "ion": 0.62,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 0.94,
+      "notes": "R*",
+      "ion": 0.8,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 3,
+      "crystal": 1.06,
+      "notes": "RC",
+      "ion": 0.92,
+      "spin_state": "",
+      "configuration": "4d 10",
+      "coordination": 8
+    }
+  ],
+  "Mo": [
+    {
+      "oxidation_state": 3,
+      "crystal": 0.83,
+      "notes": "E",
+      "ion": 0.69,
+      "spin_state": "",
+      "configuration": "4d 3",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 4,
+      "crystal": 0.79,
+      "notes": "RM",
+      "ion": 0.65,
+      "spin_state": "",
+      "configuration": "4d 2",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.6,
+      "notes": "R",
+      "ion": 0.46,
+      "spin_state": "",
+      "configuration": "4d 1",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 5,
+      "crystal": 0.75,
+      "notes": "R",
+      "ion": 0.61,
+      "spin_state": "",
+      "configuration": "4d 1",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.55,
+      "notes": "R*",
+      "ion": 0.41,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 4
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.64,
+      "notes": "",
+      "ion": 0.5,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 5
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.73,
+      "notes": "R*",
+      "ion": 0.59,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 6
+    },
+    {
+      "oxidation_state": 6,
+      "crystal": 0.87,
+      "notes": "",
+      "ion": 0.73,
+      "spin_state": "",
+      "configuration": "4p 6",
+      "coordination": 7
+    }
+  ]
+}

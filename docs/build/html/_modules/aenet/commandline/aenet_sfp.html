@@ -1,0 +1,203 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>aenet.commandline.aenet_sfp &#8212; ænet Tools 1.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for aenet.commandline.aenet_sfp</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+
+<span class="kn">from</span> <span class="nn">.tools</span> <span class="kn">import</span> <span class="n">AenetToolABC</span>
+<span class="kn">from</span> <span class="nn">..trainset</span> <span class="kn">import</span> <span class="n">TrnSet</span>
+
+<span class="n">__author__</span> <span class="o">=</span> <span class="s2">&quot;The aenet developers&quot;</span>
+<span class="n">__email__</span> <span class="o">=</span> <span class="s2">&quot;aenet@atomistic.net&quot;</span>
+<span class="n">__date__</span> <span class="o">=</span> <span class="s2">&quot;2020-11-30&quot;</span>
+
+
+<div class="viewcode-block" id="SFP"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP">[docs]</a><span class="k">class</span> <span class="nc">SFP</span><span class="p">(</span><span class="n">AenetToolABC</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Compute structure fingerprints &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SFP._set_arguments"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP._set_arguments">[docs]</a>    <span class="k">def</span> <span class="nf">_set_arguments</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s2">&quot;training_set_file&quot;</span><span class="p">,</span>
+            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;aenet training set in ASCII format.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s2">&quot;-m&quot;</span><span class="p">,</span> <span class="s2">&quot;--moment&quot;</span><span class="p">,</span>
+            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Maximal moment for fingerprint expansion (default: 2).&quot;</span><span class="p">,</span>
+            <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+            <span class="n">default</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s2">&quot;-o&quot;</span><span class="p">,</span> <span class="s2">&quot;--output-file&quot;</span><span class="p">,</span>
+            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Path to the CSV output file (default: structures.csv). &quot;</span>
+                 <span class="s2">&quot;Note: if file exists, data will be appended.&quot;</span><span class="p">,</span>
+            <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+            <span class="n">default</span><span class="o">=</span><span class="s2">&quot;structures.csv&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s2">&quot;-t&quot;</span><span class="p">,</span> <span class="s2">&quot;--atom-types&quot;</span><span class="p">,</span>
+            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Selected atom types (default: use all).&quot;</span><span class="p">,</span>
+            <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+            <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;+&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SFP._man"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP._man">[docs]</a>    <span class="k">def</span> <span class="nf">_man</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        Featurize atomic structures by calculating structure</span>
+<span class="s2">        &#39;fingerprints&#39; using the approach of reference [1].</span>
+
+<span class="s2">        [1] H. Guo, Q. Wang, A. Urban, N. Artrith, arXiv:2201.11203, 2022,</span>
+<span class="s2">            https://arxiv.org/abs/2201.11203</span>
+
+<span class="s2">        Parses a training-set file produced by ``generate.x`` and</span>
+<span class="s2">        converted to ASCII format with ``trnset2ascii.x``.  The atomic</span>
+<span class="s2">        environment features of a structure are combined by calculating</span>
+<span class="s2">        moments of their distribution (mean, standard deviation, etc.).</span>
+<span class="s2">        For further details, see the original publication [1].</span>
+
+<span class="s2">        The dimension of the resulting structural fingerprints is</span>
+
+<span class="s2">           :math:`D = D_</span><span class="si">{atom}</span><span class="s2"> * N_</span><span class="si">{moment}</span><span class="s2">`</span>
+
+<span class="s2">        where :math:`D_</span><span class="si">{atom}</span><span class="s2">` is the dimension of the atomic</span>
+<span class="s2">        environment descriptor, and :math:`N_</span><span class="si">{moment}</span><span class="s2">` is the maximal</span>
+<span class="s2">        moment used for the fingerprint expansion.</span>
+
+<span class="s2">        Note: Usually, the dimension of the structure fingerprints can</span>
+<span class="s2">        be significanlty reduced using standard dimension reduction</span>
+<span class="s2">        methods, such as principal component analysis.</span>
+
+<span class="s2">        &quot;&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="SFP.analyze"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP.analyze">[docs]</a>    <span class="k">def</span> <span class="nf">analyze</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">training_set_file</span><span class="p">,</span> <span class="n">moment</span><span class="p">,</span> <span class="n">output_file</span><span class="p">,</span> <span class="n">atom_types</span><span class="p">):</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">TrnSet</span><span class="o">.</span><span class="n">from_ascii_file</span><span class="p">(</span><span class="n">training_set_file</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">ts</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Maximal moment for structure fingerprints: </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">moment</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Writing structure fingerprints to &#39;</span><span class="si">{}</span><span class="s2">&#39;.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">output_file</span><span class="p">))</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_file</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">read_next_structure</span><span class="p">()</span>
+            <span class="n">sfp</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">moment_fingerprint</span><span class="p">(</span>
+                <span class="n">sel_atom_types</span><span class="o">=</span><span class="n">atom_types</span><span class="p">,</span> <span class="n">moment</span><span class="o">=</span><span class="n">moment</span><span class="p">)</span>
+            <span class="n">columns</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sfp</span><span class="p">)))</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;num_atoms&quot;</span><span class="p">,</span> <span class="s2">&quot;energy&quot;</span><span class="p">,</span> <span class="s2">&quot;path&quot;</span><span class="p">]</span>
+            <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">([</span><span class="n">sfp</span> <span class="o">+</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">num_atoms</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">energy</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">path</span><span class="p">]],</span>
+                              <span class="n">columns</span><span class="o">=</span><span class="n">columns</span><span class="p">)</span>
+            <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">num_structures</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">read_next_structure</span><span class="p">()</span>
+                <span class="n">sfp</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">moment_fingerprint</span><span class="p">(</span><span class="n">sel_atom_types</span><span class="o">=</span><span class="n">atom_types</span><span class="p">,</span>
+                                           <span class="n">moment</span><span class="o">=</span><span class="n">moment</span><span class="p">)</span>
+                <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">([</span><span class="n">sfp</span> <span class="o">+</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">num_atoms</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">energy</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">path</span><span class="p">]],</span>
+                                  <span class="n">columns</span><span class="o">=</span><span class="n">columns</span><span class="p">)</span>
+                <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SFP.run"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">analyze</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">training_set_file</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">moment</span><span class="p">,</span>
+                     <span class="n">args</span><span class="o">.</span><span class="n">output_file</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">atom_types</span><span class="p">)</span></div></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">tool</span> <span class="o">=</span> <span class="n">SFP</span><span class="p">()</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">tool</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">tool</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">ænet Tools</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/commandline.html">Command-line interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev/commandline.html">Defining Commandline Tools</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, The aenet Developers.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.0.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
