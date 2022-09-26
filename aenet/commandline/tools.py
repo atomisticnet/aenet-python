@@ -16,7 +16,7 @@ __date__ = "2020-11-30"
 class AenetToolABC(object):
     """
     Attributes:
-      subparsers: a subparsers instance from the 'argparse' module
+      subparsers: an instance of an argparse subparsers
 
     """
     __metaclass__ = abc.ABCMeta
@@ -46,17 +46,16 @@ class AenetToolABC(object):
         Example:
 
         self.parser.add_argument(
-            "--path",
-            help="Path to somewhere (default: .).",
-            default=".")
+          "--path", help="Path to somewhere (default: .).", default=".")
 
         """
         pass
 
     def _man(self):
         """
-        Use this method to add a manual entry to be added to the tool's help
-        message.
+        The return value of this private method is the manual entry to be
+        added to the tool's help message (i.e., shown when the
+        ``--help`` flag is passed).
 
         """
         manual = ""
@@ -65,7 +64,7 @@ class AenetToolABC(object):
     @abc.abstractmethod
     def run(self, args):
         """
-        Input:
-          args    object returned from an 'argparse' parser
+        Arguments:
+          args: object returned from an 'argparse' parser
         """
         pass

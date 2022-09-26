@@ -14,9 +14,9 @@ __date__ = "2020-11-30"
 
 
 def discover(subparsers):
-    # Import all python packages mnamed aenet-*.py from the tool directory
+    # Import all python packages named aenet-*.py from the tool directory
     tool_files = glob.glob(
-        os.path.join(os.path.dirname(__file__), 'aenet-*.py'))
+        os.path.join(os.path.dirname(__file__), 'aenet_*.py'))
     tool_packages = [os.path.basename(f)[:-3] for f in tool_files]
     for t in tool_packages:
         try:

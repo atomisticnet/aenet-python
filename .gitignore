@@ -4,3 +4,6 @@
 \#*
 .DS_Store
 pip-wheel-metadata
+__pycache__
+OLD*
+.ipynb_checkpoints
