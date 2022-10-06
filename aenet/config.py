@@ -7,13 +7,20 @@ import json
 import os
 import shutil
 import sys
+from typing import List, Union
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
 __date__ = "2020-11-28"
 
 DEFAULT = {
-    "aenet_install_dir": None,
+    "aenet": {
+        "root_path": None,
+        "generate_x_path": None,
+        "train_x_path": None,
+        "predict_x_path": None,
+        "trnset2ascii_x_path": None,
+    },
     "matplotlib_rc_params": {
         "font.size": 14,
         "legend.frameon": False,
@@ -100,3 +107,34 @@ def write_config(config_dict, config_file=None, replace=False):
             config_dict = config_dict_orig
     with open(config_file, "w") as fp:
         json.dump(config_dict, fp)
+
+
+def read(settings: Union[str, List[str]], config_file: os.PathLike = None):
+    """
+    Args:
+      settings: one or more settings to read
+      config_file: path to the config file
+
+    Returns:
+      If `settings` is a string, return only the result for this setting.
+      If `settings` is a list, return list of results.
+
+    """
+    if hasattr(settings, 'lower'):
+        settings = [settings]
+        return_single = True
+    else:
+        return_single = False
+
+    config_dict = read_config(config_file)
+    
+    result = []
+    for setting in settings:
+        if setting not in config_dict:
+            raise KeyError('Not a valid setting: {}'.format(setting))
+        result.append(config_dict[setting])
+
+    if return_single:
+        return result[0]
+    else:
+        return result

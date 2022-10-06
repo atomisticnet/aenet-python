@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-import sys
+import json
+import glob
+import os
 
 from aenet.commandline.tools import AenetToolABC
 import aenet.config as cfg
@@ -17,6 +19,11 @@ class Config(AenetToolABC):
     """
 
     def _set_arguments(self):
+        self.parser.add_argument(
+            "--set-aenet-path", "-p",
+            help="Set the root path to aenet.",
+            default=None)
+
         self.parser.add_argument(
             "--write", "-w",
             help="Write a setting to the configuration file.",
@@ -62,9 +69,48 @@ class Config(AenetToolABC):
 
         """
 
+    def set_aenet_paths(self, root_path):
+        """
+        Configure the paths to the aenet installation and to the executables.
+
+        """
+        aenet_dict = {
+            "root_path": None,
+            "generate_x_path": None,
+            "train_x_path": None,
+            "predict_x_path": None,
+            "trnset2ascii_x_path": None,
+        }
+        if not os.path.exists(root_path):
+            raise FileNotFoundError('Path not found: {}'.format(root_path))
+
+        aenet_dict['root_path'] = os.path.abspath(root_path)
+
+        def get_exec_path(name, subdir):
+            path_try = glob.glob(
+                os.path.join(aenet_dict['root_path'], 
+                             subdir, '{}*'.format(name)))
+            path_try = path_try[0] if len(path_try) > 0 else ''
+            path = input("Path to `{}` [{}]: ".format(name, path_try))
+            path = path if len(path) > 0 else path_try
+            if len(path) == 0 or not os.path.exists(path):
+                print('Warning: Path to {} not found: {}'.format(name, path))
+                path = None
+            return path
+
+        aenet_dict['generate_x_path'] = get_exec_path('generate.x', 'bin')
+        aenet_dict['train_x_path'] = get_exec_path('train.x', 'bin')
+        aenet_dict['predict_x_path'] = get_exec_path('predict.x', 'bin')
+        aenet_dict['trnset2ascii_x_path'] = get_exec_path('trnset2ASCII.x', 'tools')
+        return {'aenet': aenet_dict}
+
     def run(self, args):
+        config_dict = {}
+        if args.set_aenet_path is not None:
+            config_dict.update(self.set_aenet_paths(args.set_aenet_path))
         if args.write is not None:
-            config_dict = dict(args.write)
+            config_dict = config_dict.update(dict(args.write))
+        if config_dict:
             cfg.write_config(config_dict, config_file=args.file)
         if args.read is not None:
             print(args.read)
@@ -74,14 +120,20 @@ class Config(AenetToolABC):
                     print("'{}' = {}".format(setting, config_dict[setting]))
                 else:
                     print("'' is not currently set.")
-        if args.write is None and args.read is None:
+        if (args.write is None and args.read is None 
+                and args.set_aenet_path is None):
             config_file = cfg.config_file_path()
             if config_file is None:
                 print("No configuration file found. Using defaults.")
             else:
                 print("Configuration file: {}".format(config_file))
             config_dict = cfg.read_config(config_file=args.file)
-            print(config_dict)
+            out = json.dumps(config_dict, indent=2, default=str)
+            for o, r in [(': null', ': None'), 
+                         (': true', ': True'), 
+                         (': false', ': False')]:
+                out = out.replace(o, r)
+            print(out)
 
 
 if __name__ == "__main__":
