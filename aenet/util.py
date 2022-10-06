@@ -6,6 +6,8 @@ Auxiliary routines used in multiple places in the package.
 import numpy as np
 import sys
 import itertools
+from contextlib import contextmanager
+import os
 
 from .exceptions import ArgumentError, InternalError
 
@@ -783,3 +785,23 @@ def csv2list(csvlist):
             for item2 in item.split(","):
                 ll += expand_range(item2)
     return ll
+
+@contextmanager
+def cd(newdir):
+    """
+    Change to a directory using context manager.
+
+    Example:
+
+      with cd(./tmp/):
+        ...
+
+    Source: https://stackoverflow.com/a/24176022/1013199
+
+    """
+    prevdir = os.getcwd()
+    os.chdir(os.path.expanduser(newdir))
+    try:
+        yield {'origin': prevdir, 'current': os.getcwd()}
+    finally:
+        os.chdir(prevdir)
