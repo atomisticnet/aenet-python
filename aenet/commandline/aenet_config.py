@@ -74,23 +74,24 @@ class Config(AenetToolABC):
         Configure the paths to the aenet installation and to the executables.
 
         """
-        aenet_dict = {
-            "root_path": None,
-            "generate_x_path": None,
-            "train_x_path": None,
-            "predict_x_path": None,
-            "trnset2ascii_x_path": None,
-        }
-        if not os.path.exists(root_path):
-            raise FileNotFoundError('Path not found: {}'.format(root_path))
+        aenet_dict = cfg.read('aenet')
+        if os.path.exists(root_path):
+            aenet_dict['root_path'] = os.path.abspath(root_path)
+        else:
+            current = aenet_dict['root_path']
+            if current is None or not os.path.exists(current):
+                raise FileNotFoundError('Path not found: {}'.format(root_path))
 
-        aenet_dict['root_path'] = os.path.abspath(root_path)
+        print('aenet root path: {}'.format(aenet_dict['root_path']))
 
-        def get_exec_path(name, subdir):
-            path_try = glob.glob(
-                os.path.join(aenet_dict['root_path'], 
-                             subdir, '{}*'.format(name)))
-            path_try = path_try[0] if len(path_try) > 0 else ''
+        def get_exec_path(name, subdir, current):
+            if current is not None and os.path.exists(current):
+                path_try = current
+            else:
+                path_try = glob.glob(
+                    os.path.join(aenet_dict['root_path'], 
+                                subdir, '{}*'.format(name)))
+                path_try = path_try[0] if len(path_try) > 0 else ''
             path = input("Path to `{}` [{}]: ".format(name, path_try))
             path = path if len(path) > 0 else path_try
             if len(path) == 0 or not os.path.exists(path):
@@ -98,10 +99,14 @@ class Config(AenetToolABC):
                 path = None
             return path
 
-        aenet_dict['generate_x_path'] = get_exec_path('generate.x', 'bin')
-        aenet_dict['train_x_path'] = get_exec_path('train.x', 'bin')
-        aenet_dict['predict_x_path'] = get_exec_path('predict.x', 'bin')
-        aenet_dict['trnset2ascii_x_path'] = get_exec_path('trnset2ASCII.x', 'tools')
+        aenet_dict['generate_x_path'] = get_exec_path(
+            'generate.x', 'bin', aenet_dict['generate_x_path'])
+        aenet_dict['train_x_path'] = get_exec_path(
+            'train.x', 'bin', aenet_dict['train_x_path'])
+        aenet_dict['predict_x_path'] = get_exec_path(
+            'predict.x', 'bin', aenet_dict['predict_x_path'])
+        aenet_dict['trnset2ascii_x_path'] = get_exec_path(
+            'trnset2ASCII.x', 'tools', aenet_dict['trnset2ascii_x_path'])
         return {'aenet': aenet_dict}
 
     def run(self, args):
