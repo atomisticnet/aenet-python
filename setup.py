@@ -39,5 +39,8 @@ setup(
     packages=find_packages(exclude=['tests']),
     scripts=[os.path.join("scripts", "aenet")
              ] + glob.glob(os.path.join("scripts", "*.py")),
-    install_requires=['numpy']
+    install_requires=['numpy>=1.20.1', 
+                      'scipy>=1.6.2', 
+                      'pandas>=1.2.4', 
+                      'pytables>=3.6.1']
 )
