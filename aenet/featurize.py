@@ -8,10 +8,11 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 from . import config
 from .util import cd
+from .trainset import TrnSet
 
 __author__ = "Alexander Urban"
 __date__ = "2022-10-04"
@@ -83,7 +84,18 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                               output_file: str = 'data.train',
                               atomic_energies: Dict[str, float] = None,
                               workdir: os.PathLike = '.',
-                              debug=False):
+                              debug=False,
+                              deriv_method: Literal["taylor", "analytical"] = None,
+                              deriv_delta: float = 0.01,
+                              deriv_fraction: float = 16.0,
+                              deriv_outfile: str = 'data.deriv.train',
+                              deriv_disp_all: bool = True,
+                              deriv_N_max: int = 100000,
+                              **kwargs):
+
+        for arg in kwargs:
+            raise TypeError("Unexpected keyword argument '{}'".format(arg))
+
         if atomic_energies is None:
             atomic_energies = {}
         for t in self.typenames:
@@ -107,6 +119,23 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
         for t in self.typenames:
             generate_in += "{:2s}  {}.stp\n".format(t, t)
 
+        if deriv_method is not None:
+            if deriv_method == 'analytical':
+                raise NotImplementedError(
+                    'Analytical derivatives are not yet supported.')
+            elif deriv_method == 'taylor':
+                generate_in += "\nDERIVATIVES\n"
+                generate_in += ("method=taylor delta={delta} fraction={frac} "
+                                + "outfile={out} disp_all={all} N_max={max}\n"
+                               ).format(delta=deriv_delta, 
+                                        frac=deriv_fraction,
+                                        out=deriv_outfile,
+                                        all=(1 if deriv_disp_all else 0),
+                                        max=deriv_N_max)
+            else:
+                raise ValueError(
+                    "Unexpected derivative method '{}'".format(deriv_method))
+
         if debug:
             generate_in += "\nDEBUG\n"
 
@@ -126,7 +155,8 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         """
         stp_strings = self.setup_file_strings()
-        generate_in = self.generate_input_string(xsf_files, **kwargs)
+        generate_in = self.generate_input_string(
+            xsf_files, workdir=workdir, **kwargs)
 
         if not os.path.exists(workdir):
             os.makedirs(workdir, exist_ok=True)
@@ -145,20 +175,39 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
             with open(outfile, 'w') as fp:
                 fp.write(stp_strings[t])
 
-    def run_aenet_generate(self, xsf_files: List[os.PathLike]):
+    def run_aenet_generate(self, xsf_files: List[os.PathLike], 
+                           workdir=None, hdf5_filename='features.h5', 
+                           output_file='generate.out', **kwargs):
         aenet_paths = config.read('aenet')
-        if not os.exists(aenet_paths['generate_x_path']):
+        if not os.path.exists(aenet_paths['generate_x_path']):
             raise FileNotFoundError(
                 "Cannot find `generate.x`. Configure with `aenet config`.")
 
-        workdir = tempfile.mkdtemp(dir='.')
-        self.write_generate_input_files(
-            xsf_files, workdir=workdir, output_file='data.train')
-        with cd(workdir) as cm:
-            with open(os.join(cm['origin'], 'generate.out'), 'w') as fp:
-                subprocess.run([aenet_paths['generate_x_path'], 
-                                'generate.in'], stdout=fp)
-                shutil.move('data.train', cm['origin'])
-            
-        shutil.rmtree(workdir)
+        if workdir is None:
+            workdir = tempfile.mkdtemp(dir='.')
+            rm_tmp_files = True
+        else:
+            if not os.path.exists(workdir):
+                os.makedirs(workdir, exist_ok=True)
+            rm_tmp_files = False
 
+        self.write_generate_input_files(
+            xsf_files, workdir=workdir, output_file='data.train', **kwargs)
+
+        with cd(workdir) as cm:
+            outfile = os.path.join(cm['origin'], output_file)
+            errfile = 'errors.out'
+            with open(outfile, 'w') as out, open(errfile, 'w') as err:
+                subprocess.run([aenet_paths['generate_x_path'], 
+                                'generate.in'], stdout=out, stderr=err)
+
+        ts = TrnSet.from_fortran_binary_file(
+            os.path.join(workdir, 'data.train'), 
+            origin=workdir)
+        ts.to_hdf5(hdf5_filename)
+        ts.close()
+
+        if rm_tmp_files:
+            shutil.rmtree(workdir)
+
+        return TrnSet.from_hdf5_file(hdf5_filename)
