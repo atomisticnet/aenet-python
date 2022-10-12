@@ -42,5 +42,5 @@ setup(
     install_requires=['numpy>=1.20.1', 
                       'scipy>=1.6.2', 
                       'pandas>=1.2.4', 
-                      'pytables>=3.6.1']
+                      'tables>=3.6.1']
 )
