@@ -16,7 +16,7 @@ class SFP(AenetToolABC):
     def _set_arguments(self):
         self.parser.add_argument(
             "training_set_file",
-            help="aenet training set in ASCII format.")
+            help="aenet training set in ASCII, HDF5, or binary format.")
 
         self.parser.add_argument(
             "-m", "--moment",
@@ -67,7 +67,7 @@ class SFP(AenetToolABC):
         """
 
     def analyze(self, training_set_file, moment, output_file, atom_types):
-        ts = TrnSet.from_ascii_file(training_set_file)
+        ts = TrnSet.from_file(training_set_file)
         print(ts)
         print("Maximal moment for structure fingerprints: {}".format(moment))
         print("Writing structure fingerprints to '{}'.".format(output_file))
