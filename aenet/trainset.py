@@ -5,11 +5,17 @@ Currently, only training set fuiles in ASCII format are supported.
 
 """
 
-from typing import List
+from typing import List, Literal
+import os
+import subprocess
+
 import numpy as np
+import tables as tb
 import scipy.stats
 
+from . import config
 from .serialize import Serializable
+from .io.structure import read_safely
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -17,7 +23,7 @@ __date__ = "2020-11-21"
 __version__ = "0.1"
 
 
-class AtomicStructure(Serializable):
+class FeaturizedAtomicStructure(Serializable):
     """
     Class to hold all information of an atomic structure.
 
@@ -46,13 +52,20 @@ class AtomicStructure(Serializable):
         self.atom_types = atom_types
         self.atoms = atoms
 
+        if os.path.exists(self.path):
+            self.structure = read_safely(self.path, frmt='xsf')
+        else:
+            self.structure = None
+
     def __str__(self):
-        out = "AtomicStructure Info:\n"
+        out = "FeaturizedAtomicStructure Info:\n"
         out += "  Path           : {}\n".format(self.path)
         out += "  Energy         : {:.6e}\n".format(self.energy)
         out += "  Atom types     : "
         out += " ".join(sorted(self.atom_types)) + "\n"
-        out += "  Number of atoms: {}".format(len(self.atoms))
+        out += "  Number of atoms: {}".format(len(self.atoms)) + "\n"
+        if self.structure is not None:
+            out += str(self.structure)
         return out
 
     @property
@@ -122,10 +135,15 @@ class TrnSet(object):
     """
 
     def __init__(self, name: str, normalized: bool, scale: float, shift:
-                 float, atom_types: List[str], atomic_energy:
-                 List[float], num_atoms_tot: int, num_structures: int,
+                 float, atom_types: List[str], 
+                 atomic_energy: List[float], 
+                 num_atoms_tot: int, num_structures: int,
                  E_min: float, E_max: float, E_av: float,
-                 ascii_file=None):
+                 filename: os.PathLike = None, 
+                 fileformat: Literal["ascii", "hdf5"] = 'ascii', 
+                 origin: os.PathLike = None, **kwargs):
+        for arg in kwargs:
+            TypeError("Unexpected keyword argument '{}'.".format(arg))
         self.name = name
         self.normalized = normalized
         self.scale = scale
@@ -135,8 +153,12 @@ class TrnSet(object):
         self.num_atoms_tot = num_atoms_tot
         self.num_structures = num_structures
         self.E_min, self.E_max, self.E_av = (E_min, E_max, E_av)
-        self.ascii_file = ascii_file
+        self.origin = origin
         self.opened = False
+        if filename is not None:
+            self.filename = filename
+            self.format = fileformat
+            self.open()          
 
     def __del__(self):
         if self.opened:
@@ -154,14 +176,18 @@ class TrnSet(object):
             self.num_atoms_tot, self.num_structures)
         out += "  E_min, max, av : {:.3f} {:.3f} {:.3f}\n".format(
             self.E_min, self.E_max, self.E_av)
-        if self.ascii_file:
-            out += "  ASCII file     : {}\n".format(self.ascii_file)
+        if self.filename is not None:
+            out += "  File (format)  : {} ({})\n".format(
+                self.filename, self.format)
         return out
 
     @classmethod
-    def from_ascii_file(cls, ascii_file):
+    def from_ascii_file(cls, ascii_file: os.PathLike, **kwargs):
         """
         Load training set from aenet ASCII file.
+
+        Args:
+          ascii_file: path to an aenet training set file in ASCII format
 
         """
         with open(ascii_file) as fp:
@@ -187,27 +213,158 @@ class TrnSet(object):
                 float(E) for E in fp.readline().strip().split()]
         return cls(name, normalized, scale, shift, atom_types,
                    atomic_energy, num_atoms_tot, num_structures, E_min,
-                   E_max, E_av, ascii_file=ascii_file)
+                   E_max, E_av, filename=ascii_file, fileformat='ascii',
+                   **kwargs)
+
+    @classmethod
+    def from_fortran_binary_file(cls, 
+                                 binary_file: os.PathLike, 
+                                 ascii_file: os.PathLike = None,
+                                 error_file: str = 'errors.out',
+                                 **kwargs):
+        """
+        First convert training set file in Fortran binary format to ASCII
+        format, then open it.  This requires the tool 'trnset2ASCII.x'.
+        """
+        aenet_paths = config.read('aenet')
+        if not os.path.exists(aenet_paths['trnset2ascii_x_path']):
+            raise FileNotFoundError(
+                "Cannot find `trnset2ASCII.x`. Configure with `aenet config`.")
+        if not os.path.exists(binary_file):
+            raise FileNotFoundError("File not found: '{}'".format(binary_file))
+        if ascii_file is None:
+            ascii_file = binary_file + ".ascii"
+        with open(error_file, 'w') as err:
+            subprocess.run(
+                [aenet_paths['trnset2ascii_x_path'], '--raw', 
+                binary_file, ascii_file], stderr=err)
+        return cls.from_ascii_file(ascii_file, **kwargs)
+
+    @classmethod
+    def from_hdf5_file(cls, hdf5_file: os.PathLike, **kwargs):
+        h5file = tb.open_file(hdf5_file, mode='r')
+        metadata = h5file.root.metadata[0]
+        name = metadata['name'].decode('utf-8')
+        normalized = metadata['normalized']
+        scale = metadata['scale']
+        shift = metadata['shift']
+        atom_types = [t.decode('utf-8') for t in metadata['atom_types']]
+        atomic_energy = metadata['atomic_energy']
+        num_atoms_tot = metadata['num_atoms_tot']
+        num_structures = metadata['num_structures']
+        E_min = metadata['E_min']
+        E_max = metadata['E_max']
+        E_av = metadata['E_av']
+        h5file.close()
+        return cls(name, normalized, scale, shift, atom_types,
+                   atomic_energy, num_atoms_tot, num_structures, E_min,
+                   E_max, E_av, filename=hdf5_file, fileformat='hdf5',
+                   **kwargs)
 
     @property
     def num_types(self):
         return len(self.atom_types)
+
+    def to_hdf5(self, filename: os.PathLike, complevel: int = 1):
+        """
+        Save data set to HDF5 file.
+
+        """
+        h5file = tb.open_file(filename, mode='w', name='Aenet reference data')
+        structures = h5file.create_group(
+            h5file.root, "structures", "Atomic structures")
+
+        metadata = h5file.create_table(
+            h5file.root, "metadata", {
+                'name': tb.StringCol(itemsize=1024),
+                'normalized': tb.BoolCol(),
+                'scale': tb.Float64Col(),
+                'shift': tb.Float64Col(),
+                'atom_types': tb.StringCol(itemsize=64, shape=(self.num_types,)),
+                'atomic_energy': tb.Float64Col(shape=(self.num_types,)),
+                'num_atoms_tot': tb.UInt64Col(),
+                'num_structures': tb.UInt64Col(),
+                'E_min': tb.Float64Col(),
+                'E_max': tb.Float64Col(),
+                'E_av': tb.Float64Col()},
+            "General information about the data set")
+
+        info_table_dict = {
+            "path": tb.StringCol(itemsize=1024),
+            "first_atom":  tb.UInt64Col(),
+            "num_atoms": tb.UInt32Col(),
+            "energy": tb.Float64Col()
+        }
+        atom_table_dict = {
+            "structure": tb.UInt64Col(),
+            "type":  tb.StringCol(itemsize=64),
+            "coords": tb.Float64Col(shape=(3,)),
+            "forces": tb.Float64Col(shape=(3,))
+        }
+        info = h5file.create_table(
+            structures, "info", info_table_dict, 
+            "Atomic structure information", 
+            tb.Filters(complevel, shuffle=False))
+        atoms = h5file.create_table(
+            structures, "atoms", atom_table_dict, 
+            "Atomic data", 
+            tb.Filters(complevel, shuffle=False))
+        features = h5file.create_vlarray(
+            structures, "features", tb.Float64Atom(),
+            "Atomic environment features", 
+            tb.Filters(complevel, shuffle=False))
+
+        metadata.row['name'] = self.name
+        metadata.row['normalized'] = self.normalized
+        metadata.row['scale'] = self.scale
+        metadata.row['shift'] = self.shift
+        metadata.row['atom_types'] = self.atom_types
+        metadata.row['atomic_energy'] = self.atomic_energy
+        metadata.row['num_atoms_tot'] = self.num_atoms_tot
+        metadata.row['num_structures'] = self.num_structures
+        metadata.row['E_min'] = self.E_min
+        metadata.row['E_max'] = self.E_max
+        metadata.row['E_av'] = self.E_av
+        metadata.row.append()
+
+        self.rewind()
+        iatom = 0
+        for i in range(self.num_structures):
+            s = self.read_next_structure(read_coords=True, read_forces=True)
+            info.row['path'] = s.path
+            info.row['first_atom'] = iatom
+            info.row['num_atoms'] = s.num_atoms
+            info.row['energy'] = s.energy
+            info.row.append()
+            for j in range(s.num_atoms):
+                atoms.row['structure'] = i
+                atoms.row['type'] = s.atoms[j]['type']
+                atoms.row['coords'] = s.atoms[j]['coords']
+                atoms.row['forces'] = s.atoms[j]['forces']
+                atoms.row.append()
+                features.append(s.atoms[j]['fingerprint'])
+            iatom += s.num_atoms
+        h5file.close()
 
     def open(self):
         """
         Open training set file for reading.
 
         """
-        if self.ascii_file is None:
+        if self.filename is None:
             raise ValueError("Cannot open training set file. No file give.")
 
         if self.opened:
             self.rewind()
-        else:
-            self._fp = open(self.ascii_file)
+        elif self.format == 'ascii':
+            self._fp = open(self.filename)
             self.opened = True
             self._istruc = 0
-            self.skip_header()
+            self._ascii_skip_header()
+        elif self.format == 'hdf5':
+            self._fp = tb.open_file(self.filename)
+            self.opened = True
+            self._istruc = 0
 
     def close(self):
         if self.opened:
@@ -218,7 +375,7 @@ class TrnSet(object):
         self.close()
         self.open()
 
-    def skip_header(self):
+    def _ascii_skip_header(self):
         """
         Skip over training set file header until first atomic structure.
 
@@ -239,7 +396,51 @@ class TrnSet(object):
         self._fp.readline()
         self._fp.readline()
 
+    def read_structure(self, idx: int, read_coords=False, read_forces=False):
+        if self.format == 'ascii':
+            if self._istruc > idx:
+                self.rewind()
+            while self._istruc < idx:
+                _ = self._read_next_structure_ascii(False, False)
+            return self._read_next_structure_ascii(read_coords, read_forces)
+        elif self.format == 'hdf5':
+            return self._read_structure_hdf5(idx, read_coords, read_forces)
+        else:
+            raise ValueError("Unknown format: {}".format(self.format))
+
     def read_next_structure(self, read_coords=False, read_forces=False):
+        if self.format == 'ascii':
+            return self._read_next_structure_ascii(read_coords, read_forces)
+        elif self.format == 'hdf5':
+            return self._read_next_structure_hdf5(read_coords, read_forces)
+        else:
+            raise ValueError("Unknown format: {}".format(self.format))
+
+    def _read_structure_hdf5(self, idx, read_coords, read_forces):
+        row = self._fp.root.structures.info[idx]
+        path = row['path'].decode('utf-8')
+        if self.origin is not None:
+            path = os.path.abspath(os.path.join(self.origin, path))
+        energy = row['energy']
+        first_atom = row['first_atom']
+        num_atoms = row['num_atoms']
+        atoms = []
+        for i in range(first_atom, first_atom + num_atoms):
+            row = self._fp.root.structures.atoms[i]
+            fingerprint = self._fp.root.structures.features[i]
+            atoms.append({"type": row['type'].decode('utf-8'),
+                         "fingerprint": fingerprint,
+                         "coords": row['coords'] if read_coords else None,
+                         "forces": row['forces'] if read_forces else None})
+        return FeaturizedAtomicStructure(
+            path, energy, self.atom_types, atoms)
+
+    def _read_next_structure_hdf5(self, read_coords, read_forces):
+        s = self._read_structure_hdf5(self._istruc, read_coords, read_forces)
+        self._istruc += 1
+        return s
+
+    def _read_next_structure_ascii(self, read_coords, read_forces):
         """
         Read next atomic structure from file.
 
@@ -252,6 +453,8 @@ class TrnSet(object):
             return None
 
         path = self._fp.readline().strip()
+        if self.origin is not None:
+            path = os.path.abspath(os.path.join(self.origin, path))
         num_atoms, num_types = [
             int(N) for N in self._fp.readline().strip().split()]
         energy = float(self._fp.readline().strip())
@@ -277,7 +480,6 @@ class TrnSet(object):
                           "fingerprint": fingerprint,
                           "coords": coords,
                           "forces": forces})
-        # atom_types = sorted(set([a["type"] for a in atoms]))
-        # atom_types = [self.atom_types[i] for i in atom_types]
-        structure = AtomicStructure(path, energy, self.atom_types, atoms)
-        return structure
+        self._istruc += 1
+        return FeaturizedAtomicStructure(
+            path, energy, self.atom_types, atoms)
