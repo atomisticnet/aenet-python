@@ -182,6 +182,37 @@ class TrnSet(object):
         return out
 
     @classmethod
+    def from_file(cls, filename: os.PathLike, 
+                  file_format: Literal[
+                    'guess', 'ascii', 'hdf5', 'binary'] = 'guess', 
+                  **kwargs):
+        if not os.path.exists(filename):
+            raise FileNotFoundError("File not found: {}".format(filename))
+        if file_format == 'guess':
+            file_format = None
+            try:
+                f = tb.open_file(filename)
+                f.close()
+                file_format = 'hdf5'
+            except tb.HDF5ExtError:
+                try:
+                    # we accept all UTF-8 characters, not only ASCII
+                    with open(filename, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            pass
+                    file_format = 'ascii'
+                except UnicodeDecodeError:
+                    file_format = 'binary'
+        if file_format == 'hdf5':
+            return cls.from_hdf5_file(filename, **kwargs)
+        elif file_format == 'ascii':
+            return cls.from_ascii_file(filename, **kwargs)
+        elif file_format == 'binary':
+            return cls.from_fortran_binary_file(filename, **kwargs)
+        else:
+            raise ValueError("Unexpected file format '{}'".format(file_format))
+
+    @classmethod
     def from_ascii_file(cls, ascii_file: os.PathLike, **kwargs):
         """
         Load training set from aenet ASCII file.
@@ -220,7 +251,6 @@ class TrnSet(object):
     def from_fortran_binary_file(cls, 
                                  binary_file: os.PathLike, 
                                  ascii_file: os.PathLike = None,
-                                 error_file: str = 'errors.out',
                                  **kwargs):
         """
         First convert training set file in Fortran binary format to ASCII
@@ -234,10 +264,12 @@ class TrnSet(object):
             raise FileNotFoundError("File not found: '{}'".format(binary_file))
         if ascii_file is None:
             ascii_file = binary_file + ".ascii"
-        with open(error_file, 'w') as err:
-            subprocess.run(
-                [aenet_paths['trnset2ascii_x_path'], '--raw', 
-                binary_file, ascii_file], stderr=err)
+        output = subprocess.run(
+            [aenet_paths['trnset2ascii_x_path'], '--raw', 
+            binary_file, ascii_file], stdout=subprocess.DEVNULL, 
+            stderr=subprocess.PIPE)
+        if len(output.stderr.strip()) > 0:
+            raise IOError("Conversion of binary to text file failed.")
         return cls.from_ascii_file(ascii_file, **kwargs)
 
     @classmethod
