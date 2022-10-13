@@ -1,5 +1,5 @@
 """
-Manage configurations.
+Manage settings and read/write the global configuration file.
 
 """
 
@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import sys
-from typing import List, Union
+from typing import Any, List, Union
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -56,18 +56,29 @@ def config_file_path():
     return config_file
 
 
-def valid_setting(setting):
+def valid_setting(setting: str) -> bool:
     """
     Check if a given setting actually exists.
 
+    Args:
+        setting: the name of the setting
+
+    Returns:
+        True if the setting is known.  False otherwise.
     """
     return setting in DEFAULT
 
 
-def read_config(config_file=None):
+def read_config(config_file: os.PathLike = None) -> dict:
     """
     Search for configuration file and read if found.
 
+    Args:
+        config_file: Optional path to configuration file. Defaults to None.
+
+    Returns:
+        Dictionary with settings based on the `DEFAULT` settings and
+        values from the config file (if one was found).
     """
     config_dict = DEFAULT.copy()
     if config_file is None:
@@ -78,14 +89,15 @@ def read_config(config_file=None):
     return config_dict
 
 
-def write_config(config_dict, config_file=None, replace=False):
+def write_config(config_dict: dict, config_file: os.PathLike = None, 
+                 replace: bool = False):
     """
     Write settings to a configuration file.
 
     Args:
-      config_dict (dict): dict with settings
-      config_file (str): (optional) path to a configuration file
-      replace (bool): if True, replace existing configuration file
+      config_dict: dict with settings
+      config_file: (optional) path to a configuration file
+      replace: if True, replace existing configuration file
 
     """
     settings = list(config_dict.keys())
@@ -109,8 +121,11 @@ def write_config(config_dict, config_file=None, replace=False):
         json.dump(config_dict, fp)
 
 
-def read(settings: Union[str, List[str]], config_file: os.PathLike = None):
+def read(settings: Union[str, List[str]], 
+         config_file: os.PathLike = None) -> Union[Any, List[Any]]:
     """
+    Read a specific setting from the configuration.
+
     Args:
       settings: one or more settings to read
       config_file: path to the config file

@@ -67,6 +67,17 @@ class Config(AenetToolABC):
         If no argument is specified, the current configuration and the
         path to the configuration file will be printed out.
 
+        Configure aenet paths
+        ---------------------
+
+        To configure the paths to the aenet installation directory and
+        compiled binaries with the `--path/-p` option.
+
+          $ aenet config --path <aenet_path>
+
+        The tool will search in `<aenet_path>/bin` for executables and
+        will let the user specify paths if needed.
+
         """
 
     def set_aenet_paths(self, root_path):

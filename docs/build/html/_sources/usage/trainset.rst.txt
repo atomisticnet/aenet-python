@@ -1,0 +1,16 @@
+ænet training set files
+=======================
+
+The object class ``TrnSet`` can be used to interact with data set files
+that were produced by ænet's ``generate.x`` tool. 
+
+.. note::
+   The ænet executable ``trnset2ASCII.x`` needs to be configured to read
+   training set files.  See also :doc:`installation`.
+
+Some more text here.
+
+.. autoclass:: aenet.trainset.TrnSet
+   :members:
+   :private-members:
+   :undoc-members:

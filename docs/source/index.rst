@@ -35,6 +35,7 @@ command-line capabilities.
    usage/installation
    usage/examples
    usage/commandline
+   usage/trainset
    dev/commandline
 
 

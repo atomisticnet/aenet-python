@@ -49,7 +49,7 @@
 <div class="viewcode-block" id="SFP._set_arguments"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP._set_arguments">[docs]</a>    <span class="k">def</span> <span class="nf">_set_arguments</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
             <span class="s2">&quot;training_set_file&quot;</span><span class="p">,</span>
-            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;aenet training set in ASCII format.&quot;</span><span class="p">)</span>
+            <span class="n">help</span><span class="o">=</span><span class="s2">&quot;aenet training set in ASCII, HDF5, or binary format.&quot;</span><span class="p">)</span>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
             <span class="s2">&quot;-m&quot;</span><span class="p">,</span> <span class="s2">&quot;--moment&quot;</span><span class="p">,</span>
@@ -100,7 +100,7 @@
 <span class="s2">        &quot;&quot;&quot;</span></div>
 
 <div class="viewcode-block" id="SFP.analyze"><a class="viewcode-back" href="../../../usage/tools/sfp.html#aenet.commandline.aenet_sfp.SFP.analyze">[docs]</a>    <span class="k">def</span> <span class="nf">analyze</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">training_set_file</span><span class="p">,</span> <span class="n">moment</span><span class="p">,</span> <span class="n">output_file</span><span class="p">,</span> <span class="n">atom_types</span><span class="p">):</span>
-        <span class="n">ts</span> <span class="o">=</span> <span class="n">TrnSet</span><span class="o">.</span><span class="n">from_ascii_file</span><span class="p">(</span><span class="n">training_set_file</span><span class="p">)</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">TrnSet</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="n">training_set_file</span><span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="n">ts</span><span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Maximal moment for structure fingerprints: </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">moment</span><span class="p">))</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Writing structure fingerprints to &#39;</span><span class="si">{}</span><span class="s2">&#39;.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">output_file</span><span class="p">))</span>
@@ -153,7 +153,7 @@
 <li class="toctree-l1"><a class="reference internal" href="../../../usage/installation.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../usage/examples.html">Examples</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../usage/commandline.html">Command-line interface</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../../dev/commandline.html">Defining Commandline Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev/commandline.html">Defining Command-line tools</a></li>
 </ul>
 
 <div class="relations">
