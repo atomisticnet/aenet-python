@@ -16,6 +16,7 @@ import scipy.stats
 from . import config
 from .serialize import Serializable
 from .io.structure import read_safely
+from .geometry import AtomicStructure
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -52,20 +53,31 @@ class FeaturizedAtomicStructure(Serializable):
         self.atom_types = atom_types
         self.atoms = atoms
 
+        # the path string can contain additional information that is 
+        # stripped here if needed
+        if (not os.path.exists(path) 
+            and os.path.exists(path.split(".xsf")[0] + ".xsf")):
+            self.path = path.split(".xsf")[0] + ".xsf"
+
+        avec = None
         if os.path.exists(self.path):
-            self.structure = read_safely(self.path, frmt='xsf')
-        else:
-            self.structure = None
+            inp_structure = read_safely(self.path, frmt='xsf')
+            if inp_structure.pbc:
+                avec = inp_structure.avec[-1]
+
+        types = [self.atom_types[at['type']] for at in self.atoms]
+        coords = [at['coords'] for at in self.atoms]
+        forces = [at['forces'] for at in self.atoms]
+        self.structure = AtomicStructure(coords, types, avec=avec, 
+                                         energy=self.energy,
+                                         forces=forces)
 
     def __str__(self):
         out = "FeaturizedAtomicStructure Info:\n"
         out += "  Path           : {}\n".format(self.path)
-        out += "  Energy         : {:.6e}\n".format(self.energy)
         out += "  Atom types     : "
         out += " ".join(sorted(self.atom_types)) + "\n"
-        out += "  Number of atoms: {}".format(len(self.atoms)) + "\n"
-        if self.structure is not None:
-            out += str(self.structure)
+        out += str(self.structure)
         return out
 
     @property
@@ -159,6 +171,9 @@ class TrnSet(object):
             self.filename = filename
             self.format = fileformat
             self.open()          
+            if self.origin is None:
+                dirname = os.path.dirname(filename)
+                self.origin = dirname if len(dirname) > 0 else None
 
     def __del__(self):
         if self.opened:
@@ -180,6 +195,9 @@ class TrnSet(object):
             out += "  File (format)  : {} ({})\n".format(
                 self.filename, self.format)
         return out
+
+    def __iter__(self):
+        return self.iter_structures(read_coords=True, read_forces=True)
 
     @classmethod
     def from_file(cls, filename: os.PathLike, 
@@ -427,6 +445,11 @@ class TrnSet(object):
         self._fp.readline()
         self._fp.readline()
         self._fp.readline()
+
+    def iter_structures(self, read_coords=False, read_forces=False):
+        self.rewind()
+        for i in range(self.num_structures):
+            yield self.read_next_structure(read_coords, read_forces)
 
     def read_structure(self, idx: int, read_coords=False, read_forces=False):
         if self.format == 'ascii':
