@@ -65,7 +65,7 @@ class FeaturizedAtomicStructure(Serializable):
             if inp_structure.pbc:
                 avec = inp_structure.avec[-1]
 
-        types = [self.atom_types[at['type']] for at in self.atoms]
+        types = [at['type'] for at in self.atoms]
         coords = [at['coords'] for at in self.atoms]
         forces = [at['forces'] for at in self.atoms]
         self.structure = AtomicStructure(coords, types, avec=avec, 
@@ -531,7 +531,7 @@ class TrnSet(object):
             # read descriptor
             fingerprint = [
                 float(v) for v in self._fp.readline().strip().split()]
-            atoms.append({"type": atom_type,
+            atoms.append({"type": self.atom_types[atom_type],
                           "fingerprint": fingerprint,
                           "coords": coords,
                           "forces": forces})
