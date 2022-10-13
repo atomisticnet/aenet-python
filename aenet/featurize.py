@@ -210,4 +210,3 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
         if rm_tmp_files:
             shutil.rmtree(workdir)
 
-        return TrnSet.from_hdf5_file(hdf5_filename)
