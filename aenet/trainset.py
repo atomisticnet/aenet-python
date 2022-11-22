@@ -136,6 +136,72 @@ class FeaturizedAtomicStructure(Serializable):
                                            moment=moment, axis=0))
         return structure_fingerprint
 
+    @staticmethod
+    def _compute_moments(lst, moment: int=1, axis=0):
+        """
+        Helper function to compute moments of a list up to a degree.
+        Default is the mean.
+        To reduce down a 2D array to a single moment, run the function twice.
+        """
+        moments_list = np.array([np.mean(lst, axis=0)])
+        moments_list = np.append(moments_list, scipy.stats.moment(lst, moment=range(2, moment+1), axis=0)).flatten().tolist()
+        return moments_list
+
+    def _global_moment_fingerprint(self, moment: int=1, average: str='none', exclude_zero: bool=False):
+        """
+        Calculate the global fingerprint from local atomic fingerprints using a moment expansion.
+
+        Note: this implementation assumes that the atomic descriptors for each species have the same length.
+
+        :param str average: Averaging parameter that only accepts some possible values. Possible values:
+            - 'none': The global fingerprint involves the moments of all atomic fingerprints.
+                       F_global = moments(F_A U F_B U ...),
+            - 'inner': The global fingerprint involves the moments of averaged atomic fingerprints for each species.
+                       F_global = moments(mean(F_A) U mean(F_B) U ...),
+            - 'outer': The global fingerprint involves the mean of all moments of atomic fingerprints. 
+                        F_global = mean(moments(F_A) U moments(F_B) U ...),
+
+        where 
+            F_global is the global fingerprint,
+            F_s is the union of atomic fingerprints for species s (F_s = F_s(1) U F_s(2) U ...), 
+            F_s(i) is atomic fingerprint for species s at site i.
+
+        :param bool exclude_zero: Whether to exclude or include species that are not part of the structure.
+        """
+        if average not in ('none', 'inner', 'outer'):
+            raise ValueError("Not supported averaging method. Choose a valid averaging method.")
+        if not isinstance(moment, int) or moment < 1:
+            raise ValueError("Not supported moment. Moment should be a positive integer (i.e. 1, 2, 3, ...).")
+        
+        dimension = self.max_descriptor_length
+        atoms_info = self.atom_types
+
+        structure_fingerprint = []
+        for i, s in enumerate(self.atom_types):
+            atomic_fingerprint = [a['fingerprint'] for a in atoms_info if a['type'] == s]
+
+            if not atomic_fingerprint:
+                if exclude_zero:
+                    continue
+                else:
+                    atomic_fingerprint = [[0.0 for _ in range(dimension)]]
+
+            if average=='none':
+                structure_fingerprint.extend(atomic_fingerprint)
+            elif average=='inner':
+                mean = _compute_moments(atomic_fingerprint, moment=1, axis=0)
+                structure_fingerprint.append(mean)
+            elif average=='outer':
+                moments = _compute_moments(atomic_fingerprint, moment=moment, axis=0)
+                structure_fingerprint.append(moments)
+
+        if average in ('none', 'inner'):
+            global_fingerprint = _compute_moments(structure_fingerprint, moment=moment, axis=0)
+        elif average=='outer':
+            global_fingerprint = _compute_moments(structure_fingerprint, moment=1, axis=0)
+
+        return np.array(global_fingerprint)
+
 
 class TrnSet(object):
     """
