@@ -17,6 +17,7 @@ from . import config
 from .serialize import Serializable
 from .io.structure import read_safely
 from .geometry import AtomicStructure
+from .util import compute_moments
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -106,6 +107,14 @@ class FeaturizedAtomicStructure(Serializable):
                 comp[t] = n
         return comp
 
+    @property
+    def atom_weights(self):
+        s = len(self.atom_types) // 2
+        weights = (list(range(-s, 0))
+                   + ([0] if len(self.atom_types) % 2 != 0 else [])
+                   + list(range(1, s + 1)))
+        return {a: w for a, w in zip(self.atom_types, weights)}
+
     def moment_fingerprint(self, sel_atom_types: List[str] = None, moment=2):
         """
         Calculate a fingerprint for a collection of atoms using a moment
@@ -123,7 +132,7 @@ class FeaturizedAtomicStructure(Serializable):
             if s not in sel_atom_types:
                 continue
             atomic_fingerprints = [
-                a['fingerprint'] for a in self.atoms if a['type'] == i]
+                a['fingerprint'] for a in self.atoms if a['type'] == s]
             if len(atomic_fingerprints) == 0:
                 structure_fingerprint.extend(
                     [0.0 for j in range(moment*dimension)])
@@ -136,72 +145,80 @@ class FeaturizedAtomicStructure(Serializable):
                                            moment=moment, axis=0))
         return structure_fingerprint
 
-    @staticmethod
-    def _compute_moments(lst, moment: int=1, axis=0):
+    def global_moment_fingerprint(self, outer_moment: int=1, inner_moment: int=1, 
+                                  weighted: bool=False, weights: dict=None, 
+                                  exclude_zero_atoms: bool=False):
         """
-        Helper function to compute moments of a list up to a degree.
-        Default is the mean.
-        To reduce down a 2D array to a single moment, run the function twice.
-        """
-        moments_list = np.array([np.mean(lst, axis=0)])
-        moments_list = np.append(moments_list, scipy.stats.moment(lst, moment=range(2, moment+1), axis=0)).flatten().tolist()
-        return moments_list
+        Calculate the global fingerprint from local atomic fingerprints 
+        using a moment expansion.
+        Note: this implementation assumes that the atomic descriptors 
+        for each species have the same length.
 
-    def _global_moment_fingerprint(self, moment: int=1, average: str='none', exclude_zero: bool=False):
-        """
-        Calculate the global fingerprint from local atomic fingerprints using a moment expansion.
+        Arguments:
+          outer_moment (int)            up to which outer moment to compute 
+                                        for the inner moments of atomic fingerprints 
+                                        (should be an integer >= 1)
+          inner_moment (int)            up to which inner moment to compute 
+                                        for atomic fingerprints 
+                                        (should be an integer >= 0, i.e. 0 is no moment, 
+                                        and 1 is the mean)
+          weighted (bool)               whether atom weighting is used 
+                                        (this is different from weighted moments; 
+                                        atomic fingerprint is simply multiplied by its weight) 
+                                        (default is False)
+          weights (dict)                weights of atoms ({atom_symbol: weight}) (default is 1)
+          exclude_zero_atoms (bool)     whether to exclude or include species 
+                                        that are not part of the structure
 
-        Note: this implementation assumes that the atomic descriptors for each species have the same length.
+        Returns:
+          global_fingerprint (array)    global moment fingerprint
 
-        :param str average: Averaging parameter that only accepts some possible values. Possible values:
-            - 'none': The global fingerprint involves the moments of all atomic fingerprints.
-                       F_global = moments(F_A U F_B U ...),
-            - 'inner': The global fingerprint involves the moments of averaged atomic fingerprints for each species.
-                       F_global = moments(mean(F_A) U mean(F_B) U ...),
-            - 'outer': The global fingerprint involves the mean of all moments of atomic fingerprints. 
-                        F_global = mean(moments(F_A) U moments(F_B) U ...),
-
-        where 
+        F_global = outer_moments(w_A*inner_moments(F_A) U w_B*inner_moments(F_B) U ...),
+        where
             F_global is the global fingerprint,
-            F_s is the union of atomic fingerprints for species s (F_s = F_s(1) U F_s(2) U ...), 
-            F_s(i) is atomic fingerprint for species s at site i.
+            F_s is the union of atomic fingerprints for species s (F_s = F_s(1) U F_s(2) U ...),
+            F_s(i) is atomic fingerprint for species s at site i,
+            w_s is the weight for species s
 
-        :param bool exclude_zero: Whether to exclude or include species that are not part of the structure.
+        Dimension of the global fingerprint is equal to
+        length(atomic_fingerprint)*inner_moment*outer_moment
+        or length(atomic_fingerprint)*outer_moment if inner_moment is 0
         """
-        if average not in ('none', 'inner', 'outer'):
-            raise ValueError("Not supported averaging method. Choose a valid averaging method.")
-        if not isinstance(moment, int) or moment < 1:
-            raise ValueError("Not supported moment. Moment should be a positive integer (i.e. 1, 2, 3, ...).")
-        
-        dimension = self.max_descriptor_length
-        atoms_info = self.atom_types
+        if not isinstance(outer_moment, int) or outer_moment < 1:
+            raise ValueError(
+                "Not supported outer moment. Outer moment should be a positive integer (i.e. 1, 2, 3, ...)."
+            )
+        if not isinstance(inner_moment, int) or inner_moment < 0:
+            raise ValueError(
+                "Not supported inner moment. Inner moment should be a non-negative integer (i.e. 0, 1, 2, 3, ...)."
+            )
+        if (weighted and weights is not None
+            and (len(weights) != len(self.atom_types)
+                 or not all(w in weights for w in self.atom_types))):
+            raise ValueError("The weights dictionary should contain only the included elements.")
 
+        if weighted:
+            if weights is None:
+                weights = self.atom_weights
+        dimension = self.max_descriptor_length
+        atoms_info = self.atoms
         structure_fingerprint = []
         for i, s in enumerate(self.atom_types):
-            atomic_fingerprint = [a['fingerprint'] for a in atoms_info if a['type'] == s]
-
+            atomic_fingerprint = [a["fingerprint"] for a in atoms_info if a["type"] == s]
             if not atomic_fingerprint:
-                if exclude_zero:
+                if exclude_zero_atoms:
                     continue
                 else:
-                    atomic_fingerprint = [[0.0 for _ in range(dimension)]]
+                    atomic_fingerprint = [np.array([0.0 for _ in range(dimension)])]
+            if inner_moment:
+                atomic_fingerprint = [compute_moments(atomic_fingerprint, inner_moment)]
 
-            if average=='none':
-                structure_fingerprint.extend(atomic_fingerprint)
-            elif average=='inner':
-                mean = _compute_moments(atomic_fingerprint, moment=1, axis=0)
-                structure_fingerprint.append(mean)
-            elif average=='outer':
-                moments = _compute_moments(atomic_fingerprint, moment=moment, axis=0)
-                structure_fingerprint.append(moments)
-
-        if average in ('none', 'inner'):
-            global_fingerprint = _compute_moments(structure_fingerprint, moment=moment, axis=0)
-        elif average=='outer':
-            global_fingerprint = _compute_moments(structure_fingerprint, moment=1, axis=0)
-
+            atomic_fingerprint = np.array(list(map(lambda x: weights[s] * x 
+                                                   if weighted else x,
+                                                   atomic_fingerprint)))
+            structure_fingerprint.extend(atomic_fingerprint)
+        global_fingerprint = compute_moments(structure_fingerprint, outer_moment)
         return np.array(global_fingerprint)
-
 
 class TrnSet(object):
     """

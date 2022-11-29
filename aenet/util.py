@@ -4,6 +4,7 @@ Auxiliary routines used in multiple places in the package.
 """
 
 import numpy as np
+import scipy.stats
 import sys
 import itertools
 from contextlib import contextmanager
@@ -681,6 +682,33 @@ def wrap_pbc(coo):
                     vec[i] -= 1.0
 
     return coo
+
+
+def compute_moments(array, moment=1, axis=0):
+    """
+    Helper function to compute moments of a list up to a degree.
+    Default is the mean.
+    To reduce down a 2D array to a single moment, run the function twice.
+
+    Arguments:
+      array    single vector (list) or matrix (list of lists)
+      moment   up to which moment to compute (positive int)
+      axis     what axis to use for moment computation; consult numpy for info
+
+    Returns:
+      moments_list    list of moments
+     """
+
+    if not isinstance(moment, int) or moment < 1:
+        raise ValueError('Not supported moment. \
+                         The moment should be a positive integer (i.e. 1, 2, 3, ...).'
+                         )
+    moments_list = np.array([np.mean(array, axis=0)])
+    moments_list = np.append(moments_list, 
+                             scipy.stats.moment(array,
+                                                moment=range(2, moment + 1),
+                                                axis=0)).flatten()
+    return moments_list
 
 
 def trynumeric(string, use_pandas=False):
