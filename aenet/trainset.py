@@ -54,10 +54,10 @@ class FeaturizedAtomicStructure(Serializable):
         self.atom_types = atom_types
         self.atoms = atoms
 
-        # the path string can contain additional information that is 
+        # the path string can contain additional information that is
         # stripped here if needed
-        if (not os.path.exists(path) 
-            and os.path.exists(path.split(".xsf")[0] + ".xsf")):
+        if (not os.path.exists(path)
+                and os.path.exists(path.split(".xsf")[0] + ".xsf")):
             self.path = path.split(".xsf")[0] + ".xsf"
 
         avec = None
@@ -69,7 +69,7 @@ class FeaturizedAtomicStructure(Serializable):
         types = [at['type'] for at in self.atoms]
         coords = [at['coords'] for at in self.atoms]
         forces = [at['forces'] for at in self.atoms]
-        self.structure = AtomicStructure(coords, types, avec=avec, 
+        self.structure = AtomicStructure(coords, types, avec=avec,
                                          energy=self.energy,
                                          forces=forces)
 
@@ -115,7 +115,8 @@ class FeaturizedAtomicStructure(Serializable):
                    + list(range(1, s + 1)))
         return {a: w for a, w in zip(self.atom_types, weights)}
 
-    def moment_fingerprint(self, sel_atom_types: List[str] = None, moment=2):
+    def moment_fingerprint(self, sel_atom_types: List[str] = None,
+                           moment: int = 2):
         """
         Calculate a fingerprint for a collection of atoms using a moment
         expansion for each atom type.
@@ -145,57 +146,62 @@ class FeaturizedAtomicStructure(Serializable):
                                            moment=moment, axis=0))
         return structure_fingerprint
 
-    def global_moment_fingerprint(self, outer_moment: int=1, inner_moment: int=1, 
-                                  weighted: bool=False, weights: dict=None, 
-                                  exclude_zero_atoms: bool=False):
+    def global_moment_fingerprint(self, outer_moment: int = 1,
+                                  inner_moment: int = 1,
+                                  weighted: bool = False,
+                                  weights: dict = None,
+                                  exclude_zero_atoms: bool = False):
         """
-        Calculate the global fingerprint from local atomic fingerprints 
+        Calculate the global fingerprint from local atomic fingerprints
         using a moment expansion.
-        Note: this implementation assumes that the atomic descriptors 
+        Note: this implementation assumes that the atomic descriptors
         for each species have the same length.
 
         Arguments:
-          outer_moment (int)            up to which outer moment to compute 
-                                        for the inner moments of atomic fingerprints 
-                                        (should be an integer >= 1)
-          inner_moment (int)            up to which inner moment to compute 
-                                        for atomic fingerprints 
-                                        (should be an integer >= 0, i.e. 0 is no moment, 
-                                        and 1 is the mean)
-          weighted (bool)               whether atom weighting is used 
-                                        (this is different from weighted moments; 
-                                        atomic fingerprint is simply multiplied by its weight) 
-                                        (default is False)
-          weights (dict)                weights of atoms ({atom_symbol: weight}) (default is 1)
-          exclude_zero_atoms (bool)     whether to exclude or include species 
-                                        that are not part of the structure
+          outer_moment (int): up to which outer moment to compute
+            for the inner moments of atomic fingerprints (should be an
+            integer >= 1)
+          inner_moment (int): up to which inner moment to compute for
+            atomic fingerprints (should be an integer >= 0, i.e. 0 is no
+            moment, and 1 is the mean)
+          weighted (bool): whether atom weighting is used (this is
+            different from weighted moments; atomic fingerprint is
+            simply multiplied by its weight) (default is False)
+          weights (dict): weights of atoms ({atom_symbol: weight})
+            (default is 1)
+          exclude_zero_atoms (bool): whether to exclude or include species
+            that are not part of the structure
 
         Returns:
           global_fingerprint (array)    global moment fingerprint
 
-        F_global = outer_moments(w_A*inner_moments(F_A) U w_B*inner_moments(F_B) U ...),
+        F_global = outer_moments(w_A*inner_moments(F_A)
+                                 U w_B*inner_moments(F_B) U ...),
         where
             F_global is the global fingerprint,
-            F_s is the union of atomic fingerprints for species s (F_s = F_s(1) U F_s(2) U ...),
+            F_s is the union of atomic fingerprints for species s
+                (F_s = F_s(1) U F_s(2) U ...),
             F_s(i) is atomic fingerprint for species s at site i,
             w_s is the weight for species s
 
         Dimension of the global fingerprint is equal to
         length(atomic_fingerprint)*inner_moment*outer_moment
         or length(atomic_fingerprint)*outer_moment if inner_moment is 0
+
         """
         if not isinstance(outer_moment, int) or outer_moment < 1:
             raise ValueError(
-                "Not supported outer moment. Outer moment should be a positive integer (i.e. 1, 2, 3, ...)."
-            )
+                "Not supported outer moment. Outer moment "
+                "should be a positive integer (i.e. 1, 2, 3, ...).")
         if not isinstance(inner_moment, int) or inner_moment < 0:
             raise ValueError(
-                "Not supported inner moment. Inner moment should be a non-negative integer (i.e. 0, 1, 2, 3, ...)."
-            )
+                "Not supported inner moment. Inner moment should be a "
+                "non-negative integer (i.e. 0, 1, 2, 3, ...).")
         if (weighted and weights is not None
             and (len(weights) != len(self.atom_types)
                  or not all(w in weights for w in self.atom_types))):
-            raise ValueError("The weights dictionary should contain only the included elements.")
+            raise ValueError("The weights dictionary should contain "
+                             "only the included elements.")
 
         if weighted:
             if weights is None:
@@ -204,21 +210,26 @@ class FeaturizedAtomicStructure(Serializable):
         atoms_info = self.atoms
         structure_fingerprint = []
         for i, s in enumerate(self.atom_types):
-            atomic_fingerprint = [a["fingerprint"] for a in atoms_info if a["type"] == s]
+            atomic_fingerprint = [a["fingerprint"] for a in atoms_info
+                                  if a["type"] == s]
             if not atomic_fingerprint:
                 if exclude_zero_atoms:
                     continue
                 else:
-                    atomic_fingerprint = [np.array([0.0 for _ in range(dimension)])]
+                    atomic_fingerprint = [
+                        np.array([0.0 for _ in range(dimension)])]
             if inner_moment:
-                atomic_fingerprint = [compute_moments(atomic_fingerprint, inner_moment)]
+                atomic_fingerprint = [
+                    compute_moments(atomic_fingerprint, inner_moment)]
 
-            atomic_fingerprint = np.array(list(map(lambda x: weights[s] * x 
+            atomic_fingerprint = np.array(list(map(lambda x: weights[s] * x
                                                    if weighted else x,
                                                    atomic_fingerprint)))
             structure_fingerprint.extend(atomic_fingerprint)
-        global_fingerprint = compute_moments(structure_fingerprint, outer_moment)
+        global_fingerprint = compute_moments(
+            structure_fingerprint, outer_moment)
         return np.array(global_fingerprint)
+
 
 class TrnSet(object):
     """
@@ -230,12 +241,12 @@ class TrnSet(object):
     """
 
     def __init__(self, name: str, normalized: bool, scale: float, shift:
-                 float, atom_types: List[str], 
-                 atomic_energy: List[float], 
+                 float, atom_types: List[str],
+                 atomic_energy: List[float],
                  num_atoms_tot: int, num_structures: int,
                  E_min: float, E_max: float, E_av: float,
-                 filename: os.PathLike = None, 
-                 fileformat: Literal["ascii", "hdf5"] = 'ascii', 
+                 filename: os.PathLike = None,
+                 fileformat: Literal["ascii", "hdf5"] = 'ascii',
                  origin: os.PathLike = None, **kwargs):
         for arg in kwargs:
             TypeError("Unexpected keyword argument '{}'.".format(arg))
@@ -253,7 +264,7 @@ class TrnSet(object):
         if filename is not None:
             self.filename = filename
             self.format = fileformat
-            self.open()          
+            self.open()
             if self.origin is None:
                 dirname = os.path.dirname(filename)
                 self.origin = dirname if len(dirname) > 0 else None
@@ -283,9 +294,9 @@ class TrnSet(object):
         return self.iter_structures(read_coords=True, read_forces=True)
 
     @classmethod
-    def from_file(cls, filename: os.PathLike, 
+    def from_file(cls, filename: os.PathLike,
                   file_format: Literal[
-                    'guess', 'ascii', 'hdf5', 'binary'] = 'guess', 
+                    'guess', 'ascii', 'hdf5', 'binary'] = 'guess',
                   **kwargs):
         if not os.path.exists(filename):
             raise FileNotFoundError("File not found: {}".format(filename))
@@ -349,8 +360,8 @@ class TrnSet(object):
                    **kwargs)
 
     @classmethod
-    def from_fortran_binary_file(cls, 
-                                 binary_file: os.PathLike, 
+    def from_fortran_binary_file(cls,
+                                 binary_file: os.PathLike,
                                  ascii_file: os.PathLike = None,
                                  **kwargs):
         """
@@ -366,9 +377,9 @@ class TrnSet(object):
         if ascii_file is None:
             ascii_file = binary_file + ".ascii"
         output = subprocess.run(
-            [aenet_paths['trnset2ascii_x_path'], '--raw', 
-            binary_file, ascii_file], stdout=subprocess.DEVNULL, 
-            stderr=subprocess.PIPE)
+            [aenet_paths['trnset2ascii_x_path'], '--raw',
+             binary_file, ascii_file],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if len(output.stderr.strip()) > 0:
             raise IOError("Conversion of binary to text file failed.")
         return cls.from_ascii_file(ascii_file, **kwargs)
@@ -413,7 +424,8 @@ class TrnSet(object):
                 'normalized': tb.BoolCol(),
                 'scale': tb.Float64Col(),
                 'shift': tb.Float64Col(),
-                'atom_types': tb.StringCol(itemsize=64, shape=(self.num_types,)),
+                'atom_types': tb.StringCol(
+                    itemsize=64, shape=(self.num_types,)),
                 'atomic_energy': tb.Float64Col(shape=(self.num_types,)),
                 'num_atoms_tot': tb.UInt64Col(),
                 'num_structures': tb.UInt64Col(),
@@ -435,16 +447,16 @@ class TrnSet(object):
             "forces": tb.Float64Col(shape=(3,))
         }
         info = h5file.create_table(
-            structures, "info", info_table_dict, 
-            "Atomic structure information", 
+            structures, "info", info_table_dict,
+            "Atomic structure information",
             tb.Filters(complevel, shuffle=False))
         atoms = h5file.create_table(
-            structures, "atoms", atom_table_dict, 
-            "Atomic data", 
+            structures, "atoms", atom_table_dict,
+            "Atomic data",
             tb.Filters(complevel, shuffle=False))
         features = h5file.create_vlarray(
             structures, "features", tb.Float64Atom(),
-            "Atomic environment features", 
+            "Atomic environment features",
             tb.Filters(complevel, shuffle=False))
 
         metadata.row['name'] = self.name
@@ -567,9 +579,9 @@ class TrnSet(object):
             row = self._fp.root.structures.atoms[i]
             fingerprint = self._fp.root.structures.features[i]
             atoms.append({"type": row['type'].decode('utf-8'),
-                         "fingerprint": fingerprint,
-                         "coords": row['coords'] if read_coords else None,
-                         "forces": row['forces'] if read_forces else None})
+                          "fingerprint": fingerprint,
+                          "coords": row['coords'] if read_coords else None,
+                          "forces": row['forces'] if read_forces else None})
         return FeaturizedAtomicStructure(
             path, energy, self.atom_types, atoms)
 
