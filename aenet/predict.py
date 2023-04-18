@@ -9,6 +9,9 @@ import numpy as np
 import os
 import re
 
+from .io.structure import read as read_structure
+from .io.structure import write as write_structure
+
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
 __date__ = "2023-04-17"
@@ -68,6 +71,7 @@ class PredictIn(object):
         calc_forces = False
         save_forces = False
         save_energies = False
+        base_path = os.path.dirname(filename)
         with open(filename) as fp:
             line = "\n"
             while True:
@@ -97,7 +101,8 @@ class PredictIn(object):
                 elif kwd == 'files':
                     num_files = int(fp.readline().strip())
                     for i in range(num_files):
-                        files.append(fp.readline().strip())
+                        p = fp.readline().strip()
+                        files.append(os.path.join(base_path, p))
         return cls(types=types, networks=networks, files=files,
                    verbosity=verbosity, calc_forces=calc_forces,
                    save_forces=save_forces, save_energies=save_energies)
@@ -130,6 +135,17 @@ class PredictOut(object):
     @property
     def num_structures(self):
         return len(self.cohesive_energy)
+
+    def num_atoms(self, i):
+        """ number of atoms in a select structure """
+        return len(self.atom_types[i])
+
+    def structure(self, i, frmt=None, **kwargs):
+        """ return selected atomic structure """
+        if self.paths is None:
+            raise ValueError("File paths unknown. Cannot read structure.")
+        struc = read_structure(self.paths[i], frmt=frmt, **kwargs)
+        return struc
 
     @classmethod
     def from_file(cls, filename: os.PathLike, **kwargs):
@@ -184,21 +200,59 @@ class PredictOutAnalyzer(object):
     def num_structures(self):
         return self.pouts[0].num_structures
 
-    def energy_uncertainty(self, i: int):
+    @property
+    def paths(self):
+        return self.pouts[0].paths
+
+    def num_atoms(self, i):
+        return self.pouts[0].num_atoms(i)
+
+    def structure(self, i, frmt=None, **kwargs):
+        return self.pouts[0].structure(i, frmt=frmt, **kwargs)
+
+    def write_pdb_with_force_uncertainty(self, i, filename, frmt=None,
+                                         **kwargs):
+        struc = self.structure(i)
+        force_u = self.force_uncertainty(i)
+        write_structure(struc, filename=filename, frmt=frmt,
+                        atom_attrib=force_u, **kwargs)
+
+    def energy_stats(self, i: int, normalize: bool = True):
         """
         Return energy ucertainty for a selected structure.
 
         """
-        energies = [po.total_energy[i] for po in self.pouts]
-        return np.std(energies)
+        energies = np.array([po.total_energy[i] for po in self.pouts])
+        if normalize:
+            energies /= self.num_atoms(i)
+        E_min = np.min(energies)
+        E_max = np.max(energies)
+        E_avg = np.mean(energies)
+        E_std = np.std(energies)
+        return E_min, E_max, E_avg, E_std
 
-    def force_uncertainty(self, i: int):
+    def all_energy_stats(self, **kwargs):
+        data = []
+        for i in range(self.num_structures):
+            data.append(self.energy_stats(i))
+        columns = ['E_min', 'E_max', 'E_mean', 'E_std']
+        return np.array(data), columns
+
+    def force_stats(self, i: int):
         """
         Return energy ucertainty for a selected structure.
 
         """
         forces = [po.forces[i] for po in self.pouts]
         return np.std(forces, axis=0)
+
+    def force_uncertainty(self, i: int):
+        """
+        Return an atomic uncertainty for a selected structure.
+
+        """
+        forces = [po.forces[i] for po in self.pouts]
+        return np.mean(np.std(forces, axis=0), axis=1)
 
     def _check_compatible(self):
         if not all([po.num_structures == self.pouts[0].num_structures
