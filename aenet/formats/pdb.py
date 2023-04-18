@@ -22,15 +22,15 @@ class PDBParser(ParserABC):
         self.extensions = ['pdb']
         self.default_file_names = []
 
-    def write(self, struc, outfile=None, frame=None, **kwargs):
+    def write(self, struc, outfile=None, frame=None, atom_attrib=None,
+              **kwargs):
         """
         Write trajectory in the PDB format (appended PDB files)
 
         Arguments:
           outfile    name of the output file; None: write to stdout
-          types      list with atomic species
-          trajec[i]  array of atomic coordinates for step i
-          avec       lattice vectors
+          atom_attrib a list of attributes (floats) for each atom
+
         """
 
         for kw in kwargs:
@@ -39,6 +39,9 @@ class PDBParser(ParserABC):
         if not struc.pbc:
             a = b = c = 1.0
             alpha = beta = gamma = 90.0
+
+        if atom_attrib is None:
+            atom_attrib = [0.0 for i in range(struc.natoms)]
 
         header = ("CRYST1 {:8.3f} {:8.3f} {:8.3f} " +
                   "{:6.2f} {:6.2f} {:6.2f} P 1\nMODEL     1\n")
@@ -67,7 +70,8 @@ class PDBParser(ParserABC):
                 x = coo[i][0]
                 y = coo[i][1]
                 z = coo[i][2]
-                f.write(atom.format(i, struc.types[i], x, y, z, 0.0))
+                f.write(
+                    atom.format(i, struc.types[i], x, y, z, atom_attrib[i]))
             f.write("ENDMOL\n")
 
         if outfile:
