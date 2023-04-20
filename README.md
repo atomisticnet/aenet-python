@@ -8,7 +8,7 @@
 
 ## Installation
 
-(1) Compile the symmetry function C library. Within the `src` of the [`aenet`](https://github.com/atomisticnet/aenet) installation directory, run
+(1) Compile the symmetry function C library. Clone the [`aenet` repository](https://github.com/atomisticnet/aenet) Within the `src` of the `aenet` installation directory, run
 
     $ cd ../src
     $ make -f ./makefiles/Makefile.XXX lib
