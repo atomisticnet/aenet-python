@@ -2,13 +2,13 @@
 
 ## Prerequisites
 
-- aenet version 2.0.3 or greater
+- [aenet](https://github.com/atomisticnet/aenet) version 2.0.3 or greater
 - Python 3.6+
 - Cython
 
 ## Installation
 
-(1) Compile the symmetry function C library. Within the `src` of the `aenet` installation directory, run
+(1) Compile the symmetry function C library. Within the `src` of the [`aenet`](https://github.com/atomisticnet/aenet) installation directory, run
 
     $ cd ../src
     $ make -f ./makefiles/Makefile.XXX lib
