@@ -1,8 +1,8 @@
 # Python interface for ænet
 
 ## Prerequisites
-- Fortran compiler: [`gfortran`](https://fortran-lang.org/en/learn/os_setup/install_gfortran/), or [`ifort`](https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler.html#gs.vxs2id) (not newer version `ifx`).
-- The [Math Kernel Library (MKL)](https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux): The  Intel® oneAPI HPC Toolkit contains both `ifort` and `mkl`.
+- Fortran compiler [`gfortran`](https://fortran-lang.org/en/learn/os_setup/install_gfortran/)or [`ifort`](https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler.html#gs.vxs2id)
+- The [Math Kernel Library (MKL)](https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux)
 - [aenet](https://github.com/atomisticnet/aenet)>=2.0.3
 - python>=3.6
 - cython
