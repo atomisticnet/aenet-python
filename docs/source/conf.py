@@ -17,8 +17,8 @@ sys.path.insert(0, os.path.abspath('../..'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'ænet Tools'
-copyright = '2022, The aenet Developers'
+project = 'ænet-python'
+copyright = '2023, The aenet Developers'
 author = 'The ænet Developers'
 
 # The full version, including alpha/beta/rc tags

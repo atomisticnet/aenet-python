@@ -1,18 +1,17 @@
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17: http://docutils.sourceforge.net/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Installation &#8212; ænet Tools 1.0.0 documentation</title>
+    <title>Installation &amp; Set-up &#8212; ænet-python 1.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/alabaster.css" />
     <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-    <script src="../_static/jquery.js"></script>
-    <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script src="../_static/sphinx_highlight.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Examples" href="examples.html" />
@@ -33,13 +32,49 @@
 
           <div class="body" role="main">
             
-  <section id="installation">
-<h1>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h1>
-<p>Install the <code class="docutils literal notranslate"><span class="pre">aenet</span> <span class="pre">tools</span></code> package with <code class="docutils literal notranslate"><span class="pre">pip</span></code> from the root
-directory:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip install . --user
+  <section id="installation-set-up">
+<h1>Installation &amp; Set-up<a class="headerlink" href="#installation-set-up" title="Permalink to this heading">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">aenet</span></code> package should be installed first. Follow the instructurion
+on <a class="reference external" href="https://github.com/atomisticnet/aenet">GitHub aenet</a> or
+<a class="reference external" href="http://ann.atomistic.net/documentation/">aenet documentation</a>.
+A Fortran compiler (e.g., <a class="reference external" href="https://fortran-lang.org/en/learn/os_setup/install_gfortran/">gfortran</a>
+or <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler.html#gs.vxs2id">ifort</a>
+) and the <code class="docutils literal notranslate"><span class="pre">Math</span> <span class="pre">Kernel</span> <span class="pre">Library</span> <span class="pre">(MKL)</span></code>
+are necessary during the compiling of <code class="docutils literal notranslate"><span class="pre">aenet</span></code> package. The
+<a class="reference external" href="https://www.open-mpi.org/">OpenMPI</a> package is optional, which
+offers the parallel computing.</p>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Permalink to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>aenet &gt;= 2.0.3</p></li>
+<li><p>python &gt;=3.6</p></li>
+<li><p>cython</p></li>
+<li><p>numpy</p></li>
+</ul>
+</section>
+<section id="installation-of-mkl">
+<h2>Installation of MKL<a class="headerlink" href="#installation-of-mkl" title="Permalink to this heading">¶</a></h2>
+<p>On the homepage of <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux">Math Kernel Library (MKL)</a>,
+select the Stand-Alone Version or Toolkit. After the installation,
+system environment variables should be set by running</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">source</span><span class="w"> </span>/opt/intel/oneapi/setvars.sh<span class="w"> </span>intel64
 </pre></div>
 </div>
+<p>Test the installation: <code class="docutils literal notranslate"><span class="pre">echo</span> <span class="pre">$MKLROOT</span></code>, which should return the
+installation path of <code class="docutils literal notranslate"><span class="pre">mkl</span></code>, e.g. <code class="docutils literal notranslate"><span class="pre">/opt/intel/oneapi/mkl/2023.1.0</span></code>.</p>
+</section>
+<section id="installation-of-aenet-python">
+<h2>Installation of <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code><a class="headerlink" href="#installation-of-aenet-python" title="Permalink to this heading">¶</a></h2>
+<p>Install the <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code> package from the source
+directory:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>.<span class="w"> </span>--user
+</pre></div>
+</div>
+<p>or</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>python<span class="w"> </span>setup.py<span class="w"> </span>install<span class="w"> </span>--user
+</pre></div>
+</div>
+</section>
 </section>
 
 
@@ -49,7 +84,7 @@ directory:</p>
       </div>
       <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
         <div class="sphinxsidebarwrapper">
-<h1 class="logo"><a href="../index.html">ænet Tools</a></h1>
+<h1 class="logo"><a href="../index.html">ænet-python</a></h1>
 
 
 
@@ -59,11 +94,16 @@ directory:</p>
 
 
 <h3>Navigation</h3>
-<p class="caption"><span class="caption-text">Contents:</span></p>
 <ul class="current">
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Installation &amp; Set-up</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation-of-mkl">Installation of MKL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation-of-aenet-python">Installation of <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code></a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
 <li class="toctree-l1"><a class="reference internal" href="commandline.html">Command-line interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="trainset.html">ænet training set files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../dev/commandline.html">Defining Command-line tools</a></li>
 </ul>
 
@@ -80,12 +120,12 @@ directory:</p>
   <h3 id="searchlabel">Quick search</h3>
     <div class="searchformwrapper">
     <form class="search" action="../search.html" method="get">
-      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
       <input type="submit" value="Go" />
     </form>
     </div>
 </div>
-<script>$('#searchbox').show(0);</script>
+<script>document.getElementById('searchbox').style.display = "block"</script>
 
 
 
@@ -99,11 +139,11 @@ directory:</p>
       <div class="clearer"></div>
     </div>
     <div class="footer">
-      &copy;2022, The aenet Developers.
+      &copy;2023, The aenet Developers.
       
       |
-      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.0.1</a>
-      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 6.2.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.13</a>
       
       |
       <a href="../_sources/usage/installation.rst.txt"
