@@ -6,6 +6,8 @@
 ænet Tools Documentation
 ========================
 
+Test the setting of doc-branch.
+
 The ``aenet tools`` package is a collection of utilities for preparing
 input files and processing output files for the
 machine-learning potential software ænet (http://ann.atomistic.net).
