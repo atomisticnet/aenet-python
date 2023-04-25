@@ -115,6 +115,42 @@ Within the root directory of the source code, run</p>
 </pre></div>
 </div>
 </section>
+<section id="set-up-config-json">
+<h3>6. Set up config.json<a class="headerlink" href="#set-up-config-json" title="Permalink to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">config.json</span></code> file contains the path of executables and other parameters. It will be
+read when <code class="docutils literal notranslate"><span class="pre">aenet</span></code> is used in the Python interface. See example on <a class="reference internal" href="trainset.html"><span class="doc">ænet training set files</span></a>.</p>
+<p>One simple way is to make a new file <cite>~/.config/aenet/config.json</cite>, by following the example
+file:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="s2">&quot;aenet&quot;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;root_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/installation/path/of/aenet&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;generate_x_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/installation/path/of/aenet/bin/generate.x-xxx&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;train_x_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/installation/path/of/aenet/bin/train.x-xxx&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;predict_x_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/installation/path/of/aenet/bin/predict.x-xxx,</span>
+    <span class="s2">&quot;trnset2ascii_x_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/installation/path/of/aenet/bin/trnset2ASCII.x-xxx&quot;</span>
+<span class="p">},</span>
+<span class="s2">&quot;matplotlib_rc_params&quot;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;font.size&quot;</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span>
+    <span class="s2">&quot;legend.frameon&quot;</span><span class="p">:</span> <span class="n">false</span><span class="p">,</span>
+    <span class="s2">&quot;xtick.top&quot;</span><span class="p">:</span> <span class="n">true</span><span class="p">,</span>
+    <span class="s2">&quot;xtick.direction&quot;</span><span class="p">:</span> <span class="s2">&quot;in&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;xtick.minor.visible&quot;</span><span class="p">:</span> <span class="n">true</span><span class="p">,</span>
+    <span class="s2">&quot;xtick.major.size&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+    <span class="s2">&quot;xtick.minor.size&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+    <span class="s2">&quot;ytick.right&quot;</span><span class="p">:</span> <span class="n">true</span><span class="p">,</span>
+    <span class="s2">&quot;ytick.direction&quot;</span><span class="p">:</span> <span class="s2">&quot;in&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ytick.minor.visible&quot;</span><span class="p">:</span> <span class="n">true</span><span class="p">,</span>
+    <span class="s2">&quot;ytick.major.size&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+    <span class="s2">&quot;ytick.minor.size&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>If some paths are not needed, <code class="docutils literal notranslate"><span class="pre">null</span></code> can be used to fill in.</p>
+</section>
+<section id="compile-trnset2ascii-x">
+<h3>7. Compile <code class="docutils literal notranslate"><span class="pre">trnset2ASCII.x</span></code><a class="headerlink" href="#compile-trnset2ascii-x" title="Permalink to this heading">¶</a></h3>
+<p>Missing!!!!!</p>
+</section>
 </section>
 </section>
 
@@ -142,7 +178,7 @@ Within the root directory of the source code, run</p>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
-<li class="toctree-l1"><a class="reference internal" href="commandline.html">Command-line interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="commandline.html">Command-line tools</a></li>
 <li class="toctree-l1"><a class="reference internal" href="trainset.html">ænet training set files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../dev/commandline.html">Defining Command-line tools</a></li>
 </ul>

@@ -100,3 +100,43 @@ or
 
    $ python setup.py install --user
 
+6. Set up config.json
+^^^^^^^^^^^^^^^^^^^^^^
+The ``config.json`` file contains the path of executables and other parameters. It will be 
+read when ``aenet`` is used in the Python interface. See example on :doc:`trainset`.
+
+One simple way is to make a new file `~/.config/aenet/config.json`, by following the example
+file:
+
+.. code-block::
+
+    {
+    "aenet": {
+        "root_path": "/installation/path/of/aenet",
+        "generate_x_path": "/installation/path/of/aenet/bin/generate.x-xxx",
+        "train_x_path": "/installation/path/of/aenet/bin/train.x-xxx",
+        "predict_x_path": "/installation/path/of/aenet/bin/predict.x-xxx,
+        "trnset2ascii_x_path": "/installation/path/of/aenet/bin/trnset2ASCII.x-xxx"
+    },
+    "matplotlib_rc_params": {
+        "font.size": 14,
+        "legend.frameon": false,
+        "xtick.top": true,
+        "xtick.direction": "in",
+        "xtick.minor.visible": true,
+        "xtick.major.size": 8,
+        "xtick.minor.size": 4,
+        "ytick.right": true,
+        "ytick.direction": "in",
+        "ytick.minor.visible": true,
+        "ytick.major.size": 8,
+        "ytick.minor.size": 4}
+    }
+
+If some paths are not needed, ``null`` can be used to fill in.
+
+7. Compile ``trnset2ASCII.x``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Missing!!!!!
+

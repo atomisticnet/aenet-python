@@ -34,8 +34,8 @@
             
   <section id="aenet-training-set-files">
 <h1>ænet training set files<a class="headerlink" href="#aenet-training-set-files" title="Permalink to this heading">¶</a></h1>
-<p>The object class <code class="docutils literal notranslate"><span class="pre">TrnSet</span></code> can be used to interact with data set files
-that were produced by ænet’s <code class="docutils literal notranslate"><span class="pre">generate.x</span></code> tool.</p>
+<p>The Python class <code class="docutils literal notranslate"><span class="pre">TrnSet</span></code> in <code class="docutils literal notranslate"><span class="pre">aenet.trainset</span></code> module, can be used to interact
+with data set files produced by ænet’s <code class="docutils literal notranslate"><span class="pre">generate.x</span></code> tool.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The ænet executable <code class="docutils literal notranslate"><span class="pre">trnset2ASCII.x</span></code> needs to be configured to read
@@ -44,7 +44,7 @@ training set files.  See also <a class="reference internal" href="installation.h
 <section id="file-formats">
 <h2>File formats<a class="headerlink" href="#file-formats" title="Permalink to this heading">¶</a></h2>
 <p>Internally, ænet uses <em>unformatted</em> Fortran binary files to store the
-featurized atomic structure data that is used for training.  Since the
+featurized atomic structure data for training.  Since the
 format of such files is compiler dependent, it is not straightforward to
 parse them directly with Python.  Instead, the <code class="docutils literal notranslate"><span class="pre">TrnSet</span></code> class converts
 binary data set files to plain text using the <code class="docutils literal notranslate"><span class="pre">trnset2ASCII.x</span></code> ænet
@@ -57,6 +57,8 @@ transparently:</p>
 </div>
 <p>This opens the training set file <code class="docutils literal notranslate"><span class="pre">data.train</span></code> which can be in any of
 the three supported formats (Fortran binary, ASCII text, or HDF5).</p>
+<section id="api-reference">
+<h3>API Reference<a class="headerlink" href="#api-reference" title="Permalink to this heading">¶</a></h3>
 <dl class="py class">
 <dt class="sig sig-object py" id="aenet.trainset.TrnSet">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">aenet.trainset.</span></span><span class="sig-name descname"><span class="pre">TrnSet</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">normalized</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shift</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atom_types</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atomic_energy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_atoms_tot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_structures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E_min</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E_max</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E_av</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">PathLike</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fileformat</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Literal</span><span class="p"><span class="pre">[</span></span><span class="s"><span class="pre">'ascii'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'hdf5'</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'ascii'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">origin</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">PathLike</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/aenet/trainset.html#TrnSet"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#aenet.trainset.TrnSet" title="Permalink to this definition">¶</a></dt>
@@ -161,6 +163,7 @@ format, then open it.  This requires the tool ‘trnset2ASCII.x’.</p>
 
 </section>
 </section>
+</section>
 
 
           </div>
@@ -182,7 +185,7 @@ format, then open it.  This requires the tool ‘trnset2ASCII.x’.</p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation &amp; Set-up</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
-<li class="toctree-l1"><a class="reference internal" href="commandline.html">Command-line interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="commandline.html">Command-line tools</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">ænet training set files</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#file-formats">File formats</a></li>
 </ul>

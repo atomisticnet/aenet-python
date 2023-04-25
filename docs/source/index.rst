@@ -27,7 +27,7 @@ tools.  See :doc:`/usage/commandline` for an overview of the
 command-line capabilities.
 
 Contents
-=================
+--------------
 
 .. toctree::
    :maxdepth: 2
@@ -41,7 +41,7 @@ Contents
 
 
 Indices and tables
-==================
+--------------------
 
 * :ref:`genindex`
 * :ref:`modindex`

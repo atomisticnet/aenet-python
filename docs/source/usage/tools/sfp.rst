@@ -1,7 +1,10 @@
 ``sfp``
 =======
 
-Structure fingerprints.
+Calculate structure fingerprints.
+
+API Reference
+""""""""""""""
 
 .. autoclass:: aenet.commandline.aenet_sfp.SFP
    :members:

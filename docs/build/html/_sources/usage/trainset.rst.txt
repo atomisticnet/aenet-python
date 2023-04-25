@@ -1,8 +1,8 @@
 ænet training set files
 =======================
 
-The object class ``TrnSet`` can be used to interact with data set files
-that were produced by ænet's ``generate.x`` tool. 
+The Python class ``TrnSet`` in ``aenet.trainset`` module, can be used to interact 
+with data set files produced by ænet's ``generate.x`` tool. 
 
 .. note::
    The ænet executable ``trnset2ASCII.x`` needs to be configured to read
@@ -12,7 +12,7 @@ File formats
 ------------
 
 Internally, ænet uses *unformatted* Fortran binary files to store the
-featurized atomic structure data that is used for training.  Since the
+featurized atomic structure data for training.  Since the
 format of such files is compiler dependent, it is not straightforward to
 parse them directly with Python.  Instead, the ``TrnSet`` class converts
 binary data set files to plain text using the ``trnset2ASCII.x`` ænet
@@ -27,6 +27,9 @@ transparently:
 
 This opens the training set file ``data.train`` which can be in any of
 the three supported formats (Fortran binary, ASCII text, or HDF5).
+
+API Reference
+"""""""""""""""
 
 .. autoclass:: aenet.trainset.TrnSet
    :members:
