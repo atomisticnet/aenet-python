@@ -15,7 +15,7 @@
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Examples" href="examples.html" />
-    <link rel="prev" title="ænet Tools Documentation" href="../index.html" />
+    <link rel="prev" title="ænet-python Documentation" href="../index.html" />
    
   <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
   
@@ -34,27 +34,38 @@
             
   <section id="installation-set-up">
 <h1>Installation &amp; Set-up<a class="headerlink" href="#installation-set-up" title="Permalink to this heading">¶</a></h1>
-<p><code class="docutils literal notranslate"><span class="pre">aenet</span></code> package should be installed first. Follow the instructurion
-on <a class="reference external" href="https://github.com/atomisticnet/aenet">GitHub aenet</a> or
-<a class="reference external" href="http://ann.atomistic.net/documentation/">aenet documentation</a>.
-A Fortran compiler (e.g., <a class="reference external" href="https://fortran-lang.org/en/learn/os_setup/install_gfortran/">gfortran</a>
-or <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler.html#gs.vxs2id">ifort</a>
-) and the <code class="docutils literal notranslate"><span class="pre">Math</span> <span class="pre">Kernel</span> <span class="pre">Library</span> <span class="pre">(MKL)</span></code>
-are necessary during the compiling of <code class="docutils literal notranslate"><span class="pre">aenet</span></code> package. The
-<a class="reference external" href="https://www.open-mpi.org/">OpenMPI</a> package is optional, which
-offers the parallel computing.</p>
 <section id="prerequisites">
 <h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Permalink to this heading">¶</a></h2>
 <ul class="simple">
+<li><p>A Fortran compiler</p></li>
+<li><p>Required math libraries</p></li>
 <li><p>aenet &gt;= 2.0.3</p></li>
 <li><p>python &gt;=3.6</p></li>
 <li><p>cython</p></li>
-<li><p>numpy</p></li>
+<li><p>numpy &gt;= 1.20.1</p></li>
+<li><p>scipy &gt;= 1.6.2</p></li>
+<li><p>pandas &gt;=1.2.4</p></li>
+<li><p>tables &gt;=3.6.1</p></li>
 </ul>
 </section>
-<section id="installation-of-mkl">
-<h2>Installation of MKL<a class="headerlink" href="#installation-of-mkl" title="Permalink to this heading">¶</a></h2>
-<p>On the homepage of <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux">Math Kernel Library (MKL)</a>,
+<section id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Permalink to this heading">¶</a></h2>
+<section id="install-a-fortran-compiler">
+<h3>1. Install a Fortran compiler<a class="headerlink" href="#install-a-fortran-compiler" title="Permalink to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">aenet</span></code> is mostly written by Frotran programming language for
+the high efficiency of numeric computation. A Fortran compiler
+is required for the installation (i.e. compilation). Two compilers
+are recommended: <a class="reference external" href="https://fortran-lang.org/en/learn/os_setup/install_gfortran/">gfortran</a>
+and <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler.html#gs.vxs2id">ifort</a>.</p>
+</section>
+<section id="install-the-required-library">
+<h3>2.. Install the required library<a class="headerlink" href="#install-the-required-library" title="Permalink to this heading">¶</a></h3>
+<p>Three choices are available as listed below. During the compilation
+of <code class="docutils literal notranslate"><span class="pre">aenet</span></code>, select the corresponding <code class="docutils literal notranslate"><span class="pre">Makefile.xxx</span></code> based on the
+installed libraries.</p>
+<section id="math-kernel-library-mkl-recommended">
+<h4><code class="docutils literal notranslate"><span class="pre">Math</span> <span class="pre">Kernel</span> <span class="pre">Library</span> <span class="pre">(MKL)</span></code> (recommended)<a class="headerlink" href="#math-kernel-library-mkl-recommended" title="Permalink to this heading">¶</a></h4>
+<p>On the homepage of <a class="reference external" href="https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux">Math Kernel Library</a>,
 select the Stand-Alone Version or Toolkit. After the installation,
 system environment variables should be set by running</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">source</span><span class="w"> </span>/opt/intel/oneapi/setvars.sh<span class="w"> </span>intel64
@@ -63,10 +74,39 @@ system environment variables should be set by running</p>
 <p>Test the installation: <code class="docutils literal notranslate"><span class="pre">echo</span> <span class="pre">$MKLROOT</span></code>, which should return the
 installation path of <code class="docutils literal notranslate"><span class="pre">mkl</span></code>, e.g. <code class="docutils literal notranslate"><span class="pre">/opt/intel/oneapi/mkl/2023.1.0</span></code>.</p>
 </section>
-<section id="installation-of-aenet-python">
-<h2>Installation of <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code><a class="headerlink" href="#installation-of-aenet-python" title="Permalink to this heading">¶</a></h2>
-<p>Install the <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code> package from the source
-directory:</p>
+<section id="openblas-library">
+<h4><code class="docutils literal notranslate"><span class="pre">OpenBLAS</span></code> library<a class="headerlink" href="#openblas-library" title="Permalink to this heading">¶</a></h4>
+<p>Follow the instruction for <a class="reference external" href="https://www.openblas.net/">OpenBLAS</a>.</p>
+</section>
+<section id="blas-and-lapack-libraries">
+<h4><code class="docutils literal notranslate"><span class="pre">BLAS</span></code> and <code class="docutils literal notranslate"><span class="pre">LAPACK</span></code> libraries<a class="headerlink" href="#blas-and-lapack-libraries" title="Permalink to this heading">¶</a></h4>
+<p>Follow the instruction for <a class="reference external" href="https://netlib.org/blas/">BLAS</a> and
+<a class="reference external" href="https://netlib.org/lapack/">LAPACK</a>.</p>
+</section>
+</section>
+<section id="install-openmpi-optional">
+<h3>3. Install OpenMPI (optional)<a class="headerlink" href="#install-openmpi-optional" title="Permalink to this heading">¶</a></h3>
+<p><a class="reference external" href="https://www.open-mpi.org/">OpenMPI</a> package is optional, which
+offers the parallel computing. One way of installation is:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>openmpi
+</pre></div>
+</div>
+<p>Other methods can be found on <a class="reference external" href="https://docs.open-mpi.org/en/v5.0.x/installing-open-mpi/quickstart.html">Quick start: Installing Open MPI</a>.</p>
+<p>If this package is installed, <code class="docutils literal notranslate"><span class="pre">Makefile.xxx</span></code> with <code class="docutils literal notranslate"><span class="pre">mpi</span></code> tag can be
+selected, otherwise please choose among the <code class="docutils literal notranslate"><span class="pre">serial</span></code> versions.</p>
+</section>
+<section id="compile-aenet-package">
+<h3>4. Compile <code class="docutils literal notranslate"><span class="pre">aenet</span></code> package<a class="headerlink" href="#compile-aenet-package" title="Permalink to this heading">¶</a></h3>
+<p>Follow the instructurion
+on <a class="reference external" href="https://github.com/atomisticnet/aenet">GitHub aenet</a> or
+<a class="reference external" href="http://ann.atomistic.net/documentation/">aenet documentation</a>.
+During the compilation, select the correct <code class="docutils literal notranslate"><span class="pre">Makefile.xxx</span></code> based on
+the previous steps.</p>
+</section>
+<section id="install-aenet-python">
+<h3>5. Install <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code><a class="headerlink" href="#install-aenet-python" title="Permalink to this heading">¶</a></h3>
+<p>Source code is available on GitHub <a class="reference external" href="https://github.com/atomisticnet/aenet-python">aenet-python</a>.
+Within the root directory of the source code, run</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>.<span class="w"> </span>--user
 </pre></div>
 </div>
@@ -74,6 +114,7 @@ directory:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>python<span class="w"> </span>setup.py<span class="w"> </span>install<span class="w"> </span>--user
 </pre></div>
 </div>
+</section>
 </section>
 </section>
 
@@ -97,8 +138,7 @@ directory:</p>
 <ul class="current">
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Installation &amp; Set-up</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#prerequisites">Prerequisites</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#installation-of-mkl">Installation of MKL</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#installation-of-aenet-python">Installation of <code class="docutils literal notranslate"><span class="pre">aenet-python</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation">Installation</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
@@ -111,7 +151,7 @@ directory:</p>
 <h3>Related Topics</h3>
 <ul>
   <li><a href="../index.html">Documentation overview</a><ul>
-      <li>Previous: <a href="../index.html" title="previous chapter">ænet Tools Documentation</a></li>
+      <li>Previous: <a href="../index.html" title="previous chapter">ænet-python Documentation</a></li>
       <li>Next: <a href="examples.html" title="next chapter">Examples</a></li>
   </ul></li>
 </ul>
