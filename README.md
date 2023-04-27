@@ -15,7 +15,7 @@
 ## Simplified installation guide
 A detailed guide can be found **xxxxx**
 
-## Math Library
+### Math Library
 
 The recommended math library is  [Math Kernel Library (MKL)](https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html#gs.vxrgux). Select the Stand-Alone Version or Toolkit. After the installation, run 
     
@@ -29,9 +29,9 @@ It should return the installation path of `mkl`, e.g. `/opt/intel/oneapi/mkl/202
 
 Other choices could be: [OpenBLAS library](https://www.openblas.net/); or [BLAS](https://netlib.org/blas/) together with [LAPACK](https://netlib.org/lapack/) libraries.
 
-## Installation
+### Installation
 (1) Follow the [instruction](https://github.com/atomisticnet/aenet) to download and compile `aenet` package first.
-Select the appropriate `Makefile.XXX` based on the installed compiler, math libraries, etc.. If a `mpi` version instead of `serial` version is selected, the package OpenMPI should be installed first:
+Select the appropriate `Makefile.XXX` based on the installed compiler, math libraries, etc. If a `mpi` version instead of `serial` version is selected, the package `OpenMPI` should be installed first:
 
     $ conda install -c conda-forge openmpi
 
