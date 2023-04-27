@@ -83,3 +83,11 @@ Structure conversion and manipulation
    $ aenet sconv structure.xsf -o vasp --shift origin 10 \
      | aenet sconv - -i vasp -o vasp --scale 1.1 \
      | aenet sconv - -i vasp -o vasp --rotate-angle 3 45
+
+Featurize Structures
+-----------------------
+
+* Generate the atomic features and structural features from ``XSF`` files.
+  Examples can be found in the Jupyter notebook `Featurize structures using
+  aenet from Python <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_.
+
