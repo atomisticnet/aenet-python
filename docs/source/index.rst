@@ -7,8 +7,8 @@
 ===========================
 
 The ``aenet-python`` package is a collection of utilities for preparing
-input files and processing output files for the
-machine-learning potential software `ænet <http://ann.atomistic.net>`_.
+input files and processing output files for the machine-learning
+interatomic potential software `ænet <http://ann.atomistic.net>`_.
 
 Common use cases of the package are
 
@@ -23,7 +23,13 @@ Common use cases of the package are
   machine-learning potential training.
 
 Much of the package's functionality is exposed through command-line
-tools.  See :doc:`/usage/commandline` for an overview of the
+tools.  Specifically, the tool ``sconv`` (*structure conversion*) makes
+available capabilities for atomic structure modification and
+interconversion and ``sfp`` (*structure fingerprints*) can be used to
+featurize atomic structures.  In addition, the ``config`` tool can be
+used for :doc:`configuration </usage/installation>`.
+
+See :doc:`/usage/commandline` for an overview of the
 command-line capabilities.
 
 Contents
@@ -34,7 +40,9 @@ Contents
    :glob:
 
    usage/installation
-   usage/examples
+   usage/structure_manipulation
+   usage/data_acquisition
+   usage/featurization
    usage/commandline
    usage/trainset
    dev/commandline

@@ -100,8 +100,8 @@ class Config(AenetToolABC):
                 path_try = current
             else:
                 path_try = glob.glob(
-                    os.path.join(aenet_dict['root_path'], 
-                                subdir, '{}*'.format(name)))
+                    os.path.join(aenet_dict['root_path'],
+                                 subdir, '{}*'.format(name)))
                 path_try = path_try[0] if len(path_try) > 0 else ''
             path = input("Path to `{}` [{}]: ".format(name, path_try))
             path = path if len(path) > 0 else path_try
@@ -136,7 +136,7 @@ class Config(AenetToolABC):
                     print("'{}' = {}".format(setting, config_dict[setting]))
                 else:
                     print("'' is not currently set.")
-        if (args.write is None and args.read is None 
+        if (args.write is None and args.read is None
                 and args.set_aenet_path is None):
             config_file = cfg.config_file_path()
             if config_file is None:
@@ -145,10 +145,6 @@ class Config(AenetToolABC):
                 print("Configuration file: {}".format(config_file))
             config_dict = cfg.read_config(config_file=args.file)
             out = json.dumps(config_dict, indent=2, default=str)
-            for o, r in [(': null', ': None'), 
-                         (': true', ': True'), 
-                         (': false', ': False')]:
-                out = out.replace(o, r)
             print(out)
 
 

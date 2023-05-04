@@ -2,9 +2,9 @@ Command-line tools
 ======================
 
 **ænet-python** package not only offers the python interface, but also
-serves as a collection of command-line tools.  Each tool is implemented 
-in a separate Python script located in ``aenet/commandline/``, but they 
-are exposed through the unified shell command ``aenet``.  The ``--help`` 
+serves as a collection of command-line tools.  Each tool is implemented
+in a separate Python script located in ``aenet/commandline/``, but they
+are exposed through the unified shell command ``aenet``.  The ``--help``
 flag returns a list of all available command-line tools:
 
 .. sourcecode:: console
@@ -26,24 +26,23 @@ can be found on :doc:`installation`.
 :doc:`tools/sconv`, short for *structure converter*, is a very versatile
 tool. Some important functions are:
 
-* extract structure/energy/force information from the output of common 
-  electronic-structure codes;
+* extract structure/energy/force information from the output of common
+  electronic-structure codes (see :doc:`data_acquisition`);
 
-* interconvert formats of atomic structures, especially to ænet's XSF format;
+* interconvert formats of atomic structures, especially to ænet's XSF
+  format (see :doc:`structure_manipulation`);
 
-* perform manipulations on atomic structures, such as scaling or distortion, 
-  which is useful for reference data generation.
-
-Examples can be found on :doc:`examples`. 
+* perform manipulations on atomic structures, such as scaling or distortion,
+  which is useful for reference data generation  (see :doc:`structure_manipulation`).
 
 ``sfp``
 -------------
 :doc:`tools/sfp` is used to featurize atomic structures by calculating structure
-*fingerprints*. For example, it can parse a training set file (binary type) produced 
+*fingerprints*. For example, it can parse a training set file (binary type) produced
 by ``generate.x`` and convert it to ASCII format (a human-readable format).
 
 
-See below for a list of all 
+See below for a list of all
 documented command-line tools.
 
 .. note::
