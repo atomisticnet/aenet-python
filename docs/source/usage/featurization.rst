@@ -13,7 +13,7 @@ features can, furthermore, be combined to atomic structure features with
 the approach by Gharakhanyan *et al.* [3].
 
 [1] N. Artrith, A. Urban, and G. Ceder,
-*Phys. Rev. B* **96**, 20217, 014112 (`link <https://doi.org/10.1103/PhysRevB.96.014112>`_).
+*Phys. Rev. B* **96**, 2017, 014112 (`link <https://doi.org/10.1103/PhysRevB.96.014112>`_).
 
 [2] A. M. Miksch, T. Morawietz, J. Kästner, A. Urban, N. Artrith,
 *Mach. Learn.: Sci. Technol.* **2**, 2021, 031001 (`link <http://doi.org/10.1088/2632-2153/abfd96>`_).
