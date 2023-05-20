@@ -1,0 +1,22 @@
+DESCR
+  Featurization set-up file for species Li using the AUC method [1].
+  This file was generated using the aenet Python package.
+  Please cite the following reference when publishing results
+  based on this input file.
+  [1] N. Artrith, A. Urban and Ceder, Phys. Rev. B 96, 2017, 014112, 
+      https://doi.org/10.1103/PhysRevB.96.014112
+END DESCR
+
+ATOM Li
+
+ENV 5
+Li
+Mo
+Ni
+Ti
+O
+
+RMIN 0.55
+
+BASIS type=Chebyshev
+radial_Rc = 4.0  radial_N = 10 angular_Rc = 1.5  angular_N = 3
