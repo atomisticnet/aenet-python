@@ -73,7 +73,7 @@ class Config(AenetToolABC):
         To configure the paths to the aenet installation directory and
         compiled binaries with the `--path/-p` option.
 
-          $ aenet config --path <aenet_path>
+          $ aenet config --set-aenet-path <aenet_path>
 
         The tool will search in `<aenet_path>/bin` for executables and
         will let the user specify paths if needed.
