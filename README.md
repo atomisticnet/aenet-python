@@ -22,7 +22,40 @@ To use the featurization capabilities, the main ænet package needs to be instal
 
 where `[path-to-aenet]` is the path pointing to the aenet root directory.
 
+## Structure conversion
+
+`aenet-python` can be used to interconvert between atomic structure formats.
+
+    $ aenet sconv --format
+
+    Supported file formats:
+
+    Format      description                     read   write  extensions
+    --------------------------------------------------------------------
+    aims        FHI-aims geometry.in format     yes    yes    in aims
+    aimsout     FHI-aims output file format     yes    no     out
+    ase         ASE's trajectory (traj) format  yes    yes    traj
+    atat        ATAT's structure format         yes    yes
+    cp          cp.x trajectory (QE)            yes    no     pos
+    crystal     CRYSTAL's fort.34 format        yes    yes    crystal gui
+    espresso    Quantum Espresso input format   yes    yes    espresso
+    gap         GAP reference structure format  yes    no     gap
+    lammps      LAMMPS atomic structure dump    yes    yes    dump lammps lmp
+    lammpsdata  subset of LAMMPS data format    no     yes    data
+    pdb         Protein Data Base format        no     yes    pdb
+    prism       Prismatic XYZ format            yes    yes    prism
+    pw          pw.x output format (QE)         yes    no
+    runner      RuNNer input.data format        yes    yes
+    tinker      Tinker XYZ format               yes    yes    tinker arc
+    vasp        VASP's POSCAR/CONTCAR format    yes    yes    vasp
+    vasprun     VAPS's vasprun.xml archive      yes    no     xml
+    xdatcar     VASP's XDATCAR format           yes    no
+    xsf         XCrysDen Structure Format       yes    yes    xsf
+    xyz         XYZ Cartesian coordinates       yes    yes    xyz
+
 For more details, see the documentation.
+
+
 
 ## References
 
