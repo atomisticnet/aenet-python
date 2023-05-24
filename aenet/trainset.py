@@ -250,7 +250,7 @@ class TrnSet(object):
                  origin: os.PathLike = None, **kwargs):
         for arg in kwargs:
             TypeError("Unexpected keyword argument '{}'.".format(arg))
-        if fileformat is not in ["ascii", "hdf5"]:
+        if fileformat not in ["ascii", "hdf5"]:
             raise ValueError('Invalid file format {}'.format(fileformat))
         self.name = name
         self.normalized = normalized

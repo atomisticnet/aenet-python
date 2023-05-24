@@ -39,6 +39,10 @@ setup(
     packages=find_packages(exclude=['tests']),
     scripts=[os.path.join("scripts", "aenet")
              ] + glob.glob(os.path.join("scripts", "*.py")),
+    include_package_data=True,
+    data_files=[('data', ['aenet/data/AtomicScatteringFactors.json',
+                          'aenet/data/ShannonRadii.json',
+                          'aenet/data/species.json'])],
     install_requires=['numpy>=1.20.1',
                       'scipy>=1.6.2',
                       'pandas>=1.2.4',

@@ -78,7 +78,6 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         return setup_files
 
-
     def generate_input_string(self,
                               xsf_files: List[os.PathLike],
                               output_file: str = 'data.train',
