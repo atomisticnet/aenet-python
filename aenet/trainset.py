@@ -5,7 +5,7 @@ Currently, only training set fuiles in ASCII format are supported.
 
 """
 
-from typing import List, Literal
+from typing import List
 import os
 import subprocess
 
@@ -246,10 +246,12 @@ class TrnSet(object):
                  num_atoms_tot: int, num_structures: int,
                  E_min: float, E_max: float, E_av: float,
                  filename: os.PathLike = None,
-                 fileformat: Literal["ascii", "hdf5"] = 'ascii',
+                 fileformat: str = 'ascii',
                  origin: os.PathLike = None, **kwargs):
         for arg in kwargs:
             TypeError("Unexpected keyword argument '{}'.".format(arg))
+        if fileformat is not in ["ascii", "hdf5"]:
+            raise ValueError('Invalid file format {}'.format(fileformat))
         self.name = name
         self.normalized = normalized
         self.scale = scale
@@ -295,12 +297,13 @@ class TrnSet(object):
 
     @classmethod
     def from_file(cls, filename: os.PathLike,
-                  file_format: Literal[
-                    'guess', 'ascii', 'hdf5', 'binary'] = 'guess',
+                  file_format: str = 'guess',
                   **kwargs):
         if not os.path.exists(filename):
             raise FileNotFoundError("File not found: {}".format(filename))
-        if file_format == 'guess':
+        if file_format not in ['guess', 'ascii', 'hdf5', 'binary']:
+            raise ValueError('Invalid file format {}'.format(file_format))
+        elif file_format == 'guess':
             file_format = None
             try:
                 f = tb.open_file(filename)

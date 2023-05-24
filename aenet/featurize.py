@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import Dict, List, Literal
+from typing import Dict, List
 
 from . import config
 from .util import cd
@@ -32,7 +32,7 @@ class AtomicFeaturizer(object):
 
 class AenetAUCFeaturizer(AtomicFeaturizer):
 
-    def __init__(self, typenames: List[str], 
+    def __init__(self, typenames: List[str],
                  rad_order: int = 0, rad_cutoff: float = 0.0,
                  ang_order: int = 0, ang_cutoff: float = 0.0,
                  min_cutoff: float = 0.55, **kwargs):
@@ -50,7 +50,7 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
           This file was generated using the aenet Python package.
           Please cite the following reference when publishing results
           based on this input file.
-          [1] N. Artrith, A. Urban and Ceder, Phys. Rev. B 96, 2017, 014112, 
+          [1] N. Artrith, A. Urban and Ceder, Phys. Rev. B 96, 2017, 014112,
               https://doi.org/10.1103/PhysRevB.96.014112
         END DESCR
 
@@ -66,7 +66,7 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         BASIS type=Chebyshev
         radial_Rc = {rc}  radial_N = {ro} angular_Rc = {ac}  angular_N = {ao}
-        """.format(min_cutoff=self.min_cutoff, 
+        """.format(min_cutoff=self.min_cutoff,
                    rc=self.rad_cutoff, ro=self.rad_order,
                    ac=self.ang_cutoff, ao=self.ang_order)
 
@@ -85,7 +85,7 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                               atomic_energies: Dict[str, float] = None,
                               workdir: os.PathLike = '.',
                               debug=False,
-                              deriv_method: Literal["taylor", "analytical"] = None,
+                              deriv_method: str = None,
                               deriv_delta: float = 0.01,
                               deriv_fraction: float = 16.0,
                               deriv_outfile: str = 'data.deriv.train',
@@ -96,12 +96,16 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
         for arg in kwargs:
             raise TypeError("Unexpected keyword argument '{}'".format(arg))
 
+        if deriv_method not in ["taylor", "analytical", None]:
+            raise ValueError(
+                'Invalid derivative method: {}'.format(deriv_method))
+
         if atomic_energies is None:
             atomic_energies = {}
         for t in self.typenames:
             if t not in atomic_energies:
                 atomic_energies[t] = 0.0
-        
+
         # check if all xsf files listed exist and make paths relative to
         # workdir
         xsf_file_paths = []
@@ -127,7 +131,7 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                 generate_in += "\nDERIVATIVES\n"
                 generate_in += ("method=taylor delta={delta} fraction={frac} "
                                 + "outfile={out} disp_all={all} N_max={max}\n"
-                               ).format(delta=deriv_delta, 
+                               ).format(delta=deriv_delta,
                                         frac=deriv_fraction,
                                         out=deriv_outfile,
                                         all=(1 if deriv_disp_all else 0),
@@ -145,8 +149,8 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         return generate_in
 
-    def write_generate_input_files(self, 
-                                   xsf_files: List[os.PathLike], 
+    def write_generate_input_files(self,
+                                   xsf_files: List[os.PathLike],
                                    filename: str = 'generate.in',
                                    workdir: os.PathLike = '.', **kwargs):
         """
@@ -175,8 +179,8 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
             with open(outfile, 'w') as fp:
                 fp.write(stp_strings[t])
 
-    def run_aenet_generate(self, xsf_files: List[os.PathLike], 
-                           workdir=None, hdf5_filename='features.h5', 
+    def run_aenet_generate(self, xsf_files: List[os.PathLike],
+                           workdir=None, hdf5_filename='features.h5',
                            output_file='generate.out', **kwargs):
         aenet_paths = config.read('aenet')
         if not os.path.exists(aenet_paths['generate_x_path']):
@@ -198,15 +202,14 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
             outfile = os.path.join(cm['origin'], output_file)
             errfile = 'errors.out'
             with open(outfile, 'w') as out, open(errfile, 'w') as err:
-                subprocess.run([aenet_paths['generate_x_path'], 
+                subprocess.run([aenet_paths['generate_x_path'],
                                 'generate.in'], stdout=out, stderr=err)
 
         ts = TrnSet.from_fortran_binary_file(
-            os.path.join(workdir, 'data.train'), 
+            os.path.join(workdir, 'data.train'),
             origin=workdir)
         ts.to_hdf5(hdf5_filename)
         ts.close()
 
         if rm_tmp_files:
             shutil.rmtree(workdir)
-
