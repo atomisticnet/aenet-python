@@ -208,7 +208,7 @@ class FeaturizedAtomicStructure(Serializable):
         for i, s in enumerate(self.atom_types):
             atomic_fingerprint = [a["fingerprint"] for a in atoms_info
                                   if a["type"] == s]
-            if len(atomic_fingerprints) == 0:
+            if len(atomic_fingerprint) == 0:
                 if exclude_zero_atoms:
                     continue
                 else:
