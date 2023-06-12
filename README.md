@@ -1,5 +1,7 @@
 # aenet-python – Python tools for ænet
 
+See also the [documentation](https://aenet-python.readthedocs.io/en/latest/).
+
 This package provides Python tools for the interaction with the *atomic energy network* (ænet) machine-learning interatomic potential software package.  To learn more about ænet, see the [ænet website](http://ann.atomistic.net/) and [GitHub repository](http://ann.atomistic.net/).
 
 Common use cases for the tools within the `aenet-python`  package are
@@ -53,7 +55,7 @@ where `[path-to-aenet]` is the path pointing to the aenet root directory.
     xsf         XCrysDen Structure Format       yes    yes    xsf
     xyz         XYZ Cartesian coordinates       yes    yes    xyz
 
-For more details, see the documentation.
+For more details, see the [documentation](https://aenet-python.readthedocs.io/en/latest/).
 
 
 
