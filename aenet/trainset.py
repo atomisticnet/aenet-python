@@ -101,8 +101,8 @@ class FeaturizedAtomicStructure(Serializable):
     def composition(self):
         comp = {}
         types = [a['type'] for a in self.atoms]
-        for i, t in enumerate(self.atom_types):
-            n = types.count(i)
+        for t in self.atom_types:
+            n = types.count(t)
             if n > 0:
                 comp[t] = n
         return comp
@@ -136,14 +136,10 @@ class FeaturizedAtomicStructure(Serializable):
                 a['fingerprint'] for a in self.atoms if a['type'] == s]
             if len(atomic_fingerprints) == 0:
                 structure_fingerprint.extend(
-                    [0.0 for j in range(moment*dimension)])
+                    [0.0 for _ in range(moment*dimension)])
             else:
-                mean = np.mean(atomic_fingerprints, axis=0)
-                structure_fingerprint.extend(mean)
-                for m in range(2, moment+1):
-                    structure_fingerprint.extend(
-                        scipy.stats.moment(atomic_fingerprints,
-                                           moment=moment, axis=0))
+                structure_fingerprint.extend(
+                    compute_moments(atomic_fingerprints, moment).tolist())
         return structure_fingerprint
 
     def global_moment_fingerprint(self, outer_moment: int = 1,
@@ -212,7 +208,7 @@ class FeaturizedAtomicStructure(Serializable):
         for i, s in enumerate(self.atom_types):
             atomic_fingerprint = [a["fingerprint"] for a in atoms_info
                                   if a["type"] == s]
-            if not atomic_fingerprint:
+            if len(atomic_fingerprint) == 0:
                 if exclude_zero_atoms:
                     continue
                 else:
