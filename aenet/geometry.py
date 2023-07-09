@@ -9,6 +9,7 @@ import numpy as np
 import sys
 
 from .exceptions import ArgumentError, IncompatibleStructureError
+from .nblist import NeighborList
 from . import util
 
 __author__ = "Alexander Urban, Nongnuch Artrith"
@@ -924,6 +925,31 @@ class AtomicStructure(object):
         new_struc.typeID = np.delete(new_struc.typeID, del_idx)
         new_struc.fixed = np.delete(new_struc.fixed, del_idx, axis=0)
         return new_struc
+
+    def get_neighbors(self, i, cutoff, return_self=True, frame=-1):
+        """
+        Get all neighbors of atom 'i' within cutoff 'cutoff'.
+
+        Args:
+          i (int): index of the central atom starting with zero
+          cutoff (float): cutoff radius in Angstroms
+          return_self (bool): whether to return the central atom
+          frame (int): frame to be used (from trajectory)
+
+        Returns:
+          an atomic structure object
+
+        """
+        nblist = NeighborList(self.coords[frame],
+                              lattice_vectors=self.avec[frame],
+                              cartesian=True,
+                              types=self.types,
+                              interaction_range=cutoff)
+        (nbl, coords, dist, Tvecs) = nblist.get_neighbors_and_distances(
+            i, return_coords=True, return_self=return_self)
+        types = np.array([self.types[i] for i in nbl])
+        coords = np.array(coords)
+        return AtomicStructure(coords=coords, types=types)
 
     def frac2cart(self, fraccoo, avec=None, frame=-1):
         if (avec is None or len(avec) == 0):

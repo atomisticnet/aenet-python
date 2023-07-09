@@ -139,6 +139,15 @@ class Sconv(AenetToolABC):
             nargs="+")
 
         self.parser.add_argument(
+            "--cut",
+            help="Cut a spherical region from an atomic structure "
+                 "centered around ATOM (1...N) with a radius of CUTOFF "
+                 "in Angstroms.",
+            default=None,
+            nargs=2,
+            metavar=('atom', 'cutoff'))
+
+        self.parser.add_argument(
             "--supercell",
             help="Multiply input cell to create a supercell "
                  "(only periodic structures).",
@@ -245,6 +254,7 @@ class Sconv(AenetToolABC):
                       wrap=args.wrap,
                       scale=args.scale,
                       shift=args.shift,
+                      cut=args.cut,
                       supercell=args.supercell,
                       transform=np.array([args.a, args.b, args.c]),
                       vac=args.vac,
@@ -448,7 +458,7 @@ class Sconv(AenetToolABC):
                  print_formats=False, print_info=False, frame=None,
                  typenames=[], datafile=None, align_frames=False,
                  split=False, rotate=False, sort=False, rotate_angle=None,
-                 wrap=False, scale=None, shift=None, supercell=None,
+                 wrap=False, scale=None, shift=None, cut=None, supercell=None,
                  transform=np.identity(3), vac=None, fix_atoms=None,
                  remove_atoms=None, input_options=[], output_options=[]):
 
@@ -495,6 +505,8 @@ class Sconv(AenetToolABC):
             struc = self.translate_structure(struc, shift, **kwargs)
         if scale is not None:
             struc = self.scale_structure(struc, scale, **kwargs)
+        if cut is not None:
+            struc = struc.get_neighbors(i=int(cut[0])-1, cutoff=float(cut[1]))
         if vac is not None:
             struc = struc.add_vacuum(vac)
         if wrap:

@@ -31,6 +31,8 @@ manipulation capabilities.
    $ aenet sconv structure.xsf -o vasp --scale 1.1
    $ # rotate the structure by 45 degrees around the z axis
    $ aenet sconv structure.xyz -o vasp --rotate-angle 3 45
+   $ # return a spherical region with radius 10 Angstrom around atom 5
+   $ aenet sconv structure.xyz -o xyz --cut 5 10.0
 
 * Multiple instructions can be piped (if supported by the shell).  In
   that case, the input file is replaced by a hyphen (``-``), and the
