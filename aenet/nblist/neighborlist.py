@@ -13,7 +13,7 @@ __date__ = "2013-01-19"
 
 
 FINAL = -1
-EPS = 100.0*np.finfo(np.float).eps
+EPS = 100.0*np.finfo(float).eps
 
 
 class NeighborList(object):
