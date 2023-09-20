@@ -62,6 +62,10 @@ class ATATParser(ParserABC):
         types = []
         line = f.readline()
         while line:
+            # Coordinates are in the basis from above.  Convert to
+            # Cartesian.
+            #fraccoo = [float(el) for el in line.split()[:3]]
+            #coords.append(np.dot(fraccoo, basis))
             coords.append([float(el) for el in line.split()[:3]])
             types.append(line.split()[3])
             line = f.readline()
@@ -103,11 +107,14 @@ class ATATParser(ParserABC):
         else:
             f = sys.stdout
 
-        f.write("1.0 1.0 1.0 90.0 90.0 90.0\n")
+        # f.write("1.0 1.0 1.0 90.0 90.0 90.0\n")
         for i in range(3):
             f.write((3*"{:15.8f} ").format(*struc.avec[frame][i]) + "\n")
+        f.write((3*"{:15.8f} ").format(1, 0, 0) + "\n")
+        f.write((3*"{:15.8f} ").format(0, 1, 0) + "\n")
+        f.write((3*"{:15.8f} ").format(0, 0, 1) + "\n")
         for i in range(struc.natoms):
-            f.write((3*"{:15.8f} ").format(*struc.coords[frame][i]))
+            f.write((3*"{:15.8f} ").format(*struc.fraccoo(i, frame=frame, wrap=True)))
             f.write("{}".format(struc.types[i]) + "\n")
 
         if outfile:
