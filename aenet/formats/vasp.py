@@ -13,6 +13,7 @@ try:
     has_lxml = True
 except ImportError:
     import xml.etree.cElementTree as ET
+    has_lxml = False
 
 from ..geometry import AtomicStructure
 from ..exceptions import ArgumentError
