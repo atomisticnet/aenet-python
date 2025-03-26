@@ -11,7 +11,6 @@ import subprocess
 
 import numpy as np
 import tables as tb
-import scipy.stats
 
 from . import config
 from .serialize import Serializable
@@ -114,6 +113,10 @@ class FeaturizedAtomicStructure(Serializable):
                    + ([0] if len(self.atom_types) % 2 != 0 else [])
                    + list(range(1, s + 1)))
         return {a: w for a, w in zip(self.atom_types, weights)}
+
+    @property
+    def atom_features(self):
+        return [self.atoms[i]['fingerprint'] for i in range(self.num_atoms)]
 
     def moment_fingerprint(self, sel_atom_types: List[str] = None,
                            moment: int = 2):
@@ -290,6 +293,16 @@ class TrnSet(object):
 
     def __iter__(self):
         return self.iter_structures(read_coords=True, read_forces=True)
+
+    def __enter__(self):
+        if not self.opened:
+            self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        # returning False propagates exceptions
+        return False
 
     @classmethod
     def from_file(cls, filename: os.PathLike,

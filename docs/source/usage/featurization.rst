@@ -59,10 +59,9 @@ class :class:`aenet.trainset.TrnSet`
 .. sourcecode:: python
 
    from aenet.trainset import TrnSet
-   ts = TrnSet.from_file('features.h5')
-   # do something
-   ts.close()
+   with TrnSet.from_file('features.h5') as ts:
+      # do something
 
 See the Jupyter `notebooks
 <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_
-directory for a complete example.
+directory for complete examples.
