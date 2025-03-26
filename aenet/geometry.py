@@ -45,22 +45,6 @@ class AtomicStructure(object):
       typenames[i] chemical symbol for atom type ID i
     """
 
-    fixed = []
-    comments = []
-
-    coords = []
-    energy = []
-    forces = []
-
-    pbc = False
-    avec = None
-    bvec = None
-
-    types = []
-    typeID = []
-    names_known = False
-    typenames = []
-
     def __init__(self, coords, types, typenames=[], avec=[],
                  fractional=False, energy=None, forces=None, fixed=None):
         """
@@ -81,6 +65,16 @@ class AtomicStructure(object):
           fixed          if fixed[i][j] is True, then the j-th coordinate
                          of the i-th atom is fixed in relaxations or dynamics
         """
+
+        self.fixed = []
+        self.comments = []
+        self.coords = []
+        self.energy = []
+        self.forces = []
+        self.types = []
+        self.typeID = []
+        self.names_known = False
+        self.typenames = []
 
         if avec is None or (len(avec) == 0):
             self.avec = None
