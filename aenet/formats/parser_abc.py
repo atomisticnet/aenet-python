@@ -16,8 +16,7 @@ __changes__ = """
 """
 
 
-class ParserABC(object):
-    __metaclass__ = ABCMeta
+class ParserABC(metaclass=ABCMeta):
 
     _amend_args = ['energy', 'forces']
 
