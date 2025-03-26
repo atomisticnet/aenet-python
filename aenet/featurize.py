@@ -9,10 +9,13 @@ import shutil
 import subprocess
 import tempfile
 from typing import Dict, List
+import numpy as np
 
 from . import config
 from .util import cd
 from .trainset import TrnSet
+from .geometry import AtomicStructure
+from .formats.xsf import XSFParser
 
 __author__ = "Alexander Urban"
 __date__ = "2022-10-04"
@@ -24,6 +27,12 @@ class AtomicFeaturizer(object):
         self.typenames = typenames
         for arg in kwargs:
             print("Warning: unknown keyword `{}`".format(arg))
+
+    @classmethod
+    def from_structure(cls, struc: AtomicStructure, **kwargs):
+        if not struc.names_known:
+            raise ValueError("Structure without type name information.")
+        return cls(typenames=struc.typenames)
 
     @property
     def ntypes(self):
@@ -181,6 +190,23 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
     def run_aenet_generate(self, xsf_files: List[os.PathLike],
                            workdir=None, hdf5_filename='features.h5',
                            output_file='generate.out', **kwargs):
+        """
+        Run aenet's `generate.x` tool to evaluate the features of a list 
+        of XSF files. The features are written to an HDF5 output file.
+
+        Args:
+            xsf_files: List of paths to XSF files in aenet's format.
+            workdir: Directory for the creation of input/output files. 
+                Defaults to None.
+            hdf5_filename: Name of the output file with generated 
+                features. Defaults to 'features.h5'.
+            output_file: Name of the `generate.x` output file. Will only 
+                be accessible if `workdir` is not None. 
+                Defaults to 'generate.out'.
+
+        Raises:
+            FileNotFoundError: Raised when the `generate.x` tool is not found.
+        """
         aenet_paths = config.read('aenet')
         if not os.path.exists(aenet_paths['generate_x_path']):
             raise FileNotFoundError(
@@ -212,3 +238,74 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         if rm_tmp_files:
             shutil.rmtree(workdir)
+
+    def featurize_structures(self, structures: List[AtomicStructure],
+                             hdf5_filename=None, **kwargs):
+        """
+        Runs aenet's `generate.x` tool and returns the feature vectors.
+
+        Args:
+            structures: List of .geometry.AtomicStructure
+            hdf5_filename: Path to the generated HDF5 file with the 
+                featurized structures. If None, a temporary file will
+                be created and deleted when the featurization is done.
+
+        Returns:
+            a list of .trainset.FeaturizedAtomicStructure objects
+            
+        """
+        # generate XSF files for featurization with generate.x
+        xsf_dir = tempfile.mkdtemp(dir='.')
+        xsf = XSFParser()
+        xsf_files = []
+        for i, s in enumerate(structures):
+            struc = s.copy()
+            xsf_filename = os.path.join(xsf_dir, 'structure{}.xsf'.format(i))
+            xsf_files.append(xsf_filename)
+            # If the structure is not labeled with energies and forces,
+            # it can still be featurized.  Setting these labels to zero
+            # when they aren't set.
+            if struc.energy[-1] is None:
+                struc.energy[-1] = 0.0
+            if struc.forces[-1] is None or len(struc.forces[-1]) == 0:
+                struc.forces[-1] = np.zeros(struc.coords[-1].shape)
+            xsf.write(struc, outfile=xsf_filename)
+
+        # now perform the featurization
+        if hdf5_filename is None:
+            workdir = tempfile.mkdtemp(dir='.')
+            trnset_file = os.path.join(workdir, 'features.h5')
+            rm_tmp_files = True
+        else:
+            if os.path.exists(hdf5_filename):
+                raise IOError('File already exists: {}'.format(hdf5_filename))
+            trnset_file = hdf5_filename
+            rm_tmp_files = False
+
+        self.run_aenet_generate(xsf_files, hdf5_filename=trnset_file, **kwargs)
+        featurized_structures = []
+        with TrnSet.from_file(trnset_file) as ts:
+            for s in ts:
+                featurized_structures.append(s)
+
+        if rm_tmp_files:
+            shutil.rmtree(workdir)
+        shutil.rmtree(xsf_dir)
+
+        return featurized_structures
+    
+    def featurize_structure(self, struc: AtomicStructure, **kwargs):
+        """
+        Runs aenet's `generate.x` tool and returns the feature vectors.
+        This is the same as `featurize_structures()` but for a single 
+        structure.  See the docstring of `featurize_structures()` for
+        additional arguments.
+
+        Args:
+            struc: Instance of .geometry.AtomicStructure
+
+        Returns:
+            An instance of .trainset.FeaturizedAtomicStructure
+
+        """
+        return self.featurize_structures([struc], **kwargs)[-1]
