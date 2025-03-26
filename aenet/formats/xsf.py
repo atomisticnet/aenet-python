@@ -45,7 +45,7 @@ class XSFParser(ParserABC):
         if (len(struc.comments) > 0):
             f.write("\n")
 
-        if struc.energy[frame]:
+        if struc.energy[frame] is not None:
             f.write("# total energy = {:.8f} eV\n".format(struc.energy[frame]))
             f.write("\n")
 
