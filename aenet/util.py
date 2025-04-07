@@ -700,14 +700,12 @@ def compute_moments(array, moment=1, axis=0):
      """
 
     if not isinstance(moment, int) or moment < 1:
-        raise ValueError('Not supported moment. \
-                         The moment should be a positive integer (i.e. 1, 2, 3, ...).'
-                         )
+        raise ValueError('Mment must be a positive integer.')
     moments_list = np.array([np.mean(array, axis=0)])
-    moments_list = np.append(moments_list, 
-                             scipy.stats.moment(array,
-                                                moment=range(2, moment + 1),
-                                                axis=0)).flatten()
+    if moment > 1:
+        moments_list = np.append(
+            moments_list, scipy.stats.moment(
+                array, moment=range(2, moment + 1), axis=0)).flatten()
     return moments_list
 
 
