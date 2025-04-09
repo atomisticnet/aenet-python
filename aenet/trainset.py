@@ -8,6 +8,7 @@ Currently, only training set fuiles in ASCII format are supported.
 from typing import List
 import os
 import subprocess
+import warnings
 
 import numpy as np
 import tables as tb
@@ -156,6 +157,8 @@ class FeaturizedAtomicStructure(Serializable):
           weighted (bool): whether atom weighting is used (this is
             different from weighted moments; atomic fingerprint is
             simply multiplied by its weight) (default is False)
+            Attention: species weighting is not useful when 
+                       stack_type_features is True.
           weights (dict): weights of atoms ({atom_symbol: weight})
             (default is self.atom_weights)
           append_weighted (bool): If True, and weighted is True, append 
@@ -201,6 +204,9 @@ class FeaturizedAtomicStructure(Serializable):
                  or not all(w in weights for w in self.atom_types))):
             raise ValueError("The weights dictionary should contain "
                              "only the included elements.")
+        if stack_type_features and weighted:
+            warnings.warn("Type weighting is usually not useful when "
+                          "the type features are stacked.")
 
         if weighted and weights is None:
             weights = self.atom_weights
@@ -220,9 +226,8 @@ class FeaturizedAtomicStructure(Serializable):
                 else:
                     atom_features = np.zeros(dimension)
 
-            if inner_moment:
-                type_fingerprint = compute_moments(
-                    atom_features, inner_moment).flatten()
+            type_fingerprint = compute_moments(
+                atom_features, inner_moment).flatten()
 
             if weighted:
                 type_fingerprint_w = weights[s]*type_fingerprint
