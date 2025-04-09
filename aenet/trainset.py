@@ -116,50 +116,40 @@ class FeaturizedAtomicStructure(Serializable):
 
     @property
     def atom_features(self):
-        return [self.atoms[i]['fingerprint'] for i in range(self.num_atoms)]
+        return np.array([self.atoms[i]['fingerprint']
+                         for i in range(self.num_atoms)])
 
-    def moment_fingerprint(self, sel_atom_types: List[str] = None,
-                           moment: int = 2):
+    def atom_features_for_type(self, atom_type: str):
         """
-        Calculate a fingerprint for a collection of atoms using a moment
-        expansion for each atom type.
+        Return only the features for atoms of a selected type.
 
-        Note: this implementation assumes that the atomic descriptors for
-        each species have the same length.
-
+        Args:
+            atom_type (str): Chemical symbol.
         """
-        if sel_atom_types is None:
-            sel_atom_types = self.atom_types
-        dimension = self.max_descriptor_length
-        structure_fingerprint = []
-        for i, s in enumerate(self.atom_types):
-            if s not in sel_atom_types:
-                continue
-            atomic_fingerprints = [
-                a['fingerprint'] for a in self.atoms if a['type'] == s]
-            if len(atomic_fingerprints) == 0:
-                structure_fingerprint.extend(
-                    [0.0 for _ in range(moment*dimension)])
-            else:
-                structure_fingerprint.extend(
-                    compute_moments(atomic_fingerprints, moment).tolist())
-        return structure_fingerprint
+        idx = (np.array([self.atoms[i]['type']
+                         for i in range(self.num_atoms)]) == atom_type)
+        return self.atom_features[idx]
 
     def global_moment_fingerprint(self, outer_moment: int = 1,
                                   inner_moment: int = 1,
                                   weighted: bool = False,
                                   weights: dict = None,
-                                  exclude_zero_atoms: bool = False):
+                                  append_weighted: bool = False,
+                                  stack_type_features: bool = False,
+                                  exclude_zero_atoms: bool = False,
+                                  atom_types: List[str] = None):
         """
         Calculate the global fingerprint from local atomic fingerprints
         using a moment expansion.
+
         Note: this implementation assumes that the atomic descriptors
         for each species have the same length.
 
         Arguments:
           outer_moment (int): up to which outer moment to compute
             for the inner moments of atomic fingerprints (should be an
-            integer >= 1)
+            integer >= 1). Note: The outer moment is not used when
+            stack_type_features is True.
           inner_moment (int): up to which inner moment to compute for
             atomic fingerprints (should be an integer >= 0, i.e. 0 is no
             moment, and 1 is the mean)
@@ -167,9 +157,19 @@ class FeaturizedAtomicStructure(Serializable):
             different from weighted moments; atomic fingerprint is
             simply multiplied by its weight) (default is False)
           weights (dict): weights of atoms ({atom_symbol: weight})
-            (default is 1)
+            (default is self.atom_weights)
+          append_weighted (bool): If True, and weighted is True, append 
+            the weighted features to the list of unweighted features. 
+            Otherwise, only return the weighted features. (default is False)
+          stack_type_features (bool): If True, do not perform an outer
+            moment expansion to combine the feature vectors for individual
+            atom types.  Instead, only concatenate the atom-type feature
+            vectors. (default is False)
           exclude_zero_atoms (bool): whether to exclude or include species
             that are not part of the structure
+          atom_types (list): provide a list of chemical symbols to be
+            considered for the global moment fingerprint. Per default, 
+            all of the structure's atom types are considered.
 
         Returns:
           global_fingerprint (array)    global moment fingerprint
@@ -184,8 +184,8 @@ class FeaturizedAtomicStructure(Serializable):
             w_s is the weight for species s
 
         Dimension of the global fingerprint is equal to
-        length(atomic_fingerprint)*inner_moment*outer_moment
-        or length(atomic_fingerprint)*outer_moment if inner_moment is 0
+        length(type_fingerprint)*inner_moment*outer_moment
+        or length(type_fingerprint)*outer_moment if inner_moment is 0
 
         """
         if not isinstance(outer_moment, int) or outer_moment < 1:
@@ -202,32 +202,51 @@ class FeaturizedAtomicStructure(Serializable):
             raise ValueError("The weights dictionary should contain "
                              "only the included elements.")
 
-        if weighted:
-            if weights is None:
-                weights = self.atom_weights
+        if weighted and weights is None:
+            weights = self.atom_weights
+
+        if atom_types is None:
+            atom_types = self.atom_types
+
         dimension = self.max_descriptor_length
-        atoms_info = self.atoms
         structure_fingerprint = []
-        for i, s in enumerate(self.atom_types):
-            atomic_fingerprint = [a["fingerprint"] for a in atoms_info
-                                  if a["type"] == s]
-            if len(atomic_fingerprint) == 0:
+        for s in atom_types:
+            atom_features = self.atom_features_for_type(s)
+            
+            if len(atom_features) == 0:
+                # no atoms of type s found
                 if exclude_zero_atoms:
                     continue
                 else:
-                    atomic_fingerprint = [
-                        np.array([0.0 for _ in range(dimension)])]
-            if inner_moment:
-                atomic_fingerprint = [
-                    compute_moments(atomic_fingerprint, inner_moment)]
+                    atom_features = np.zeros(dimension)
 
-            atomic_fingerprint = np.array(list(map(lambda x: weights[s] * x
-                                                   if weighted else x,
-                                                   atomic_fingerprint)))
-            structure_fingerprint.extend(atomic_fingerprint)
-        global_fingerprint = compute_moments(
-            structure_fingerprint, outer_moment)
-        return np.array(global_fingerprint)
+            if inner_moment:
+                type_fingerprint = compute_moments(
+                    atom_features, inner_moment).flatten()
+
+            if weighted:
+                type_fingerprint_w = weights[s]*type_fingerprint
+                if append_weighted:
+                    # append the weighted features to the unweighted
+                    type_fingerprint = np.append(
+                        type_fingerprint,
+                        type_fingerprint_w)
+                else:
+                    # only keep the weighted features
+                    type_fingerprint = type_fingerprint_w               
+            
+            structure_fingerprint.append(type_fingerprint)
+
+        # combine features from the individual atom types either
+        # by concatenation or by performing another (outer) moment
+        # expansion
+        if stack_type_features:
+            structure_fingerprint = np.array(structure_fingerprint).flatten()
+        else:
+            structure_fingerprint = compute_moments(
+                structure_fingerprint, outer_moment).flatten()
+            
+        return structure_fingerprint
 
 
 class TrnSet(object):
