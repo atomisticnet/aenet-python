@@ -15,21 +15,24 @@ SCATTERING_FACTOR_COEFFICIENTS[S]  Cromer-Mann coefficients for the calculation
 """
 
 import json
-from pkg_resources import resource_filename
+from importlib import resources
 import numpy as np
 
 __author__ = "Alexander urban"
 __date__ = "2013-03-25"
 
-with open(resource_filename(__name__, "data/species.json"), 'r') as fp:
-    atomic_species = json.load(fp)
+package = __package__
 
-with open(resource_filename(__name__, "data/ShannonRadii.json"), 'r') as fp:
-    shannon_radii = json.load(fp)
+atomic_species = json.loads(
+    resources.files(package).joinpath("data/species.json").read_text())
 
-with open(resource_filename(__name__, "data/AtomicScatteringFactors.json"),
-          'r') as fp:
-    SCATTERING_FACTOR_COEFFICIENTS = json.load(fp)
+shannon_radii = json.loads(
+    resources.files(package).joinpath(
+        "data/ShannonRadii.json").read_text())
+
+SCATTERING_FACTOR_COEFFICIENTS = json.loads(
+    resources.files(package).joinpath(
+        "data/AtomicScatteringFactors.json").read_text())
 
 atomic_number = {}
 for i, sp in enumerate(atomic_species):
