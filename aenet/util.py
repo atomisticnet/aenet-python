@@ -177,10 +177,10 @@ def center_of_mass(coords, masses=None, avec=None, translations=False):
                 com = com_test.copy()
         com_frac = np.dot(com, np.linalg.inv(avec))
         for i in range(3):
-            while(com_frac[i] >= 1.0):
+            while (com_frac[i] >= 1.0):
                 com_frac[i] -= 1.0
                 T_opt[:, i] -= 1
-            while(com_frac[i] < 0.0):
+            while (com_frac[i] < 0.0):
                 com_frac[i] += 1.0
                 T_opt[:, i] += 1
         com = np.dot(com_frac, avec)
@@ -811,6 +811,7 @@ def csv2list(csvlist):
             for item2 in item.split(","):
                 ll += expand_range(item2)
     return ll
+
 
 @contextmanager
 def cd(newdir):

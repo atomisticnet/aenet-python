@@ -9,3 +9,5 @@ OLD*
 .ipynb_checkpoints
 dist/
 build/
+notebooks-work/
+.virtual_documents

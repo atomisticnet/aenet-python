@@ -55,8 +55,9 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
     def setup_file_strings(self):
         header = """
         DESCR
-          Featurization set-up file for species {species} using the AUC method [1].
-          This file was generated using the aenet Python package.
+          Featurization set-up file for species {species} using the
+          AUC method [1].
+          This file was generated using the aenet-python package.
           Please cite the following reference when publishing results
           based on this input file.
           [1] N. Artrith, A. Urban and Ceder, Phys. Rev. B 96, 2017, 014112,
@@ -123,7 +124,8 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
             xsf_file_paths.append(
                 os.path.relpath(os.path.abspath(f), os.path.abspath(workdir)))
 
-        generate_in = "OUTPUT {}\n\nTYPES\n{}\n".format(output_file, self.ntypes)
+        generate_in = "OUTPUT {}\n\nTYPES\n{}\n".format(
+            output_file, self.ntypes)
         for t in self.typenames:
             generate_in += "{:2s}  {}\n".format(t, atomic_energies[t])
 
@@ -139,11 +141,11 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                 generate_in += "\nDERIVATIVES\n"
                 generate_in += ("method=taylor delta={delta} fraction={frac} "
                                 + "outfile={out} disp_all={all} N_max={max}\n"
-                               ).format(delta=deriv_delta,
-                                        frac=deriv_fraction,
-                                        out=deriv_outfile,
-                                        all=(1 if deriv_disp_all else 0),
-                                        max=deriv_N_max)
+                                ).format(delta=deriv_delta,
+                                         frac=deriv_fraction,
+                                         out=deriv_outfile,
+                                         all=(1 if deriv_disp_all else 0),
+                                         max=deriv_N_max)
             else:
                 raise ValueError(
                     "Unexpected derivative method '{}'".format(deriv_method))
@@ -191,17 +193,17 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                            workdir=None, hdf5_filename='features.h5',
                            output_file='generate.out', **kwargs):
         """
-        Run aenet's `generate.x` tool to evaluate the features of a list 
+        Run aenet's `generate.x` tool to evaluate the features of a list
         of XSF files. The features are written to an HDF5 output file.
 
         Args:
             xsf_files: List of paths to XSF files in aenet's format.
-            workdir: Directory for the creation of input/output files. 
+            workdir: Directory for the creation of input/output files.
                 Defaults to None.
-            hdf5_filename: Name of the output file with generated 
+            hdf5_filename: Name of the output file with generated
                 features. Defaults to 'features.h5'.
-            output_file: Name of the `generate.x` output file. Will only 
-                be accessible if `workdir` is not None. 
+            output_file: Name of the `generate.x` output file. Will only
+                be accessible if `workdir` is not None.
                 Defaults to 'generate.out'.
 
         Raises:
@@ -246,13 +248,13 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         Args:
             structures: List of .geometry.AtomicStructure
-            hdf5_filename: Path to the generated HDF5 file with the 
+            hdf5_filename: Path to the generated HDF5 file with the
                 featurized structures. If None, a temporary file will
                 be created and deleted when the featurization is done.
 
         Returns:
             a list of .trainset.FeaturizedAtomicStructure objects
-            
+
         """
         # generate XSF files for featurization with generate.x
         xsf_dir = tempfile.mkdtemp(dir='.')
@@ -293,11 +295,11 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
         shutil.rmtree(xsf_dir)
 
         return featurized_structures
-    
+
     def featurize_structure(self, struc: AtomicStructure, **kwargs):
         """
         Runs aenet's `generate.x` tool and returns the feature vectors.
-        This is the same as `featurize_structures()` but for a single 
+        This is the same as `featurize_structures()` but for a single
         structure.  See the docstring of `featurize_structures()` for
         additional arguments.
 

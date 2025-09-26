@@ -157,12 +157,12 @@ class FeaturizedAtomicStructure(Serializable):
           weighted (bool): whether atom weighting is used (this is
             different from weighted moments; atomic fingerprint is
             simply multiplied by its weight) (default is False)
-            Attention: species weighting is not useful when 
+            Attention: species weighting is not useful when
                        stack_type_features is True.
           weights (dict): weights of atoms ({atom_symbol: weight})
             (default is self.atom_weights)
-          append_weighted (bool): If True, and weighted is True, append 
-            the weighted features to the list of unweighted features. 
+          append_weighted (bool): If True, and weighted is True, append
+            the weighted features to the list of unweighted features.
             Otherwise, only return the weighted features. (default is False)
           stack_type_features (bool): If True, do not perform an outer
             moment expansion to combine the feature vectors for individual
@@ -171,7 +171,7 @@ class FeaturizedAtomicStructure(Serializable):
           exclude_zero_atoms (bool): whether to exclude or include species
             that are not part of the structure
           atom_types (list): provide a list of chemical symbols to be
-            considered for the global moment fingerprint. Per default, 
+            considered for the global moment fingerprint. Per default,
             all of the structure's atom types are considered.
 
         Returns:
@@ -218,7 +218,7 @@ class FeaturizedAtomicStructure(Serializable):
         structure_fingerprint = []
         for s in atom_types:
             atom_features = self.atom_features_for_type(s)
-            
+
             if len(atom_features) == 0:
                 # no atoms of type s found
                 if exclude_zero_atoms:
@@ -238,8 +238,8 @@ class FeaturizedAtomicStructure(Serializable):
                         type_fingerprint_w)
                 else:
                     # only keep the weighted features
-                    type_fingerprint = type_fingerprint_w               
-            
+                    type_fingerprint = type_fingerprint_w
+
             structure_fingerprint.append(type_fingerprint)
 
         # combine features from the individual atom types either
@@ -250,7 +250,7 @@ class FeaturizedAtomicStructure(Serializable):
         else:
             structure_fingerprint = compute_moments(
                 structure_fingerprint, outer_moment).flatten()
-            
+
         return structure_fingerprint
 
 
