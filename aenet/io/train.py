@@ -10,7 +10,7 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
-from .. import config_dict
+from .. import config as cfg
 
 __author__ = "Nongnuch Artrith, Alexander Urban"
 __email__ = "aenet@atomistic.net"
@@ -28,7 +28,10 @@ class TrainOutput(object):
         self.errors = self._read_training_errors()
 
     def __str__(self):
-        return
+        out = "Training statistics:\n"
+        for k, v in self.stats.items():
+            out += "  {}: {}\n".format(k, v)
+        return out
 
     def _read_training_errors(self, path=None):
         """ Read errors from 'train.x' output file. """
@@ -44,8 +47,22 @@ class TrainOutput(object):
             data=errors,
             columns=['MAE_train', 'RMSE_train', 'MAE_test', 'RMSE_test'])
 
+    @property
+    def stats(self):
+        """ Return a dictionary with training statistics. """
+        stats = {
+            'final_MAE_train': self.errors['MAE_train'].values[-1],
+            'final_RMSE_train': self.errors['RMSE_train'].values[-1],
+            'final_MAE_test': self.errors['MAE_test'].values[-1],
+            'final_RMSE_test': self.errors['RMSE_test'].values[-1],
+            'min_RMSE_test': np.min(self.errors['RMSE_test'].values),
+            'epoch_min_RMSE_test': int(
+                np.argmin(self.errors['RMSE_test'].values)) + 1
+        }
+        return stats
+
     def plot_training_errors(self, pd=None, outfile=None):
-        plt.rcParams.update(config_dict['matplotlib_rc_params'])
+        plt.rcParams.update(cfg.read('matplotlib_rc_params'))
         if pd is None:
             pd = self.errors
         pd.plot(y=["RMSE_train", "RMSE_test"], logy=True,
@@ -71,12 +88,12 @@ class Energies(object):
         columns = columns.replace("Cost Func", "Cost-Func")
         columns = columns.split()[1:]
         self.energies_train = pd.read_csv(path_train,
-                                          delim_whitespace=True,
+                                          sep=r'\s+',
                                           skiprows=1, header=0,
                                           names=columns)
         if path_test is not None:
             self.energies_test = pd.read_csv(path_test,
-                                             delim_whitespace=True,
+                                             sep=r'\s+',
                                              skiprows=1, header=0,
                                              names=columns)
         else:
@@ -86,7 +103,7 @@ class Energies(object):
         return
 
     def plot_correlation(self, outfile=None, E_min=None, E_max=None):
-        plt.rcParams.update(config_dict['matplotlib_rc_params'])
+        plt.rcParams.update(cfg.read('matplotlib_rc_params'))
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.set_aspect('equal', adjustable='box')
