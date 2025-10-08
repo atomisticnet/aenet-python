@@ -16,7 +16,11 @@ Common use cases for the tools within the `aenet-python`  package are
 
 Install the Python package as usual, for example with pip
 
-    $ pip install --user .
+    $ pip install .
+
+For development, install in editable mode:
+
+    $ pip install -e .
 
 To use the featurization capabilities, the main ænet package needs to be installed separately as described [elsewhere](http://ann.atomistic.net/documentation/).  And `aenet-python` needs to be made aware of the ænet installation path, for example, using its interactive configuration tool
 

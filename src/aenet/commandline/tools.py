@@ -68,3 +68,21 @@ class AenetToolABC(object):
           args: object returned from an 'argparse' parser
         """
         pass
+
+
+def main():
+    """
+    Main entry point for the aenet command-line interface.
+    """
+    import aenet.commandline as cmd
+
+    parser = argparse.ArgumentParser(
+        description="Python interface to the atomic energy network (aenet) package.",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    subparsers = parser.add_subparsers()
+    cmd.discover(subparsers)
+    args = parser.parse_args()
+    try:
+        args.run(args)
+    except AttributeError:
+        parser.print_help()

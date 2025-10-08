@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aenet"
+dynamic = ["version"]
+description = "Python interface for the aenet package"
+readme = "README.md"
+authors = [
+    {name = "The aenet Development Team", email = "aenet@atomistic.net"}
+]
+license = {text = "MPL-2.0"}
+keywords = ["materials science", "machine learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.1",
+    "scipy>=1.6.2",
+    "pandas>=1.2.4",
+    "tables>=3.6.1",
+    "tqdm>=4.62.3",
+    "matplotlib>=3.3.4",
+]
+
+[project.urls]
+Homepage = "http://ann.atomistic.net/"
+Documentation = "https://aenet-python.readthedocs.io/en/latest/"
+Repository = "https://github.com/atomisticnet/aenet-python"
+
+[project.scripts]
+aenet = "aenet.commandline.tools:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {file = "src/aenet/VERSION"}
+
+[tool.setuptools.package-data]
+aenet = [
+    "VERSION",
+    "data/*.json"
+]
