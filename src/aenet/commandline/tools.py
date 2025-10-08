@@ -77,7 +77,9 @@ def main():
     import aenet.commandline as cmd
 
     parser = argparse.ArgumentParser(
-        description="Python interface to the atomic energy network (aenet) package.",
+        description=(
+            "Python interface to the atomic energy network "
+            "(aenet) package."),
         formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers()
     cmd.discover(subparsers)
