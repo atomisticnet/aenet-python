@@ -316,7 +316,8 @@ class ANNPotential(object):
               trnset_file: os.PathLike = 'data.train',
               config: Optional[TrainingConfig] = None,
               workdir: os.PathLike = None,
-              output_file: os.PathLike = 'train.out'):
+              output_file: os.PathLike = 'train.out',
+              num_processes: Optional[int] = None):
         """
         Train the ANN potential using aenet's train.x executable.
 
@@ -340,6 +341,10 @@ class ANNPotential(object):
             the directory is kept. Default: None
         output_file : os.PathLike, optional
             File path to save train.x standard output. Default: 'train.out'
+        num_processes : int, optional
+            Number of MPI processes to use for parallel training. Requires
+            MPI support to be enabled in the configuration (mpi_enabled=True).
+            If None, training runs without MPI. Default: None
 
         Raises
         ------
@@ -377,6 +382,11 @@ class ANNPotential(object):
         if config is None:
             config = TrainingConfig()
 
+        # Validate num_processes
+        if num_processes is not None and num_processes <= 0:
+            raise ValueError(
+                f"num_processes must be > 0, got {num_processes}")
+
         if workdir is None:
             workdir = tempfile.mkdtemp(dir='.')
             rm_tmp_files = True
@@ -410,14 +420,23 @@ class ANNPotential(object):
                                     config=config,
                                     workdir=workdir)
 
+        # Construct command for MPI or non-MPI execution
+        train_x_path = aenet_paths['train_x_path']
+        if num_processes and aenet_paths.get('mpi_enabled', False):
+            launcher = aenet_paths['mpi_launcher']
+            command = launcher.format(
+                num_proc=num_processes,
+                exec=train_x_path
+            ).split() + ['train.in']
+        else:
+            command = [train_x_path, 'train.in']
+
         # Call `train.x` and perform the training
         with cd(workdir) as cm:
             outfile = os.path.join(cm['origin'], output_file)
             errfile = 'errors.out'
             with open(outfile, 'w') as out, open(errfile, 'w') as err:
-                proc = subprocess.Popen(
-                    [aenet_paths['train_x_path'], 'train.in'],
-                    stdout=out, stderr=err)
+                proc = subprocess.Popen(command, stdout=out, stderr=err)
 
         def get_progress_percentage():
             epoch = len(glob.glob(os.path.join(

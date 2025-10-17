@@ -20,6 +20,8 @@ DEFAULT = {
         "train_x_path": None,
         "predict_x_path": None,
         "trnset2ascii_x_path": None,
+        "mpi_enabled": False,
+        "mpi_launcher": "mpirun -np {num_proc} {exec}",
     },
     "matplotlib_rc_params": {
         "font.size": 14,
@@ -89,7 +91,7 @@ def read_config(config_file: os.PathLike = None) -> dict:
     return config_dict
 
 
-def write_config(config_dict: dict, config_file: os.PathLike = None, 
+def write_config(config_dict: dict, config_file: os.PathLike = None,
                  replace: bool = False):
     """
     Write settings to a configuration file.
@@ -121,7 +123,7 @@ def write_config(config_dict: dict, config_file: os.PathLike = None,
         json.dump(config_dict, fp)
 
 
-def read(settings: Union[str, List[str]], 
+def read(settings: Union[str, List[str]],
          config_file: os.PathLike = None) -> Union[Any, List[Any]]:
     """
     Read a specific setting from the configuration.
@@ -142,7 +144,7 @@ def read(settings: Union[str, List[str]],
         return_single = False
 
     config_dict = read_config(config_file)
-    
+
     result = []
     for setting in settings:
         if setting not in config_dict:

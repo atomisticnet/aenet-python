@@ -189,7 +189,7 @@ Training Method Parameters
 
 **EKF** (Extended Kalman Filter)
 
-*   ``lambda_`` (float): Forgetting factor. Default: ``0.99``
+*   ``lambda`` (float): Forgetting factor. Default: ``0.99``
 *   ``lambda0`` (float): Initial forgetting factor. Default: ``0.999``
 *   ``P`` (float): Initial covariance. Default: ``100.0``
 *   ``mnoise`` (float): Measurement noise. Default: ``0.0``
@@ -212,3 +212,69 @@ Training Method Parameters
 This method requires a configured `aenet` installation.
 Use ``aenet config`` on the command line to set the paths to the `aenet`
 executables.
+
+MPI Parallelization
+-------------------
+
+Training can be accelerated using MPI parallelization if the ``train.x``
+executable is built with MPI support. This allows training to run across
+multiple CPU cores or nodes on HPC systems.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+1. The ``train.x`` executable must be compiled with MPI support
+2. MPI must be enabled in the aenet-python configuration:
+
+.. code-block:: bash
+
+    $ aenet config --enable-mpi
+
+3. (Optional) Customize the MPI launcher for your system:
+
+.. code-block:: bash
+
+    # For SLURM systems
+    $ aenet config --set-mpi-launcher "srun -n {num_proc} {exec}"
+
+    # Default is "mpirun -np {num_proc} {exec}"
+
+Using MPI in Training
+~~~~~~~~~~~~~~~~~~~~~
+
+To enable MPI parallelization, pass the ``num_processes`` parameter to the
+``train()`` method:
+
+.. code-block:: python
+
+    from aenet.mlip import ANNPotential, TrainingConfig
+
+    # Define architecture
+    arch = {"Si": [(10, 'tanh'), (10, 'tanh')]}
+    potential = ANNPotential(arch)
+
+    # Standard training (sequential, no MPI)
+    config = TrainingConfig(iterations=1000)
+    potential.train('data.train', config=config)
+
+    # MPI training with 8 processes
+    config = TrainingConfig(iterations=1000)
+    potential.train('data.train', config=config, num_processes=8)
+
+    # MPI training with custom configuration
+    config = TrainingConfig(
+        iterations=1000,
+        method=Adam(mu=0.005, batchsize=32),
+        testpercent=10
+    )
+    potential.train('data.train', config=config, num_processes=16)
+
+The ``num_processes`` parameter specifies how many MPI processes to use.
+The actual command executed will be based on the configured MPI launcher.
+For example, with the default launcher and ``num_processes=8``, the
+command would be:
+
+.. code-block:: bash
+
+    mpirun -np 8 /path/to/train.x train.in
+

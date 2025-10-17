@@ -51,6 +51,24 @@ class Config(AenetToolABC):
             help="Replace existing config file.",
             action="store_true")
 
+        self.parser.add_argument(
+            "--enable-mpi",
+            help="Enable MPI parallelization for aenet executables.",
+            action="store_true")
+
+        self.parser.add_argument(
+            "--disable-mpi",
+            help="Disable MPI parallelization for aenet executables.",
+            action="store_true")
+
+        self.parser.add_argument(
+            "--set-mpi-launcher",
+            help="Set custom MPI launcher command template. "
+                 "Use {num_proc} for number of processes and {exec} "
+                 "for executable path. "
+                 "Example: 'mpirun -np {num_proc} {exec}'",
+            default=None)
+
     def _man(self):
         return """
         Read a setting from the configuration file and print to screen:
@@ -120,10 +138,33 @@ class Config(AenetToolABC):
             'trnset2ASCII.x', 'tools', aenet_dict['trnset2ascii_x_path'])
         return {'aenet': aenet_dict}
 
+    def configure_mpi(self, args):
+        """
+        Configure MPI settings for parallel execution.
+
+        """
+        aenet_dict = cfg.read('aenet')
+
+        if args.enable_mpi:
+            aenet_dict['mpi_enabled'] = True
+            print("MPI parallelization enabled")
+
+        if args.disable_mpi:
+            aenet_dict['mpi_enabled'] = False
+            print("MPI parallelization disabled")
+
+        if args.set_mpi_launcher:
+            aenet_dict['mpi_launcher'] = args.set_mpi_launcher
+            print(f"MPI launcher set to: {args.set_mpi_launcher}")
+
+        return {'aenet': aenet_dict}
+
     def run(self, args):
         config_dict = {}
         if args.set_aenet_path is not None:
             config_dict.update(self.set_aenet_paths(args.set_aenet_path))
+        if args.enable_mpi or args.disable_mpi or args.set_mpi_launcher:
+            config_dict.update(self.configure_mpi(args))
         if args.write is not None:
             config_dict = config_dict.update(dict(args.write))
         if config_dict:
@@ -137,7 +178,9 @@ class Config(AenetToolABC):
                 else:
                     print("'' is not currently set.")
         if (args.write is None and args.read is None
-                and args.set_aenet_path is None):
+                and args.set_aenet_path is None
+                and not args.enable_mpi and not args.disable_mpi
+                and args.set_mpi_launcher is None):
             config_file = cfg.config_file_path()
             if config_file is None:
                 print("No configuration file found. Using defaults.")
