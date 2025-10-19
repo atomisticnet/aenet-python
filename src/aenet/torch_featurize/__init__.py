@@ -6,5 +6,15 @@ construction, Chebyshev polynomial evaluation, and atomic featurization.
 """
 
 from .neighborlist import TorchNeighborList
+from .chebyshev import (
+    ChebyshevPolynomials,
+    RadialBasis,
+    AngularBasis
+)
 
-__all__ = ['TorchNeighborList']
+__all__ = [
+    'TorchNeighborList',
+    'ChebyshevPolynomials',
+    'RadialBasis',
+    'AngularBasis'
+]
