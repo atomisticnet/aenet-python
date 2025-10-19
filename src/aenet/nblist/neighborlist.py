@@ -87,16 +87,20 @@ class NeighborList(object):
             d = (float(a*b*c)/float(N))**(1./3.)
             self._nboxes = (int(round(a/d)), int(round(b/d)), int(round(c/d)))
 
-        self._nboxes_tot = np.product(self._nboxes)
+        self._nboxes_tot = np.prod(self._nboxes)
         self._box = np.empty(self._ncoo, dtype=int)
         self._first = np.empty(self._nboxes_tot, dtype=int)
         self._first[:] = FINAL
         self._next = np.zeros(self._ncoo, dtype=int)
 
         # determine `star' of periodic lattice cells within range
-        self._T_latt = (np.array([[0, 0, 0]] +
-                                 self.star_setup(self._avec,
-                                                 self._range, self._tol)))
+        if self._pbc:
+            self._T_latt = (np.array([[0, 0, 0]] +
+                                     self.star_setup(self._avec,
+                                                     self._range, self._tol)))
+        else:
+            # only the home cell
+            self._T_latt = np.array([[0, 0, 0]])
 
         # determine `star' of boxes that has to be checked for neighbors
         avec_box = self._avec.copy()

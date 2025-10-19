@@ -33,6 +33,12 @@ dependencies = [
     "tables>=3.6.1",
     "tqdm>=4.62.3",
     "matplotlib>=3.3.4",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+torch-gpu = [
+    "torch-cluster",
 ]
 
 [project.urls]
