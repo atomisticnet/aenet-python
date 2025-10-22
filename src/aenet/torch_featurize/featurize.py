@@ -5,14 +5,15 @@ This module implements the AUC (Artrith-Urban-Ceder) descriptor with the
 typespin architecture from aenet's Fortran code.
 """
 
+from typing import List, Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
-from typing import List, Dict, Optional, Tuple
-import numpy as np
 from torch_scatter import scatter_add
 
+from .chebyshev import AngularBasis, RadialBasis
 from .neighborlist import TorchNeighborList
-from .chebyshev import RadialBasis, AngularBasis
 
 
 class ChebyshevDescriptor(nn.Module):
@@ -27,15 +28,17 @@ class ChebyshevDescriptor(nn.Module):
     This exactly matches the behavior of aenet's Fortran implementation.
     """
 
-    def __init__(self,
-                 species: List[str],
-                 rad_order: int,
-                 rad_cutoff: float,
-                 ang_order: int,
-                 ang_cutoff: float,
-                 min_cutoff: float = 0.55,
-                 device: str = 'cpu',
-                 dtype: torch.dtype = torch.float64):
+    def __init__(
+        self,
+        species: List[str],
+        rad_order: int,
+        rad_cutoff: float,
+        ang_order: int,
+        ang_cutoff: float,
+        min_cutoff: float = 0.55,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
+    ):
         """
         Initialize Chebyshev descriptor.
 
@@ -62,7 +65,7 @@ class ChebyshevDescriptor(nn.Module):
         self.dtype = dtype
 
         # Multi-species flag
-        self.multi = (self.n_species > 1)
+        self.multi = self.n_species > 1
 
         # Create species to index mapping
         self.species_to_idx = {s: i for i, s in enumerate(species)}
@@ -72,14 +75,16 @@ class ChebyshevDescriptor(nn.Module):
 
         # Neighbor list
         max_cutoff = max(rad_cutoff, ang_cutoff)
-        self.nbl = TorchNeighborList(cutoff=max_cutoff, device=device, dtype=dtype)
+        self.nbl = TorchNeighborList(
+            cutoff=max_cutoff, device=device, dtype=dtype
+        )
 
         # SINGLE radial basis function (not per type pair!)
         self.rad_basis = RadialBasis(
             rad_order=rad_order,
             rad_cutoff=rad_cutoff,
             min_cutoff=min_cutoff,
-            dtype=dtype
+            dtype=dtype,
         )
 
         # SINGLE angular basis function (not per type triplet!)
@@ -87,7 +92,7 @@ class ChebyshevDescriptor(nn.Module):
             ang_order=ang_order,
             ang_cutoff=ang_cutoff,
             min_cutoff=min_cutoff,
-            dtype=dtype
+            dtype=dtype,
         )
 
         # Calculate number of features
@@ -105,10 +110,13 @@ class ChebyshevDescriptor(nn.Module):
         - 3 species: {-1, 0, 1}
         - 5 species: {-2, -1, 0, 1, 2}
 
-        Returns:
+        Returns
+        -------
             typespin: (n_species,) tensor of typespin values
         """
-        typespin = torch.zeros(self.n_species, dtype=self.dtype, device=self.device)
+        typespin = torch.zeros(
+            self.n_species, dtype=self.dtype, device=self.device
+        )
 
         # Use int() to truncate towards zero like Fortran, not floor division
         s = int(-self.n_species / 2)
@@ -133,7 +141,8 @@ class ChebyshevDescriptor(nn.Module):
             - Radial: (rad_order + 1)
             - Angular: (ang_order + 1)
 
-        Returns:
+        Returns
+        -------
             Number of features (same for all species)
         """
         n_rad = self.rad_order + 1
@@ -152,12 +161,13 @@ class ChebyshevDescriptor(nn.Module):
         """Get number of features (same for all species)."""
         return self.n_features
 
-    def compute_radial_features(self,
-                               positions: torch.Tensor,
-                               species_indices: torch.Tensor,
-                               cell: Optional[torch.Tensor] = None,
-                               pbc: Optional[torch.Tensor] = None
-                               ) -> torch.Tensor:
+    def compute_radial_features(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
         Compute radial features using typespin architecture.
 
@@ -173,31 +183,36 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) lattice vectors (None for isolated systems)
             pbc: (3,) periodic boundary conditions
 
-        Returns:
+        Returns
+        -------
             radial_features: (N, n_rad_features) tensor
         """
         n_atoms = len(positions)
         n_rad = self.rad_order + 1
 
         # Get all neighbors within radial cutoff
-        neighbor_data = self.nbl.get_neighbors(positions, cell, pbc)
-        edge_index = neighbor_data['edge_index']
-        distances = neighbor_data['distances']
+        # Positions are Cartesian, so use fractional=False for PBC
+        neighbor_data = self.nbl.get_neighbors(
+            positions, cell, pbc, fractional=False
+        )
+        edge_index = neighbor_data["edge_index"]
+        distances = neighbor_data["distances"]
 
         # Filter by radial cutoff
-        mask = ((distances <= self.rad_cutoff) &
-                (distances > self.min_cutoff))
+        mask = (distances <= self.rad_cutoff) & (distances > self.min_cutoff)
         edge_index_rad = edge_index[:, mask]
         distances_rad = distances[mask]
 
         if len(distances_rad) == 0:
             # Return zeros if no neighbors
             if self.multi:
-                return torch.zeros(n_atoms, 2 * n_rad,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, 2 * n_rad, dtype=self.dtype, device=self.device
+                )
             else:
-                return torch.zeros(n_atoms, n_rad,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, n_rad, dtype=self.dtype, device=self.device
+                )
 
         # Compute radial basis for all pairs
         G_rad = self.rad_basis(distances_rad)  # (n_pairs, n_rad)
@@ -227,18 +242,19 @@ class ChebyshevDescriptor(nn.Module):
         )
 
         # Concatenate unweighted and weighted features
-        rad_features = torch.cat([
-            rad_features_unweighted, rad_features_weighted
-        ], dim=1)
+        rad_features = torch.cat(
+            [rad_features_unweighted, rad_features_weighted], dim=1
+        )
 
         return rad_features
 
-    def compute_angular_features(self,
-                                positions: torch.Tensor,
-                                species_indices: torch.Tensor,
-                                cell: Optional[torch.Tensor] = None,
-                                pbc: Optional[torch.Tensor] = None
-                                ) -> torch.Tensor:
+    def compute_angular_features(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
         Compute angular features using typespin architecture.
 
@@ -255,41 +271,46 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) lattice vectors
             pbc: (3,) periodic boundary conditions
 
-        Returns:
+        Returns
+        -------
             angular_features: (N, n_ang_features) tensor
         """
         n_atoms = len(positions)
         n_ang = self.ang_order + 1
 
         # Get all neighbors within angular cutoff
-        neighbor_data = self.nbl.get_neighbors(positions, cell, pbc)
-        edge_index = neighbor_data['edge_index']
-        distances = neighbor_data['distances']
+        # Positions are Cartesian, so use fractional=False for PBC
+        neighbor_data = self.nbl.get_neighbors(
+            positions, cell, pbc, fractional=False
+        )
+        edge_index = neighbor_data["edge_index"]
+        distances = neighbor_data["distances"]
 
         # Filter by angular cutoff
-        mask = ((distances <= self.ang_cutoff) &
-                (distances > self.min_cutoff))
+        mask = (distances <= self.ang_cutoff) & (distances > self.min_cutoff)
         edge_index_ang = edge_index[:, mask]
         distances_ang = distances[mask]
 
         if len(distances_ang) < 2:
             # Return zeros if insufficient neighbors
             if self.multi:
-                return torch.zeros(n_atoms, 2 * n_ang,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, 2 * n_ang, dtype=self.dtype, device=self.device
+                )
             else:
-                return torch.zeros(n_atoms, n_ang,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, n_ang, dtype=self.dtype, device=self.device
+                )
 
         # Compute displacement vectors
         i_indices = edge_index_ang[0]
         j_indices = edge_index_ang[1]
 
         if cell is not None:
-            offsets = neighbor_data['offsets'][mask]
-            r_ij = ((positions[j_indices] +
-                     offsets.to(self.dtype) @ cell) -
-                    positions[i_indices])
+            offsets = neighbor_data["offsets"][mask]
+            r_ij = (
+                positions[j_indices] + offsets.to(self.dtype) @ cell
+            ) - positions[i_indices]
         else:
             r_ij = positions[j_indices] - positions[i_indices]
 
@@ -323,22 +344,24 @@ class ChebyshevDescriptor(nn.Module):
         if len(triplet_centers) == 0:
             # No valid triplets
             if self.multi:
-                return torch.zeros(n_atoms, 2 * n_ang,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, 2 * n_ang, dtype=self.dtype, device=self.device
+                )
             else:
-                return torch.zeros(n_atoms, n_ang,
-                                   dtype=self.dtype, device=self.device)
+                return torch.zeros(
+                    n_atoms, n_ang, dtype=self.dtype, device=self.device
+                )
 
         # Convert to tensors
-        triplet_centers = torch.tensor(triplet_centers,
-                                       dtype=torch.long,
-                                       device=self.device)
-        triplet_j_idx = torch.tensor(triplet_j_idx,
-                                     dtype=torch.long,
-                                     device=self.device)
-        triplet_k_idx = torch.tensor(triplet_k_idx,
-                                     dtype=torch.long,
-                                     device=self.device)
+        triplet_centers = torch.tensor(
+            triplet_centers, dtype=torch.long, device=self.device
+        )
+        triplet_j_idx = torch.tensor(
+            triplet_j_idx, dtype=torch.long, device=self.device
+        )
+        triplet_k_idx = torch.tensor(
+            triplet_k_idx, dtype=torch.long, device=self.device
+        )
 
         # Get distances and vectors for triplets
         d_ij = distances_ang[triplet_j_idx]
@@ -377,18 +400,19 @@ class ChebyshevDescriptor(nn.Module):
         )
 
         # Concatenate unweighted and weighted features
-        ang_features = torch.cat([
-            ang_features_unweighted, ang_features_weighted
-        ], dim=1)
+        ang_features = torch.cat(
+            [ang_features_unweighted, ang_features_weighted], dim=1
+        )
 
         return ang_features
 
-    def forward(self,
-               positions: torch.Tensor,
-               species: List[str],
-               cell: Optional[torch.Tensor] = None,
-               pbc: Optional[torch.Tensor] = None
-               ) -> torch.Tensor:
+    def forward(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
         Featurize atomic structure.
 
@@ -398,13 +422,15 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) lattice vectors (None for isolated)
             pbc: (3,) periodic boundary conditions
 
-        Returns:
+        Returns
+        -------
             features: (N, n_features) feature matrix
         """
         # Convert species to indices
         species_indices = torch.tensor(
             [self.species_to_idx[s] for s in species],
-            dtype=torch.long, device=self.device
+            dtype=torch.long,
+            device=self.device,
         )
 
         # Move inputs to device
@@ -414,11 +440,13 @@ class ChebyshevDescriptor(nn.Module):
 
         # Compute radial features
         rad_features = self.compute_radial_features(
-            positions, species_indices, cell, pbc)
+            positions, species_indices, cell, pbc
+        )
 
         # Compute angular features
         ang_features = self.compute_angular_features(
-            positions, species_indices, cell, pbc)
+            positions, species_indices, cell, pbc
+        )
 
         # Concatenate in Fortran order: [radial_unweighted, angular_unweighted,
         #                                 radial_weighted, angular_weighted]
@@ -426,24 +454,28 @@ class ChebyshevDescriptor(nn.Module):
         if self.multi:
             n_rad = self.rad_order + 1
             n_ang = self.ang_order + 1
-            features = torch.cat([
-                rad_features[:, :n_rad],      # radial unweighted
-                ang_features[:, :n_ang],      # angular unweighted
-                rad_features[:, n_rad:],      # radial weighted
-                ang_features[:, n_ang:]       # angular weighted
-            ], dim=1)
+            features = torch.cat(
+                [
+                    rad_features[:, :n_rad],  # radial unweighted
+                    ang_features[:, :n_ang],  # angular unweighted
+                    rad_features[:, n_rad:],  # radial weighted
+                    ang_features[:, n_ang:],  # angular weighted
+                ],
+                dim=1,
+            )
         else:
             # Single species: just concatenate radial and angular
             features = torch.cat([rad_features, ang_features], dim=1)
 
         return features
 
-    def compute_feature_gradients(self,
-                                  positions: torch.Tensor,
-                                  species: List[str],
-                                  cell: Optional[torch.Tensor] = None,
-                                  pbc: Optional[torch.Tensor] = None
-                                  ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_feature_gradients(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute features and their gradients w.r.t. positions.
 
@@ -455,7 +487,8 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) lattice vectors
             pbc: (3,) periodic boundary conditions
 
-        Returns:
+        Returns
+        -------
             features: (N, F) feature tensor
             gradients: (N, F, N, 3) gradient tensor where
                       gradients[i, f, j, k] = ∂feature[i,f]/∂position[j,k]
@@ -467,8 +500,9 @@ class ChebyshevDescriptor(nn.Module):
         features = self.forward(positions_grad, species, cell, pbc)
 
         N, F = features.shape
-        gradients = torch.zeros(N, F, N, 3,
-                               dtype=self.dtype, device=self.device)
+        gradients = torch.zeros(
+            N, F, N, 3, dtype=self.dtype, device=self.device
+        )
 
         # Compute gradient for each feature of each atom
         for i in range(N):
@@ -479,23 +513,25 @@ class ChebyshevDescriptor(nn.Module):
 
                 # Compute gradient
                 grad = torch.autograd.grad(
-                    features, positions_grad,
+                    features,
+                    positions_grad,
                     grad_outputs=grad_out,
                     retain_graph=True,
-                    create_graph=False
+                    create_graph=False,
                 )[0]
 
                 gradients[i, f] = grad
 
         return features.detach(), gradients
 
-    def compute_forces_from_energy(self,
-                                   positions: torch.Tensor,
-                                   species: List[str],
-                                   energy_model: nn.Module,
-                                   cell: Optional[torch.Tensor] = None,
-                                   pbc: Optional[torch.Tensor] = None
-                                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_forces_from_energy(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        energy_model: nn.Module,
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute atomic forces from an energy model.
 
@@ -509,7 +545,8 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) lattice vectors
             pbc: (3,) periodic boundary conditions
 
-        Returns:
+        Returns
+        -------
             energy: Scalar total energy
             forces: (N, 3) force on each atom
         """
@@ -524,18 +561,20 @@ class ChebyshevDescriptor(nn.Module):
 
         # Compute forces via autograd: F = -∂E/∂r
         forces = -torch.autograd.grad(
-            energy, positions_grad,
-            create_graph=True  # Enable higher-order derivatives
+            energy,
+            positions_grad,
+            create_graph=True,  # Enable higher-order derivatives
         )[0]
 
         return energy, forces
 
-    def featurize_structure(self,
-                           positions: np.ndarray,
-                           species: List[str],
-                           cell: Optional[np.ndarray] = None,
-                           pbc: Optional[np.ndarray] = None
-                           ) -> np.ndarray:
+    def featurize_structure(
+        self,
+        positions: np.ndarray,
+        species: List[str],
+        cell: Optional[np.ndarray] = None,
+        pbc: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """
         Numpy interface for featurization.
 
@@ -545,12 +584,15 @@ class ChebyshevDescriptor(nn.Module):
             cell: (3, 3) numpy array (optional)
             pbc: (3,) boolean numpy array (optional)
 
-        Returns:
+        Returns
+        -------
             features: (N, n_features) numpy array
         """
         # Convert to torch
         pos_torch = torch.from_numpy(positions).to(self.dtype)
-        cell_torch = torch.from_numpy(cell).to(self.dtype) if cell is not None else None
+        cell_torch = (
+            torch.from_numpy(cell).to(self.dtype) if cell is not None else None
+        )
         pbc_torch = torch.from_numpy(pbc) if pbc is not None else None
 
         # Featurize
@@ -578,12 +620,13 @@ class BatchedFeaturizer(nn.Module):
         super().__init__()
         self.featurizer = featurizer
 
-    def forward(self,
-               batch_positions: List[torch.Tensor],
-               batch_species: List[List[str]],
-               batch_cells: Optional[List[torch.Tensor]] = None,
-               batch_pbc: Optional[List[torch.Tensor]] = None
-               ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        batch_positions: List[torch.Tensor],
+        batch_species: List[List[str]],
+        batch_cells: Optional[List[torch.Tensor]] = None,
+        batch_pbc: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Featurize batch of structures.
 
@@ -593,14 +636,17 @@ class BatchedFeaturizer(nn.Module):
             batch_cells: List of (3, 3) cell tensors
             batch_pbc: List of (3,) pbc tensors
 
-        Returns:
+        Returns
+        -------
             features: (total_atoms, n_features) concatenated features
             batch_indices: (total_atoms,) batch index for each atom
         """
         all_features = []
         all_batch_indices = []
 
-        for batch_idx, (pos, species) in enumerate(zip(batch_positions, batch_species)):
+        for batch_idx, (pos, species) in enumerate(
+            zip(batch_positions, batch_species)
+        ):
             cell = batch_cells[batch_idx] if batch_cells else None
             pbc = batch_pbc[batch_idx] if batch_pbc else None
 

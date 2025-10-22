@@ -7,6 +7,10 @@ Structure featurization
    ``trnset2ASCII.x`` tools.  Make sure to install ænet and configure
    the paths as described in :doc:`installation`.
 
+   **Alternative**: For a pure Python/PyTorch implementation that does not
+   require Fortran, see :doc:`torch_featurization`. The PyTorch implementation
+   provides identical results with GPU acceleration support.
+
 ``aenet-python`` can be used to featurize atomic environments with the
 expansion method by Artrith *et al.* [1,2].  Local atomic environment
 features can, furthermore, be combined to atomic structure features with

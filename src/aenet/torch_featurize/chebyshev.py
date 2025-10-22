@@ -1,17 +1,19 @@
 """
-Vectorized Chebyshev Polynomial Evaluation for PyTorch
+Vectorized Chebyshev Polynomial Evaluation for PyTorch.
 
 This module implements Chebyshev polynomial evaluation using the explicit
 cosine form T_n(x) = cos(n * arccos(x)) instead of recurrence relations,
 enabling efficient vectorization and GPU acceleration.
 
-References:
+References
+----------
     N. Artrith, A. Urban, and G. Ceder, PRB 96 (2017) 014112
 """
 
+from typing import Tuple
+
 import torch
 import torch.nn as nn
-from typing import Tuple
 
 
 class ChebyshevPolynomials(nn.Module):
@@ -44,7 +46,7 @@ class ChebyshevPolynomials(nn.Module):
         max_order: int,
         r_min: float,
         r_max: float,
-        dtype: torch.dtype = torch.float64
+        dtype: torch.dtype = torch.float64,
     ):
         super().__init__()
         self.max_order = max_order
@@ -54,7 +56,7 @@ class ChebyshevPolynomials(nn.Module):
 
         # Register order indices as buffer (for automatic device transfer)
         orders = torch.arange(max_order + 1, dtype=dtype)
-        self.register_buffer('orders', orders)
+        self.register_buffer("orders", orders)
 
     def rescale_distances(self, r: torch.Tensor) -> torch.Tensor:
         """
@@ -110,7 +112,7 @@ class ChebyshevPolynomials(nn.Module):
         fc = torch.where(
             r < Rc,
             0.5 * (torch.cos(torch.pi * r / Rc) + 1.0),
-            torch.zeros_like(r)
+            torch.zeros_like(r),
         )
         return fc
 
@@ -136,7 +138,7 @@ class ChebyshevPolynomials(nn.Module):
         dfc = torch.where(
             r < Rc,
             -0.5 * torch.pi / Rc * torch.sin(torch.pi * r / Rc),
-            torch.zeros_like(r)
+            torch.zeros_like(r),
         )
         return dfc
 
@@ -224,12 +226,11 @@ class ChebyshevPolynomials(nn.Module):
         # Compute U polynomials for all orders
         # U_n corresponds to order n, so U_{n-1} is at index n-1
         U_orders = torch.arange(
-            self.max_order + 1,
-            dtype=self.dtype,
-            device=r.device
+            self.max_order + 1, dtype=self.dtype, device=r.device
         )
-        U = torch.sin((U_orders + 1) * arccos_x.unsqueeze(-1)
-                      ) / sqrt_term.unsqueeze(-1)
+        U = torch.sin(
+            (U_orders + 1) * arccos_x.unsqueeze(-1)
+        ) / sqrt_term.unsqueeze(-1)
 
         # dT_n/dx = n * U_{n-1}
         # For n=0: derivative is 0
@@ -274,7 +275,7 @@ class RadialBasis(nn.Module):
         rad_order: int,
         rad_cutoff: float,
         min_cutoff: float = 0.55,
-        dtype: torch.dtype = torch.float64
+        dtype: torch.dtype = torch.float64,
     ):
         super().__init__()
 
@@ -284,7 +285,7 @@ class RadialBasis(nn.Module):
             max_order=rad_order,
             r_min=0.0,  # Always 0.0 for radial basis
             r_max=rad_cutoff,
-            dtype=dtype
+            dtype=dtype,
         )
         self.rad_cutoff = rad_cutoff
         self.rad_order = rad_order
@@ -344,10 +345,7 @@ class RadialBasis(nn.Module):
 
         # Product rule: d(T*fc)/dr = dT/dr * fc + T * dfc/dr
         G_rad = T * fc.unsqueeze(-1)
-        dG_rad_dr = (
-            dT_dr * fc.unsqueeze(-1) +
-            T * dfc_dr.unsqueeze(-1)
-        )
+        dG_rad_dr = dT_dr * fc.unsqueeze(-1) + T * dfc_dr.unsqueeze(-1)
 
         return G_rad, dG_rad_dr
 
@@ -382,25 +380,19 @@ class AngularBasis(nn.Module):
         ang_order: int,
         ang_cutoff: float,
         min_cutoff: float = 0.55,
-        dtype: torch.dtype = torch.float64
+        dtype: torch.dtype = torch.float64,
     ):
         super().__init__()
 
         # For cos(θ), already in [-1, 1], so no rescaling needed
         self.cheb = ChebyshevPolynomials(
-            max_order=ang_order,
-            r_min=-1.0,
-            r_max=1.0,
-            dtype=dtype
+            max_order=ang_order, r_min=-1.0, r_max=1.0, dtype=dtype
         )
         self.ang_cutoff = ang_cutoff
         self.ang_order = ang_order
 
     def forward(
-        self,
-        r_ij: torch.Tensor,
-        r_ik: torch.Tensor,
-        cos_theta: torch.Tensor
+        self, r_ij: torch.Tensor, r_ik: torch.Tensor, cos_theta: torch.Tensor
     ) -> torch.Tensor:
         """
         Evaluate angular symmetry functions.

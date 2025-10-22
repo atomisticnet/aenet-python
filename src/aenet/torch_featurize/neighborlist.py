@@ -8,12 +8,14 @@ Supports:
 - Double precision
 """
 
-import torch
-from typing import Optional, Tuple, Dict, List
 import warnings
+from typing import Dict, List, Optional, Tuple
+
+import torch
 
 try:
     from torch_cluster import radius_graph
+
     TORCH_CLUSTER_AVAILABLE = True
 except ImportError:
     TORCH_CLUSTER_AVAILABLE = False
@@ -47,8 +49,8 @@ class TorchNeighborList:
         cutoff: float,
         atom_types: Optional[torch.Tensor] = None,
         cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
-        device: str = 'cpu',
-        dtype: torch.dtype = torch.float64
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
     ):
         """
         Initialize neighbor list.
@@ -61,7 +63,8 @@ class TorchNeighborList:
             device: 'cpu' or 'cuda'
             dtype: torch.float32 or torch.float64 (recommended: float64)
 
-        Raises:
+        Raises
+        ------
             ValueError: If cutoff_dict contains types not in atom_types
             ValueError: If cutoff_dict values exceed maximum cutoff
         """
@@ -89,20 +92,27 @@ class TorchNeighborList:
         self,
         positions: torch.Tensor,
         cell: Optional[torch.Tensor] = None,
-        pbc: Optional[torch.Tensor] = None
+        pbc: Optional[torch.Tensor] = None,
+        fractional: bool = True,
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Unified interface for neighbor finding.
 
         Args:
             positions: (N, 3) atom positions
-                - For isolated systems: Cartesian coordinates in Angstroms
-                - For periodic systems: Fractional coordinates [0, 1)
+                - For isolated systems: Always Cartesian coordinates
+                    in Angstroms
+                - For periodic systems: Fractional [0,1) or Cartesian,
+                    see fractional arg
             cell: (3, 3) lattice vectors as rows (None for isolated systems)
             pbc: (3,) boolean tensor for PBC in each direction
                  (default: [True, True, True] if cell is provided)
+            fractional: For periodic systems only. If True, positions
+              are fractional coordinates [0, 1). If False, positions are
+              Cartesian (Angstroms).
 
-        Returns:
+        Returns
+        -------
             Dictionary containing:
             - 'edge_index': (2, num_edges) neighbor pairs [source, target]
             - 'distances': (num_edges,) pairwise distances in Angstroms
@@ -114,30 +124,31 @@ class TorchNeighborList:
             # Isolated system
             edge_index, distances = self.get_neighbors_isolated(positions)
             num_neighbors = self._count_neighbors(
-                edge_index, positions.shape[0])
+                edge_index, positions.shape[0]
+            )
             return {
-                'edge_index': edge_index,
-                'distances': distances,
-                'offsets': None,
-                'num_neighbors': num_neighbors
+                "edge_index": edge_index,
+                "distances": distances,
+                "offsets": None,
+                "num_neighbors": num_neighbors,
             }
         else:
             # Periodic system
             edge_index, distances, offsets = self.get_neighbors_pbc(
-                positions, cell, pbc
+                positions, cell, pbc, fractional
             )
             num_neighbors = self._count_neighbors(
-                edge_index, positions.shape[0])
+                edge_index, positions.shape[0]
+            )
             return {
-                'edge_index': edge_index,
-                'distances': distances,
-                'offsets': offsets,
-                'num_neighbors': num_neighbors
+                "edge_index": edge_index,
+                "distances": distances,
+                "offsets": offsets,
+                "num_neighbors": num_neighbors,
             }
 
     def get_neighbors_isolated(
-        self,
-        positions: torch.Tensor
+        self, positions: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Find neighbors for isolated system (no PBC).
@@ -145,7 +156,8 @@ class TorchNeighborList:
         Args:
             positions: (N, 3) atom positions in Angstroms (Cartesian)
 
-        Returns:
+        Returns
+        -------
             edge_index: (2, num_edges) neighbor pairs [source, target]
             distances: (num_edges,) pairwise distances in Angstroms
         """
@@ -154,7 +166,8 @@ class TorchNeighborList:
         # Handle single atom case
         if positions.shape[0] <= 1:
             edge_index = torch.empty(
-                (2, 0), dtype=torch.long, device=self.device)
+                (2, 0), dtype=torch.long, device=self.device
+            )
             distances = torch.empty(0, dtype=self.dtype, device=self.device)
             return edge_index, distances
 
@@ -163,8 +176,8 @@ class TorchNeighborList:
             positions,
             r=self.cutoff,
             max_num_neighbors=256,
-            flow='source_to_target',
-            loop=False  # Don't include self-loops
+            flow="source_to_target",
+            loop=False,  # Don't include self-loops
         )
 
         # Compute distances
@@ -181,33 +194,41 @@ class TorchNeighborList:
         self,
         positions: torch.Tensor,
         cell: torch.Tensor,
-        pbc: Optional[torch.Tensor] = None
+        pbc: Optional[torch.Tensor] = None,
+        fractional: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Find neighbors with periodic boundary conditions.
 
         Args:
-            positions: (N, 3) Cartesian coordinates in Angstroms
+            positions: (N, 3) atom positions
             cell: (3, 3) lattice vectors as rows
             pbc: (3,) boolean tensor for PBC in each direction
                  (default: [True, True, True])
+            fractional: If True, positions are fractional [0,1).
+                       If False, positions are Cartesian (Angstroms).
 
-        Returns:
+        Returns
+        -------
             edge_index: (2, num_edges) neighbor pairs [source, target]
             distances: (num_edges,) pairwise distances in Angstroms
             offsets: (num_edges, 3) cell offset vectors for each edge
         """
         if pbc is None:
             pbc = torch.tensor(
-                [True, True, True], dtype=torch.bool, device=self.device)
+                [True, True, True], dtype=torch.bool, device=self.device
+            )
         else:
             pbc = pbc.to(self.device)
 
         positions = positions.to(self.device).to(self.dtype)
         cell = cell.to(self.device).to(self.dtype)
 
-        # Positions are already in Cartesian coordinates
-        cart_positions = positions
+        # Convert to Cartesian if needed
+        if fractional:
+            cart_positions = positions @ cell
+        else:
+            cart_positions = positions
 
         # Determine search range in each direction
         search_cells = self._determine_search_cells(cell, pbc)
@@ -222,8 +243,8 @@ class TorchNeighborList:
             all_positions,
             r=self.cutoff,
             max_num_neighbors=256,
-            flow='source_to_target',
-            loop=False
+            flow="source_to_target",
+            loop=False,
         )
 
         # Filter and compute distances
@@ -234,9 +255,7 @@ class TorchNeighborList:
         return edge_index, distances, cell_offsets
 
     def _determine_search_cells(
-        self,
-        cell: torch.Tensor,
-        pbc: torch.Tensor
+        self, cell: torch.Tensor, pbc: torch.Tensor
     ) -> torch.Tensor:
         """
         Determine how many periodic images to check in each direction.
@@ -245,7 +264,8 @@ class TorchNeighborList:
             cell: (3, 3) lattice vectors as rows
             pbc: (3,) boolean tensor for PBC
 
-        Returns:
+        Returns
+        -------
             search_cells: (3,) integer number of cells to search in each
                           direction
         """
@@ -258,8 +278,9 @@ class TorchNeighborList:
 
         # Number of cells needed to cover cutoff
         search_cells = torch.ceil(self.cutoff / face_distances).long()
-        search_cells = torch.where(pbc, search_cells, torch.zeros_like(
-            search_cells))
+        search_cells = torch.where(
+            pbc, search_cells, torch.zeros_like(search_cells)
+        )
 
         return search_cells
 
@@ -268,7 +289,7 @@ class TorchNeighborList:
         positions: torch.Tensor,
         cell: torch.Tensor,
         search_cells: torch.Tensor,
-        pbc: torch.Tensor
+        pbc: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Create periodic images of atoms.
@@ -279,7 +300,8 @@ class TorchNeighborList:
             search_cells: (3,) number of cells to search in each direction
             pbc: (3,) boolean for PBC
 
-        Returns:
+        Returns
+        -------
             all_positions: (num_images * N, 3) Cartesian positions including
                periodic images
             offsets: (num_images * N, 3) cell offset for each position
@@ -290,29 +312,36 @@ class TorchNeighborList:
         ranges = []
         for s, p in zip(search_cells, pbc):
             if p:
-                ranges.append(torch.arange(
-                    -s, s + 1, device=self.device, dtype=torch.long))
+                ranges.append(
+                    torch.arange(
+                        -s, s + 1, device=self.device, dtype=torch.long
+                    )
+                )
             else:
-                ranges.append(torch.tensor(
-                    [0], device=self.device, dtype=torch.long))
+                ranges.append(
+                    torch.tensor([0], device=self.device, dtype=torch.long)
+                )
 
         # Create meshgrid of offsets
         offset_grid = torch.stack(
-            torch.meshgrid(*ranges, indexing='ij'), dim=-1
+            torch.meshgrid(*ranges, indexing="ij"), dim=-1
         ).reshape(-1, 3)
 
         # Replicate positions for each offset
         replicated_positions = positions.unsqueeze(0).expand(
-            offset_grid.shape[0], -1, -1)
+            offset_grid.shape[0], -1, -1
+        )
 
         # Compute offset vectors in Cartesian coordinates
-        offset_vectors = (offset_grid.to(self.dtype).unsqueeze(1) @ cell
-                          ).expand(-1, n_atoms, -1)
+        offset_vectors = (
+            offset_grid.to(self.dtype).unsqueeze(1) @ cell
+        ).expand(-1, n_atoms, -1)
 
         # Apply offsets
         all_positions = (replicated_positions + offset_vectors).reshape(-1, 3)
-        all_offsets = offset_grid.unsqueeze(1).expand(-1, n_atoms, -1
-                                                      ).reshape(-1, 3)
+        all_offsets = (
+            offset_grid.unsqueeze(1).expand(-1, n_atoms, -1).reshape(-1, 3)
+        )
 
         return all_positions, all_offsets
 
@@ -321,7 +350,7 @@ class TorchNeighborList:
         edge_index: torch.Tensor,
         all_positions: torch.Tensor,
         all_offsets: torch.Tensor,
-        n_atoms: int
+        n_atoms: int,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Process edges from periodic images and compute distances.
@@ -332,7 +361,8 @@ class TorchNeighborList:
             all_offsets: (num_images * N, 3) cell offsets for each position
             n_atoms: number of atoms in unit cell
 
-        Returns:
+        Returns
+        -------
             edge_index: (2, num_edges) filtered edge indices (in unit cell)
             distances: (num_edges,) distances
             cell_offsets: (num_edges, 3) cell offsets for each edge
@@ -341,7 +371,8 @@ class TorchNeighborList:
             # No edges found
             distances = torch.empty(0, dtype=self.dtype, device=self.device)
             cell_offsets = torch.empty(
-                (0, 3), dtype=torch.long, device=self.device)
+                (0, 3), dtype=torch.long, device=self.device
+            )
             return edge_index, distances, cell_offsets
 
         row, col = edge_index
@@ -365,19 +396,22 @@ class TorchNeighborList:
 
         # Also remove self-interactions in the central cell
         self_interaction_mask = (unit_cell_row == unit_cell_col) & (
-            torch.all(cell_offsets == 0, dim=1))
+            torch.all(cell_offsets == 0, dim=1)
+        )
         valid_mask = central_cell_mask & (~self_interaction_mask)
 
         # Apply filters
         edge_index = torch.stack(
-            [unit_cell_row[valid_mask], unit_cell_col[valid_mask]])
+            [unit_cell_row[valid_mask], unit_cell_col[valid_mask]]
+        )
         distances = distances[valid_mask]
         cell_offsets = cell_offsets[valid_mask]
 
         return edge_index, distances, cell_offsets
 
-    def _count_neighbors(self, edge_index: torch.Tensor, n_atoms: int
-                         ) -> torch.Tensor:
+    def _count_neighbors(
+        self, edge_index: torch.Tensor, n_atoms: int
+    ) -> torch.Tensor:
         """
         Count number of neighbors for each atom.
 
@@ -385,14 +419,16 @@ class TorchNeighborList:
             edge_index: (2, num_edges) edge indices
             n_atoms: total number of atoms
 
-        Returns:
+        Returns
+        -------
             num_neighbors: (n_atoms,) number of neighbors per atom
         """
         if edge_index.shape[1] == 0:
             return torch.zeros(n_atoms, dtype=torch.long, device=self.device)
 
         num_neighbors = torch.zeros(
-            n_atoms, dtype=torch.long, device=self.device)
+            n_atoms, dtype=torch.long, device=self.device
+        )
         unique, counts = torch.unique(edge_index[0], return_counts=True)
         num_neighbors[unique] = counts
 
@@ -401,7 +437,7 @@ class TorchNeighborList:
     def _validate_cutoff_dict(
         self,
         cutoff_dict: Dict[Tuple[int, int], float],
-        atom_types: torch.Tensor
+        atom_types: torch.Tensor,
     ) -> None:
         """
         Validate that cutoff_dict is consistent with atom_types.
@@ -410,7 +446,8 @@ class TorchNeighborList:
             cutoff_dict: Dictionary of pair cutoffs
             atom_types: Tensor of atom types
 
-        Raises:
+        Raises
+        ------
             ValueError: If cutoff_dict keys contain undefined types
             ValueError: If any cutoff exceeds self.cutoff
         """
@@ -443,7 +480,7 @@ class TorchNeighborList:
         cell: Optional[torch.Tensor] = None,
         pbc: Optional[torch.Tensor] = None,
         atom_types: Optional[torch.Tensor] = None,
-        cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None
+        cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Get neighbors of a specific atom.
@@ -456,7 +493,8 @@ class TorchNeighborList:
             atom_types: Override stored atom_types (optional)
             cutoff_dict: Override stored cutoff_dict (optional)
 
-        Returns:
+        Returns
+        -------
             Dictionary containing:
             - 'indices': (num_neighbors,) neighbor atom indices
             - 'distances': (num_neighbors,) distances to neighbors
@@ -469,8 +507,7 @@ class TorchNeighborList:
         """
         # Use stored values or overrides
         types = atom_types if atom_types is not None else self.atom_types
-        cutoffs = (cutoff_dict if cutoff_dict is not None
-                   else self.cutoff_dict)
+        cutoffs = cutoff_dict if cutoff_dict is not None else self.cutoff_dict
 
         # Validate if both are provided
         if cutoffs is not None and types is not None:
@@ -480,13 +517,14 @@ class TorchNeighborList:
         result = self._get_or_compute_neighbors(positions, cell, pbc)
 
         # Extract neighbors of specific atom
-        edge_index = result['edge_index']
+        edge_index = result["edge_index"]
         mask = edge_index[0] == atom_idx
 
         neighbor_indices = edge_index[1][mask]
-        distances = result['distances'][mask]
-        offsets = (result['offsets'][mask]
-                   if result['offsets'] is not None else None)
+        distances = result["distances"][mask]
+        offsets = (
+            result["offsets"][mask] if result["offsets"] is not None else None
+        )
 
         # Apply type-specific cutoff filtering if applicable
         if types is not None and cutoffs is not None:
@@ -499,9 +537,9 @@ class TorchNeighborList:
                 offsets = offsets[filter_mask]
 
         return {
-            'indices': neighbor_indices,
-            'distances': distances,
-            'offsets': offsets
+            "indices": neighbor_indices,
+            "distances": distances,
+            "offsets": offsets,
         }
 
     def get_neighbors_by_atom(
@@ -510,7 +548,7 @@ class TorchNeighborList:
         cell: Optional[torch.Tensor] = None,
         pbc: Optional[torch.Tensor] = None,
         atom_types: Optional[torch.Tensor] = None,
-        cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None
+        cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
     ) -> List[Dict[str, Optional[torch.Tensor]]]:
         """
         Get neighbors for all atoms in structured format.
@@ -522,7 +560,8 @@ class TorchNeighborList:
             atom_types: Override stored atom_types (optional)
             cutoff_dict: Override stored cutoff_dict (optional)
 
-        Returns:
+        Returns
+        -------
             List of length N_atoms, where each element is a dict:
             - 'indices': neighbor indices
             - 'distances': distances
@@ -545,7 +584,7 @@ class TorchNeighborList:
         neighbor_indices: torch.Tensor,
         distances: torch.Tensor,
         atom_types: torch.Tensor,
-        cutoff_dict: Dict[Tuple[int, int], float]
+        cutoff_dict: Dict[Tuple[int, int], float],
     ) -> torch.Tensor:
         """
         Filter neighbors based on type-dependent cutoffs.
@@ -557,12 +596,14 @@ class TorchNeighborList:
             atom_types: Atom types tensor
             cutoff_dict: Dictionary of pair cutoffs
 
-        Returns:
+        Returns
+        -------
             Boolean mask for neighbors within type-specific cutoffs
         """
         source_type = atom_types[source_idx].item()
-        mask = torch.zeros(len(neighbor_indices), dtype=torch.bool,
-                           device=self.device)
+        mask = torch.zeros(
+            len(neighbor_indices), dtype=torch.bool, device=self.device
+        )
 
         for i, (neigh_idx, dist) in enumerate(
             zip(neighbor_indices, distances)
@@ -579,7 +620,7 @@ class TorchNeighborList:
         self,
         positions: torch.Tensor,
         cell: Optional[torch.Tensor],
-        pbc: Optional[torch.Tensor]
+        pbc: Optional[torch.Tensor],
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Get cached neighbor list or compute new one.
@@ -589,7 +630,8 @@ class TorchNeighborList:
             cell: Lattice vectors
             pbc: PBC flags
 
-        Returns:
+        Returns
+        -------
             Neighbor list result dictionary
         """
         # Compute cache key
@@ -612,7 +654,7 @@ class TorchNeighborList:
         self,
         positions: torch.Tensor,
         cell: Optional[torch.Tensor],
-        pbc: Optional[torch.Tensor]
+        pbc: Optional[torch.Tensor],
     ) -> Tuple:
         """
         Compute cache key for positions/cell/pbc combination.
@@ -622,15 +664,18 @@ class TorchNeighborList:
             cell: Lattice vectors
             pbc: PBC flags
 
-        Returns:
+        Returns
+        -------
             Tuple that can be used as cache key
         """
         # Use hash of tensor data
         pos_hash = hash(positions.cpu().numpy().tobytes())
-        cell_hash = hash(cell.cpu().numpy().tobytes()
-                         ) if cell is not None else None
-        pbc_hash = hash(pbc.cpu().numpy().tobytes()
-                        ) if pbc is not None else None
+        cell_hash = (
+            hash(cell.cpu().numpy().tobytes()) if cell is not None else None
+        )
+        pbc_hash = (
+            hash(pbc.cpu().numpy().tobytes()) if pbc is not None else None
+        )
 
         return (pos_hash, cell_hash, pbc_hash)
 

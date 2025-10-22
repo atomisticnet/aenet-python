@@ -28,6 +28,30 @@ To use the featurization capabilities, the main ænet package needs to be instal
 
 where `[path-to-aenet]` is the path pointing to the aenet root directory.
 
+## PyTorch featurization
+
+`aenet-python` provides a pure Python/PyTorch implementation of the Chebyshev descriptor for atomic environments. This implementation offers GPU acceleration and gradient computation without requiring the Fortran-based `generate.x` tool.
+
+```python
+from aenet.torch_featurize import ChebyshevDescriptor
+
+descriptor = ChebyshevDescriptor(
+    species=['O', 'H'],
+    rad_order=10, rad_cutoff=4.0,
+    ang_order=3, ang_cutoff=1.5
+)
+
+features = descriptor.featurize_structure(positions, species)
+```
+
+Key features:
+- No Fortran dependency for featurization
+- GPU acceleration via PyTorch
+- Automatic differentiation for force calculations
+- Validated to match Fortran implementation (< 1e-14 error)
+
+See the [documentation](https://aenet-python.readthedocs.io/en/latest/usage/torch_featurization.html) and example notebooks for details.
+
 ## Structure conversion
 
 `aenet-python` can be used to interconvert between atomic structure formats.

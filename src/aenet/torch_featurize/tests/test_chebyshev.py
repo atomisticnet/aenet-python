@@ -6,10 +6,11 @@ Tests numerical accuracy, derivatives, and comparison with recurrence relation.
 
 import pytest
 import torch
+
 from aenet.torch_featurize.chebyshev import (
+    AngularBasis,
     ChebyshevPolynomials,
     RadialBasis,
-    AngularBasis
 )
 
 
@@ -45,9 +46,11 @@ class TestChebyshevPolynomials:
         x_above = cheb.rescale_distances(r_above)
 
         assert torch.allclose(
-            x_below, torch.tensor([-1.0], dtype=torch.float64))
+            x_below, torch.tensor([-1.0], dtype=torch.float64)
+        )
         assert torch.allclose(
-            x_above, torch.tensor([1.0], dtype=torch.float64))
+            x_above, torch.tensor([1.0], dtype=torch.float64)
+        )
 
     def test_known_chebyshev_values(self):
         """Test against known Chebyshev polynomial values."""
@@ -69,7 +72,8 @@ class TestChebyshevPolynomials:
 
         # T_0(0)=1, T_1(0)=0, T_2(0)=-1, T_3(0)=0, T_4(0)=1
         expected = torch.tensor(
-            [[1.0, 0.0, -1.0, 0.0, 1.0]], dtype=torch.float64)
+            [[1.0, 0.0, -1.0, 0.0, 1.0]], dtype=torch.float64
+        )
         assert torch.allclose(T, expected, atol=1e-10)
 
     def test_known_values_at_extrema(self):
@@ -88,7 +92,8 @@ class TestChebyshevPolynomials:
 
         # At x=-1: T_n(-1) = (-1)^n
         expected_neg = torch.tensor(
-            [[1.0, -1.0, 1.0, -1.0, 1.0, -1.0]], dtype=torch.float64)
+            [[1.0, -1.0, 1.0, -1.0, 1.0, -1.0]], dtype=torch.float64
+        )
         assert torch.allclose(T_neg, expected_neg, atol=1e-10)
 
     def test_recurrence_equivalence(self):
@@ -152,7 +157,8 @@ class TestChebyshevPolynomials:
         cheb = ChebyshevPolynomials(max_order=5, r_min=0.5, r_max=4.0)
 
         r = torch.tensor(
-            [1.5, 2.0, 3.0], dtype=torch.float64, requires_grad=True)
+            [1.5, 2.0, 3.0], dtype=torch.float64, requires_grad=True
+        )
 
         # Compute with autodiff
         T = cheb(r)
@@ -191,11 +197,13 @@ class TestChebyshevPolynomials:
 
         # At r=Rc/2: fc = 0.5 * (cos(π/2) + 1) = 0.5
         assert torch.allclose(
-            fc[1], torch.tensor(0.5, dtype=torch.float64), atol=1e-10)
+            fc[1], torch.tensor(0.5, dtype=torch.float64), atol=1e-10
+        )
 
         # At r=Rc: fc = 0.5 * (cos(π) + 1) = 0.0
         assert torch.allclose(
-            fc[2], torch.tensor(0.0, dtype=torch.float64), atol=1e-10)
+            fc[2], torch.tensor(0.0, dtype=torch.float64), atol=1e-10
+        )
 
         # At r>Rc: fc = 0.0
         assert torch.allclose(fc[3], torch.tensor(0.0, dtype=torch.float64))
@@ -213,7 +221,8 @@ class TestChebyshevPolynomials:
 
         # At r=Rc: dfc/dr = -0.5 * π/Rc * sin(π) = 0
         assert torch.allclose(
-            dfc[1], torch.tensor(0.0, dtype=torch.float64), atol=1e-10)
+            dfc[1], torch.tensor(0.0, dtype=torch.float64), atol=1e-10
+        )
 
         # At r>Rc: dfc/dr = 0
         assert torch.allclose(dfc[2], torch.tensor(0.0, dtype=torch.float64))
@@ -233,20 +242,22 @@ class TestChebyshevPolynomials:
 
         # Should be very close to 0
         assert torch.allclose(
-            fc_before, torch.zeros_like(fc_before), atol=1e-6)
+            fc_before, torch.zeros_like(fc_before), atol=1e-6
+        )
         assert torch.allclose(fc_after, torch.zeros_like(fc_after), atol=1e-10)
 
     @pytest.mark.skipif(
-            not torch.cuda.is_available(), reason="CUDA not available")
+        not torch.cuda.is_available(), reason="CUDA not available"
+    )
     def test_gpu_compatibility(self):
         """Test that module works on GPU."""
         cheb = ChebyshevPolynomials(max_order=5, r_min=0.5, r_max=4.0)
         cheb = cheb.cuda()
 
-        r = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64, device='cuda')
+        r = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64, device="cuda")
         T = cheb(r)
 
-        assert T.device.type == 'cuda'
+        assert T.device.type == "cuda"
         assert T.shape == (3, 6)
 
 
@@ -302,9 +313,7 @@ class TestRadialBasis:
 
     def test_min_cutoff(self):
         """Test minimum cutoff handling."""
-        rad_sf = RadialBasis(
-            rad_order=5, rad_cutoff=4.0, min_cutoff=0.8
-        )
+        rad_sf = RadialBasis(rad_order=5, rad_cutoff=4.0, min_cutoff=0.8)
 
         # Distance below min_cutoff should still be handled
         r_below = torch.tensor([0.5], dtype=torch.float64)
@@ -361,7 +370,8 @@ class TestAngularBasis:
         fc_val = ang_sf.cheb.cutoff_function(torch.tensor([1.0]), 2.0)[0]
         expected_0 = fc_val**2 * torch.ones(4, dtype=torch.float64)
         expected_180 = fc_val**2 * torch.tensor(
-            [1.0, -1.0, 1.0, -1.0], dtype=torch.float64)
+            [1.0, -1.0, 1.0, -1.0], dtype=torch.float64
+        )
 
         assert torch.allclose(G_ang[0], expected_0, atol=1e-10)
         assert torch.allclose(G_ang[1], expected_180, atol=1e-10)
@@ -404,7 +414,8 @@ class TestNumericalStability:
 
         # Values very close to ±1
         x = torch.tensor(
-            [-0.9999999, -0.999, 0.0, 0.999, 0.9999999], dtype=torch.float64)
+            [-0.9999999, -0.999, 0.0, 0.999, 0.9999999], dtype=torch.float64
+        )
 
         # Should not produce NaN or Inf
         T = cheb(x)
@@ -438,5 +449,5 @@ class TestNumericalStability:
         assert torch.all(torch.abs(T) <= 1.0 + 1e-10)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
