@@ -278,9 +278,11 @@ class RadialBasis(nn.Module):
     ):
         super().__init__()
 
+        # Chebyshev polynomials are evaluated on [0, Rc], not [min_cutoff, Rc]
+        # min_cutoff is only used for neighbor filtering, not polynomial domain
         self.cheb = ChebyshevPolynomials(
             max_order=rad_order,
-            r_min=min_cutoff,
+            r_min=0.0,  # Always 0.0 for radial basis
             r_max=rad_cutoff,
             dtype=dtype
         )

@@ -11,10 +11,16 @@ from .chebyshev import (
     RadialBasis,
     AngularBasis
 )
+from .featurize import (
+    ChebyshevDescriptor,
+    BatchedFeaturizer
+)
 
 __all__ = [
     'TorchNeighborList',
     'ChebyshevPolynomials',
     'RadialBasis',
-    'AngularBasis'
+    'AngularBasis',
+    'ChebyshevDescriptor',
+    'BatchedFeaturizer'
 ]

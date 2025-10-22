@@ -187,7 +187,7 @@ class TorchNeighborList:
         Find neighbors with periodic boundary conditions.
 
         Args:
-            positions: (N, 3) fractional coordinates [0, 1)
+            positions: (N, 3) Cartesian coordinates in Angstroms
             cell: (3, 3) lattice vectors as rows
             pbc: (3,) boolean tensor for PBC in each direction
                  (default: [True, True, True])
@@ -206,8 +206,8 @@ class TorchNeighborList:
         positions = positions.to(self.device).to(self.dtype)
         cell = cell.to(self.device).to(self.dtype)
 
-        # Convert fractional to Cartesian
-        cart_positions = positions @ cell
+        # Positions are already in Cartesian coordinates
+        cart_positions = positions
 
         # Determine search range in each direction
         search_cells = self._determine_search_cells(cell, pbc)
