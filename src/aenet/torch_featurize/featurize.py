@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from typing import List, Dict, Optional, Tuple
 import numpy as np
+from torch_scatter import scatter_add
 
 from .neighborlist import TorchNeighborList
 from .chebyshev import RadialBasis, AngularBasis
@@ -158,11 +159,13 @@ class ChebyshevDescriptor(nn.Module):
                                pbc: Optional[torch.Tensor] = None
                                ) -> torch.Tensor:
         """
-        Compute radial features for all atoms using typespin architecture.
+        Compute radial features using typespin architecture.
+
+        Uses scatter_add for efficient, gradient-preserving accumulation.
 
         For each atom i:
-            - Set 1 (unweighted): sum over all neighbors j of G_rad(d_ij)
-            - Set 2 (typespin): sum over all neighbors j of s_j * G_rad(d_ij)
+            - Set 1 (unweighted): sum over neighbors j of G_rad(d_ij)
+            - Set 2 (typespin): sum over neighbors j of s_j * G_rad(d_ij)
 
         Args:
             positions: (N, 3) atomic positions
@@ -176,26 +179,25 @@ class ChebyshevDescriptor(nn.Module):
         n_atoms = len(positions)
         n_rad = self.rad_order + 1
 
-        # Feature sets: [unweighted, typespin-weighted]
-        if self.multi:
-            rad_features = torch.zeros(n_atoms, 2 * n_rad,
-                                       dtype=self.dtype, device=self.device)
-        else:
-            rad_features = torch.zeros(n_atoms, n_rad,
-                                       dtype=self.dtype, device=self.device)
-
         # Get all neighbors within radial cutoff
         neighbor_data = self.nbl.get_neighbors(positions, cell, pbc)
         edge_index = neighbor_data['edge_index']
         distances = neighbor_data['distances']
 
         # Filter by radial cutoff
-        mask = (distances <= self.rad_cutoff) & (distances > self.min_cutoff)
+        mask = ((distances <= self.rad_cutoff) &
+                (distances > self.min_cutoff))
         edge_index_rad = edge_index[:, mask]
         distances_rad = distances[mask]
 
         if len(distances_rad) == 0:
-            return rad_features
+            # Return zeros if no neighbors
+            if self.multi:
+                return torch.zeros(n_atoms, 2 * n_rad,
+                                   dtype=self.dtype, device=self.device)
+            else:
+                return torch.zeros(n_atoms, n_rad,
+                                   dtype=self.dtype, device=self.device)
 
         # Compute radial basis for all pairs
         G_rad = self.rad_basis(distances_rad)  # (n_pairs, n_rad)
@@ -204,22 +206,30 @@ class ChebyshevDescriptor(nn.Module):
         center_indices = edge_index_rad[0]
         neighbor_indices = edge_index_rad[1]
 
-        # Unweighted features: sum over neighbors
-        for pair_idx in range(len(distances_rad)):
-            center_idx = center_indices[pair_idx].item()
-            rad_features[center_idx, :n_rad] += G_rad[pair_idx]
+        # Unweighted features: scatter_add over neighbors
+        rad_features_unweighted = scatter_add(
+            G_rad, center_indices, dim=0, dim_size=n_atoms
+        )
+
+        if not self.multi:
+            return rad_features_unweighted
 
         # Typespin-weighted features (for multi-species only)
-        if self.multi:
-            neighbor_species = species_indices[neighbor_indices]
-            neighbor_typespin = self.typespin[neighbor_species]  # (n_pairs,)
+        neighbor_species = species_indices[neighbor_indices]
+        neighbor_typespin = self.typespin[neighbor_species]  # (n_pairs,)
 
-            # Multiply by typespin and sum
-            G_rad_weighted = G_rad * neighbor_typespin.unsqueeze(-1)  # (n_pairs, n_rad)
+        # Multiply by typespin
+        G_rad_weighted = G_rad * neighbor_typespin.unsqueeze(-1)
 
-            for pair_idx in range(len(distances_rad)):
-                center_idx = center_indices[pair_idx].item()
-                rad_features[center_idx, n_rad:2*n_rad] += G_rad_weighted[pair_idx]
+        # Scatter_add weighted features
+        rad_features_weighted = scatter_add(
+            G_rad_weighted, center_indices, dim=0, dim_size=n_atoms
+        )
+
+        # Concatenate unweighted and weighted features
+        rad_features = torch.cat([
+            rad_features_unweighted, rad_features_weighted
+        ], dim=1)
 
         return rad_features
 
@@ -230,11 +240,14 @@ class ChebyshevDescriptor(nn.Module):
                                 pbc: Optional[torch.Tensor] = None
                                 ) -> torch.Tensor:
         """
-        Compute angular features for all atoms using typespin architecture.
+        Compute angular features using typespin architecture.
+
+        Uses vectorized triplet generation and scatter_add for
+        efficient, gradient-preserving accumulation.
 
         For each atom i with neighbors j, k:
-            - Set 1 (unweighted): sum over all triplets (i,j,k) of G_ang(d_ij, d_ik, cos_ijk)
-            - Set 2 (typespin): sum over triplets of s_j * s_k * G_ang(d_ij, d_ik, cos_ijk)
+            - Set 1 (unweighted): sum over triplets of G_ang
+            - Set 2 (typespin): sum over triplets of s_j * s_k * G_ang
 
         Args:
             positions: (N, 3) atomic positions
@@ -248,26 +261,25 @@ class ChebyshevDescriptor(nn.Module):
         n_atoms = len(positions)
         n_ang = self.ang_order + 1
 
-        # Feature sets: [unweighted, typespin-weighted]
-        if self.multi:
-            ang_features = torch.zeros(n_atoms, 2 * n_ang,
-                                       dtype=self.dtype, device=self.device)
-        else:
-            ang_features = torch.zeros(n_atoms, n_ang,
-                                       dtype=self.dtype, device=self.device)
-
         # Get all neighbors within angular cutoff
         neighbor_data = self.nbl.get_neighbors(positions, cell, pbc)
         edge_index = neighbor_data['edge_index']
         distances = neighbor_data['distances']
 
         # Filter by angular cutoff
-        mask = (distances <= self.ang_cutoff) & (distances > self.min_cutoff)
+        mask = ((distances <= self.ang_cutoff) &
+                (distances > self.min_cutoff))
         edge_index_ang = edge_index[:, mask]
         distances_ang = distances[mask]
 
         if len(distances_ang) < 2:
-            return ang_features
+            # Return zeros if insufficient neighbors
+            if self.multi:
+                return torch.zeros(n_atoms, 2 * n_ang,
+                                   dtype=self.dtype, device=self.device)
+            else:
+                return torch.zeros(n_atoms, n_ang,
+                                   dtype=self.dtype, device=self.device)
 
         # Compute displacement vectors
         i_indices = edge_index_ang[0]
@@ -275,52 +287,99 @@ class ChebyshevDescriptor(nn.Module):
 
         if cell is not None:
             offsets = neighbor_data['offsets'][mask]
-            # Convert offsets to correct dtype for matrix multiplication
-            r_ij = (positions[j_indices] + offsets.to(self.dtype) @ cell) - positions[i_indices]
+            r_ij = ((positions[j_indices] +
+                     offsets.to(self.dtype) @ cell) -
+                    positions[i_indices])
         else:
             r_ij = positions[j_indices] - positions[i_indices]
 
         # Normalize displacement vectors
         r_ij_norm = r_ij / distances_ang.unsqueeze(-1)
 
-        # Process each central atom
+        # Generate all valid triplets (i, j, k) where j and k are
+        # neighbors of i
+        triplet_centers = []
+        triplet_j_idx = []
+        triplet_k_idx = []
+
+        # Group edges by center atom
         for center_idx in range(n_atoms):
-            # Find neighbors of this atom
             neighbor_mask = i_indices == center_idx
-            if neighbor_mask.sum() < 2:
+            n_neighbors = neighbor_mask.sum().item()
+
+            if n_neighbors < 2:
                 continue
 
-            neighbor_pos = torch.where(neighbor_mask)[0]
-            n_neighbors = len(neighbor_pos)
+            # Get indices of edges for this center
+            edge_positions = torch.where(neighbor_mask)[0]
 
-            # Get data for these neighbors
-            neighbor_indices = j_indices[neighbor_pos]
-            neighbor_distances = distances_ang[neighbor_pos]
-            neighbor_vectors = r_ij_norm[neighbor_pos]
-            neighbor_species = species_indices[neighbor_indices]
+            # Generate all pairs (j, k) for this center
+            for idx_j in range(n_neighbors):
+                for idx_k in range(idx_j + 1, n_neighbors):
+                    triplet_centers.append(center_idx)
+                    triplet_j_idx.append(edge_positions[idx_j].item())
+                    triplet_k_idx.append(edge_positions[idx_k].item())
 
-            # Generate all pairs (j, k) where j < k
-            for j_idx in range(n_neighbors):
-                for k_idx in range(j_idx + 1, n_neighbors):
-                    d_ij = neighbor_distances[j_idx].unsqueeze(0)
-                    d_ik = neighbor_distances[k_idx].unsqueeze(0)
+        if len(triplet_centers) == 0:
+            # No valid triplets
+            if self.multi:
+                return torch.zeros(n_atoms, 2 * n_ang,
+                                   dtype=self.dtype, device=self.device)
+            else:
+                return torch.zeros(n_atoms, n_ang,
+                                   dtype=self.dtype, device=self.device)
 
-                    # Compute cos(theta_ijk)
-                    cos_theta = torch.dot(neighbor_vectors[j_idx],
-                                         neighbor_vectors[k_idx]).clamp(-1.0, 1.0)
-                    cos_theta = cos_theta.unsqueeze(0)
+        # Convert to tensors
+        triplet_centers = torch.tensor(triplet_centers,
+                                       dtype=torch.long,
+                                       device=self.device)
+        triplet_j_idx = torch.tensor(triplet_j_idx,
+                                     dtype=torch.long,
+                                     device=self.device)
+        triplet_k_idx = torch.tensor(triplet_k_idx,
+                                     dtype=torch.long,
+                                     device=self.device)
 
-                    # Compute angular basis
-                    G_ang = self.ang_basis(d_ij, d_ik, cos_theta).squeeze(0)  # (n_ang,)
+        # Get distances and vectors for triplets
+        d_ij = distances_ang[triplet_j_idx]
+        d_ik = distances_ang[triplet_k_idx]
+        vec_j = r_ij_norm[triplet_j_idx]
+        vec_k = r_ij_norm[triplet_k_idx]
 
-                    # Unweighted features
-                    ang_features[center_idx, :n_ang] += G_ang
+        # Compute cos(theta_ijk) for all triplets
+        cos_theta = (vec_j * vec_k).sum(dim=1).clamp(-1.0, 1.0)
 
-                    # Typespin-weighted features (for multi-species only)
-                    if self.multi:
-                        s_j = self.typespin[neighbor_species[j_idx]]
-                        s_k = self.typespin[neighbor_species[k_idx]]
-                        ang_features[center_idx, n_ang:2*n_ang] += s_j * s_k * G_ang
+        # Compute angular basis for all triplets
+        G_ang = self.ang_basis(d_ij, d_ik, cos_theta)  # (n_triplets, n_ang)
+
+        # Scatter_add unweighted features
+        ang_features_unweighted = scatter_add(
+            G_ang, triplet_centers, dim=0, dim_size=n_atoms
+        )
+
+        if not self.multi:
+            return ang_features_unweighted
+
+        # Typespin-weighted features (for multi-species only)
+        neighbor_j_species = species_indices[j_indices[triplet_j_idx]]
+        neighbor_k_species = species_indices[j_indices[triplet_k_idx]]
+
+        typespin_j = self.typespin[neighbor_j_species]
+        typespin_k = self.typespin[neighbor_k_species]
+        typespin_product = typespin_j * typespin_k
+
+        # Multiply by typespin product
+        G_ang_weighted = G_ang * typespin_product.unsqueeze(-1)
+
+        # Scatter_add weighted features
+        ang_features_weighted = scatter_add(
+            G_ang_weighted, triplet_centers, dim=0, dim_size=n_atoms
+        )
+
+        # Concatenate unweighted and weighted features
+        ang_features = torch.cat([
+            ang_features_unweighted, ang_features_weighted
+        ], dim=1)
 
         return ang_features
 
@@ -378,6 +437,98 @@ class ChebyshevDescriptor(nn.Module):
             features = torch.cat([rad_features, ang_features], dim=1)
 
         return features
+
+    def compute_feature_gradients(self,
+                                  positions: torch.Tensor,
+                                  species: List[str],
+                                  cell: Optional[torch.Tensor] = None,
+                                  pbc: Optional[torch.Tensor] = None
+                                  ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute features and their gradients w.r.t. positions.
+
+        Uses PyTorch autograd to compute ∂features/∂positions.
+
+        Args:
+            positions: (N, 3) atomic positions
+            species: List of N species names
+            cell: (3, 3) lattice vectors
+            pbc: (3,) periodic boundary conditions
+
+        Returns:
+            features: (N, F) feature tensor
+            gradients: (N, F, N, 3) gradient tensor where
+                      gradients[i, f, j, k] = ∂feature[i,f]/∂position[j,k]
+        """
+        # Enable gradient tracking
+        positions_grad = positions.clone().detach().requires_grad_(True)
+
+        # Compute features
+        features = self.forward(positions_grad, species, cell, pbc)
+
+        N, F = features.shape
+        gradients = torch.zeros(N, F, N, 3,
+                               dtype=self.dtype, device=self.device)
+
+        # Compute gradient for each feature of each atom
+        for i in range(N):
+            for f in range(F):
+                # Create grad_outputs tensor
+                grad_out = torch.zeros_like(features)
+                grad_out[i, f] = 1.0
+
+                # Compute gradient
+                grad = torch.autograd.grad(
+                    features, positions_grad,
+                    grad_outputs=grad_out,
+                    retain_graph=True,
+                    create_graph=False
+                )[0]
+
+                gradients[i, f] = grad
+
+        return features.detach(), gradients
+
+    def compute_forces_from_energy(self,
+                                   positions: torch.Tensor,
+                                   species: List[str],
+                                   energy_model: nn.Module,
+                                   cell: Optional[torch.Tensor] = None,
+                                   pbc: Optional[torch.Tensor] = None
+                                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute atomic forces from an energy model.
+
+        Forces are computed as F = -∂E/∂r using autograd through
+        the full featurization → energy prediction pipeline.
+
+        Args:
+            positions: (N, 3) atomic positions
+            species: List of N species names
+            energy_model: Neural network that predicts energy from features
+            cell: (3, 3) lattice vectors
+            pbc: (3,) periodic boundary conditions
+
+        Returns:
+            energy: Scalar total energy
+            forces: (N, 3) force on each atom
+        """
+        # Enable gradient tracking for positions
+        positions_grad = positions.clone().detach().requires_grad_(True)
+
+        # Compute features
+        features = self.forward(positions_grad, species, cell, pbc)
+
+        # Predict energy
+        energy = energy_model(features).sum()
+
+        # Compute forces via autograd: F = -∂E/∂r
+        forces = -torch.autograd.grad(
+            energy, positions_grad,
+            create_graph=True  # Enable higher-order derivatives
+        )[0]
+
+        return energy, forces
 
     def featurize_structure(self,
                            positions: np.ndarray,
