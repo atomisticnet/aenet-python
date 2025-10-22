@@ -100,6 +100,7 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                               deriv_outfile: str = 'data.deriv.train',
                               deriv_disp_all: bool = True,
                               deriv_N_max: int = 100000,
+                              forcespercent: int = None,
                               **kwargs):
 
         for arg in kwargs:
@@ -152,6 +153,10 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         if debug:
             generate_in += "\nDEBUG\n"
+            
+        if forcespercent is not None:
+            generate_in += "\nFORCES\nforcespercent\t{}\n".format(forcespercent)
+
 
         generate_in += "\nFILES\n{}\n".format(len(xsf_file_paths))
         for p in xsf_file_paths:
