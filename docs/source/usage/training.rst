@@ -171,7 +171,7 @@ Key Parameters for ``train()``:
 See the ``TrainingConfig`` class documentation above for all available configuration parameters.
 
 Training Method Parameters
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Adam** (default method)
 
@@ -277,4 +277,3 @@ command would be:
 .. code-block:: bash
 
     mpirun -np 8 /path/to/train.x train.in
-

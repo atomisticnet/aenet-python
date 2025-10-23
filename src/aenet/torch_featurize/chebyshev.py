@@ -64,6 +64,7 @@ class ChebyshevPolynomials(nn.Module):
 
         The Chebyshev polynomials are defined on [-1, 1], so distances
         must be rescaled using:
+
             x = (2*r - r_min - r_max) / (r_max - r_min)
 
         Parameters
@@ -186,8 +187,11 @@ class ChebyshevPolynomials(nn.Module):
         Evaluate Chebyshev polynomials and their derivatives.
 
         Uses the relationship:
+
             dT_n/dx = n * U_{n-1}(x)
+
         where U_n are Chebyshev polynomials of the second kind:
+
             U_n(x) = sin((n+1)*arccos(x)) / sqrt(1-x²)
 
         Parameters
@@ -355,7 +359,9 @@ class AngularBasis(nn.Module):
     Angular basis functions using Chebyshev polynomials.
 
     For a triplet of atoms (i, j, k), computes:
+
         G_ang = T_n(cos θ_ijk) * fc(r_ij) * fc(r_ik)
+
     where θ_ijk is the angle at atom i.
 
     Parameters

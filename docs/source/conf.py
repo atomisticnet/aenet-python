@@ -40,6 +40,19 @@ extensions = ['sphinx.ext.autodoc',
 # Autosummary settings
 autosummary_generate = True
 
+# Mock imports for heavy dependencies
+autodoc_mock_imports = [
+    'torch',
+    'torch_scatter',
+    'torch_cluster',
+    'numpy',
+    'scipy',
+    'pandas',
+    'tables',
+    'matplotlib',
+    'tqdm',
+]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 

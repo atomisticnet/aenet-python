@@ -174,10 +174,12 @@ class TorchNeighborList:
 
         Args:
             positions: (N, 3) atom positions
+
                 - For isolated systems: Always Cartesian coordinates
-                    in Angstroms
+                  in Angstroms
                 - For periodic systems: Fractional [0,1) or Cartesian,
-                    see fractional arg
+                  see fractional arg
+
             cell: (3, 3) lattice vectors as rows (None for isolated systems)
             pbc: (3,) boolean tensor for PBC in each direction
                  (default: [True, True, True] if cell is provided)
