@@ -9,7 +9,6 @@ import numpy as np
 import sys
 
 from .exceptions import ArgumentError, IncompatibleStructureError
-from .nblist import NeighborList
 from . import util
 
 __author__ = "Alexander Urban, Nongnuch Artrith"
@@ -934,16 +933,45 @@ class AtomicStructure(object):
           an atomic structure object
 
         """
-        nblist = NeighborList(self.coords[frame],
-                              lattice_vectors=self.avec[frame],
-                              cartesian=True,
-                              types=self.types,
-                              interaction_range=cutoff)
-        (nbl, coords, dist, Tvecs) = nblist.get_neighbors_and_distances(
-            i, return_coords=True, return_self=return_self)
-        types = np.array([self.types[i] for i in nbl])
-        coords = np.array(coords)
-        return AtomicStructure(coords=coords, types=types)
+        # Lazy import to avoid circular dependency
+        from .torch_featurize.neighborlist import TorchNeighborList
+
+        # Create neighbor list (accepts numpy arrays)
+        nbl = TorchNeighborList(cutoff=cutoff, device='cpu')
+
+        # Get neighbors with coordinates computed automatically
+        positions = self.coords[frame]
+        cell = self.avec[frame] if self.pbc else None
+
+        result = nbl.get_neighbors_of_atom(
+            i, positions, cell=cell, return_coordinates=True
+        )
+
+        # Extract data (convert back to numpy)
+        neighbor_idx = result['indices'].cpu().numpy()
+
+        # Handle empty neighbor list
+        if len(neighbor_idx) == 0:
+            if return_self:
+                # Only return the central atom
+                coords = np.array([self.coords[frame][i]])
+                types = np.array([self.types[i]])
+                return AtomicStructure(coords=coords, types=types)
+            else:
+                # No neighbors found and not returning self
+                return None
+        else:
+            neighbor_coords = result['coordinates'].cpu().numpy()
+
+            # Build result structure
+            if return_self:
+                coords = np.vstack([self.coords[frame][i], neighbor_coords])
+                types = np.hstack([self.types[i], self.types[neighbor_idx]])
+            else:
+                coords = neighbor_coords
+                types = self.types[neighbor_idx]
+
+            return AtomicStructure(coords=coords, types=types)
 
     def frac2cart(self, fraccoo, avec=None, frame=-1):
         if (avec is None or len(avec) == 0):

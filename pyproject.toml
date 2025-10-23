@@ -33,6 +33,20 @@ dependencies = [
     "tables>=3.6.1",
     "tqdm>=4.62.3",
     "matplotlib>=3.3.4",
+    "torch>=2.0.0",
+    "torch-scatter>=2.1.0",
+    "torch-cluster>=1.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "ruff>=0.1.0",
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "jupyter>=1.0.0",
+    "notebook>=6.4.0",
 ]
 
 [project.urls]
@@ -57,3 +71,62 @@ aenet = [
     "VERSION",
     "data/*.json"
 ]
+
+[tool.ruff]
+# Set line length to 79 for PEP8 compliance
+line-length = 79
+target-version = "py38"
+
+# Exclude generated files and cache directories
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".eggs",
+    "*.egg-info",
+    ".venv",
+    "venv",
+    ".ipynb_checkpoints",
+]
+
+[tool.ruff.lint]
+# Enable pycodestyle (E, W), Pyflakes (F), isort (I),
+# and pydocstyle (D) checks
+select = ["E", "F", "W", "I", "D", "UP", "C90"]
+
+# Ignore some rules that conflict with our style or scientific notation
+ignore = [
+    "D100",  # Missing docstring in public module
+    "D104",  # Missing docstring in public package
+    "D105",  # Missing docstring in magic method
+    "D203",  # 1 blank line required before class docstring
+    "D213",  # Multi-line docstring summary should start at second line
+    "D401",  # First line should be imperative (scientific docs differ)
+    "E501",  # Line too long (handled by formatter)
+    "N802",  # Function name should be lowercase
+    "N803",  # Argument name should be lowercase (e.g., Rc for cutoff)
+    "N806",  # Variable in function should be lowercase (e.g., T, G, N, F)
+    "C901",  # Function is too complex (acceptable for scientific algorithms)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files don't need full docstrings
+"tests/*.py" = ["D"]
+"**/tests/*.py" = ["D"]
+# Benchmark files can have unused variables (for timing)
+"**/benchmark_*.py" = ["F841"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = ["aenet"]
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+# Indent with spaces
+indent-style = "space"
+# Use line endings consistent with the OS
+line-ending = "auto"

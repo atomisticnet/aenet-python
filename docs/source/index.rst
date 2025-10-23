@@ -45,10 +45,21 @@ Contents
    usage/structure_manipulation
    usage/data_acquisition
    usage/featurization
+   usage/torch_featurization
+   usage/neighbor_lists
+   usage/migration_torch
    usage/commandline
    usage/trainset
    usage/training
    dev/commandline
+
+API Reference
+-------------
+
+.. toctree::
+   :maxdepth: 2
+
+   api/index
 
 
 Indices and tables
