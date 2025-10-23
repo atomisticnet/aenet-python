@@ -9,8 +9,9 @@ Supports:
 """
 
 import warnings
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 
 try:
@@ -51,6 +52,7 @@ class TorchNeighborList:
         cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
+        max_num_neighbors: int = 256,
     ):
         """
         Initialize neighbor list.
@@ -62,6 +64,9 @@ class TorchNeighborList:
                 distances. Keys should be sorted tuples: (min, max)
             device: 'cpu' or 'cuda'
             dtype: torch.float32 or torch.float64 (recommended: float64)
+            max_num_neighbors: Maximum number of neighbors per atom to consider
+                (default: 256). Increase if you encounter systems with very
+                dense neighbor environments.
 
         Raises
         ------
@@ -79,6 +84,7 @@ class TorchNeighborList:
         self.cutoff_dict = cutoff_dict
         self.device = device
         self.dtype = dtype
+        self.max_num_neighbors = max_num_neighbors
 
         # Validate cutoff_dict if both types and dict are provided
         if cutoff_dict is not None and atom_types is not None:
@@ -87,6 +93,74 @@ class TorchNeighborList:
         # Cache for efficiency
         self._cached_result = None
         self._cache_key = None
+
+    def _to_tensor(
+        self,
+        array: Union[np.ndarray, torch.Tensor],
+        dtype: Optional[torch.dtype] = None,
+    ) -> torch.Tensor:
+        """
+        Convert numpy array or torch tensor to appropriate tensor.
+
+        Args:
+            array: Input array (numpy or torch)
+            dtype: Target dtype (uses self.dtype if not specified)
+
+        Returns
+        -------
+            torch.Tensor on self.device with appropriate dtype
+        """
+        if dtype is None:
+            dtype = self.dtype
+
+        if isinstance(array, np.ndarray):
+            tensor = torch.from_numpy(array)
+        else:
+            tensor = array
+
+        return tensor.to(self.device).to(dtype)
+
+    @classmethod
+    def from_AtomicStructure(
+        cls,
+        structure,
+        cutoff: float,
+        frame: int = -1,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
+        max_num_neighbors: int = 256,
+    ):
+        """
+        Factory method: create neighbor list from AtomicStructure.
+
+        Args:
+            structure: Instance of aenet.geometry.AtomicStructure
+            cutoff: Maximum interaction cutoff radius in Angstroms
+            frame: Frame index to use (default: -1 for last frame)
+            device: 'cpu' or 'cuda'
+            dtype: torch.float32 or torch.float64 (recommended: float64)
+            max_num_neighbors: Maximum number of neighbors per atom
+
+        Returns
+        -------
+            TorchNeighborList instance configured for the structure
+
+        Example:
+            >>> from aenet.geometry import AtomicStructure
+            >>> from aenet.torch_featurize.neighborlist import (
+            ...     TorchNeighborList
+            ... )
+            >>> structure = AtomicStructure(coords, types, avec=avec)
+            >>> nbl = TorchNeighborList.from_AtomicStructure(
+            ...     structure, cutoff=4.0
+            ... )
+        """
+        return cls(
+            cutoff=cutoff,
+            device=device,
+            dtype=dtype,
+            max_num_neighbors=max_num_neighbors,
+        )
 
     def get_neighbors(
         self,
@@ -175,7 +249,7 @@ class TorchNeighborList:
         edge_index = radius_graph(
             positions,
             r=self.cutoff,
-            max_num_neighbors=256,
+            max_num_neighbors=self.max_num_neighbors,
             flow="source_to_target",
             loop=False,  # Don't include self-loops
         )
@@ -242,7 +316,7 @@ class TorchNeighborList:
         edge_index = radius_graph(
             all_positions,
             r=self.cutoff,
-            max_num_neighbors=256,
+            max_num_neighbors=self.max_num_neighbors,
             flow="source_to_target",
             loop=False,
         )
@@ -476,22 +550,26 @@ class TorchNeighborList:
     def get_neighbors_of_atom(
         self,
         atom_idx: int,
-        positions: torch.Tensor,
-        cell: Optional[torch.Tensor] = None,
+        positions: Union[np.ndarray, torch.Tensor],
+        cell: Optional[Union[np.ndarray, torch.Tensor]] = None,
         pbc: Optional[torch.Tensor] = None,
         atom_types: Optional[torch.Tensor] = None,
         cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
+        return_coordinates: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Get neighbors of a specific atom.
 
         Args:
             atom_idx: Index of the atom to query
-            positions: (N, 3) atom positions
-            cell: (3, 3) lattice vectors (None for isolated systems)
+            positions: (N, 3) atom positions (numpy array or torch tensor)
+            cell: (3, 3) lattice vectors (None for isolated systems,
+                  numpy array or torch tensor)
             pbc: (3,) PBC flags
             atom_types: Override stored atom_types (optional)
             cutoff_dict: Override stored cutoff_dict (optional)
+            return_coordinates: If True, also return actual neighbor
+                coordinates with PBC offsets applied (default: False)
 
         Returns
         -------
@@ -499,12 +577,18 @@ class TorchNeighborList:
             - 'indices': (num_neighbors,) neighbor atom indices
             - 'distances': (num_neighbors,) distances to neighbors
             - 'offsets': (num_neighbors, 3) cell offsets (or None)
+            - 'coordinates': (num_neighbors, 3) neighbor coordinates
+                (only if return_coordinates=True)
 
         Note:
             If both atom_types and cutoff_dict are provided (either
             stored or as arguments), neighbors are filtered by
             type-specific cutoffs.
         """
+        # Convert inputs to tensors
+        positions = self._to_tensor(positions)
+        if cell is not None:
+            cell = self._to_tensor(cell)
         # Use stored values or overrides
         types = atom_types if atom_types is not None else self.atom_types
         cutoffs = cutoff_dict if cutoff_dict is not None else self.cutoff_dict
@@ -536,11 +620,24 @@ class TorchNeighborList:
             if offsets is not None:
                 offsets = offsets[filter_mask]
 
-        return {
+        # Compute coordinates if requested
+        coordinates = None
+        if return_coordinates:
+            coordinates = positions[neighbor_indices]
+            if offsets is not None and cell is not None:
+                # Apply PBC offsets: convert to float and apply cell matrix
+                coordinates = coordinates + (offsets.to(self.dtype) @ cell)
+
+        result_dict = {
             "indices": neighbor_indices,
             "distances": distances,
             "offsets": offsets,
         }
+
+        if return_coordinates:
+            result_dict["coordinates"] = coordinates
+
+        return result_dict
 
     def get_neighbors_by_atom(
         self,

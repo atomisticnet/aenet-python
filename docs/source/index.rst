@@ -46,6 +46,7 @@ Contents
    usage/data_acquisition
    usage/featurization
    usage/torch_featurization
+   usage/neighbor_lists
    usage/migration_torch
    usage/commandline
    usage/trainset
