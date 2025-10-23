@@ -12,9 +12,12 @@ Structure featurization
    provides identical results with GPU acceleration support.
 
 ``aenet-python`` can be used to featurize atomic environments with the
-expansion method by Artrith *et al.* [1,2].  Local atomic environment
+expansion method by Artrith *et al.* [1,2,3].  Local atomic environment
 features can, furthermore, be combined to atomic structure features with
-the approach by Gharakhanyan *et al.* [3].
+the approach by Gharakhanyan *et al.* [4].
+
+[1] N. Artrith and A. Urban, *Comput. Mater. Sci.* **114**, 2016, 135-150
+(`link4 <http://dx.doi.org/10.1016/j.commatsci.2015.11.047>`_).
 
 [1] N. Artrith, A. Urban, and G. Ceder,
 *Phys. Rev. B* **96**, 2017, 014112 (`link1 <https://doi.org/10.1103/PhysRevB.96.014112>`_).

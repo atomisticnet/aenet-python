@@ -228,3 +228,16 @@ The Chebyshev descriptor implementation is based on:
 **N. Artrith, A. Urban, and G. Ceder**,
 *Phys. Rev. B* **96**, 2017, 014112
 https://doi.org/10.1103/PhysRevB.96.014112
+
+More details can be found in:
+
+**A. M. Miksch, T. Morawietz, J. Kästner, A. Urban, N. Artrith**,
+*Mach. Learn.: Sci. Technol.* **2**, 2021, 031001
+http://doi.org/10.1088/2632-2153/abfd96
+
+The reference implementation is in the ænet Fortran codebase. The ænet
+reference is:
+
+**N. Artrith and A. Urban**,
+*Comput. Mater. Sci.* **114**, 2016, 135-150
+http://dx.doi.org/10.1016/j.commatsci.2015.11.047
