@@ -39,20 +39,37 @@ class FeaturizedAtomicStructure(Serializable):
           "fingerprint": fingerprint,
           "coords": coords,
           "forces": forces}
+    neighbor_info (dict, optional): Neighbor information for force training.
+        If present, contains:
+            - 'neighbor_counts': (n_atoms,) array of neighbor counts
+            - 'neighbor_lists': List of (nnb,) arrays with neighbor indices
+            - 'neighbor_vectors': List of (nnb, 3) arrays with
+                 displacement vectors
+    cell (np.ndarray, optional): Unit cell lattice vectors as (3, 3) array
+        where rows are lattice vectors. None for non-periodic structures.
+    pbc (bool, optional): True for 3D-periodic structures, False/None for
+        isolated structures.
 
     Properties:
 
     max_descriptor_length (int): Dimension of longest fingerprint among
       all atoms of the atomic structure
+    has_neighbor_info (bool): True if neighbor information is available
+    has_cell (bool): True if cell information is available
+    is_periodic (bool): True if structure is periodic
 
     """
 
     def __init__(self, path: str, energy: float, atom_types: List[str],
-                 atoms: List[dict]):
+                 atoms: List[dict], neighbor_info: dict = None,
+                 cell: np.ndarray = None, pbc: bool = None):
         self.path = path
         self.energy = energy
         self.atom_types = atom_types
         self.atoms = atoms
+        self.neighbor_info = neighbor_info
+        self.cell = cell
+        self.pbc = pbc if pbc is not None else False
 
         # the path string can contain additional information that is
         # stripped here if needed
@@ -60,26 +77,80 @@ class FeaturizedAtomicStructure(Serializable):
                 and os.path.exists(path.split(".xsf")[0] + ".xsf")):
             self.path = path.split(".xsf")[0] + ".xsf"
 
-        avec = None
-        if os.path.exists(self.path):
-            inp_structure = read_safely(self.path, frmt='xsf')
-            if inp_structure.pbc:
-                avec = inp_structure.avec[-1]
-
-        types = [at['type'] for at in self.atoms]
-        coords = [at['coords'] for at in self.atoms]
-        forces = [at['forces'] for at in self.atoms]
-        self.structure = AtomicStructure(coords, types, avec=avec,
-                                         energy=self.energy,
-                                         forces=forces)
-
     def __str__(self):
         out = "FeaturizedAtomicStructure Info:\n"
         out += "  Path           : {}\n".format(self.path)
         out += "  Atom types     : "
         out += " ".join(sorted(self.atom_types)) + "\n"
+        out += "  Neighbor info  : {}\n".format(
+            "Available" if self.has_neighbor_info else "Not available"
+        )
         out += str(self.structure)
         return out
+
+    @property
+    def avec(self):
+        """
+        Get unit cell lattice vectors.
+
+        Returns cell from HDF5 if available, otherwise reads from XSF file
+        as fallback for legacy binary format support.
+        """
+        # Prioritize cell from HDF5
+        if self.cell is not None:
+            return self.cell
+
+        # Fallback: read from XSF file (for legacy binary format)
+        avec = None
+        if os.path.exists(self.path):
+            inp_structure = read_safely(self.path, frmt='xsf')
+            if inp_structure.pbc:
+                avec = inp_structure.avec[-1]
+        return avec
+
+    @property
+    def types(self):
+        return [at['type'] for at in self.atoms]
+
+    @property
+    def coords(self):
+        return np.array([at['coords'] for at in self.atoms])
+
+    @property
+    def forces(self):
+        return np.array([at['forces'] for at in self.atoms])
+
+    @property
+    def structure(self):
+        structure = AtomicStructure(
+            self.coords,
+            self.types,
+            avec=self.avec,
+            energy=self.energy,
+            forces=self.forces
+            )
+        return structure
+
+    @property
+    def has_neighbor_info(self):
+        """
+        Returns True if neighbor information is available for force training.
+        """
+        return self.neighbor_info is not None
+
+    @property
+    def has_cell(self):
+        """
+        Returns True if unit cell information is available.
+        """
+        return self.cell is not None
+
+    @property
+    def is_periodic(self):
+        """
+        Returns True if structure is periodic (3D-periodic).
+        """
+        return self.pbc and self.cell is not None
 
     @property
     def num_atoms(self):
@@ -318,6 +389,32 @@ class TrnSet(object):
     def __iter__(self):
         return self.iter_structures(read_coords=True, read_forces=True)
 
+    def __getitem__(self, key):
+        """
+        Enable subscript access to structures.
+
+        Supports integer indexing, negative indexing, and slicing.
+
+        Examples:
+            >>> struc = trnset[0]  # First structure
+            >>> last = trnset[-1]  # Last structure
+            >>> subset = trnset[0:10]  # First 10 structures
+        """
+        if isinstance(key, int):
+            # Handle negative indices
+            if key < 0:
+                key = self.num_structures + key
+            if key < 0 or key >= self.num_structures:
+                raise IndexError("Structure index out of range")
+            return self.read_structure(key, read_coords=True, read_forces=True)
+        elif isinstance(key, slice):
+            # Handle slicing
+            indices = range(*key.indices(self.num_structures))
+            return [self[i] for i in indices]
+        else:
+            raise TypeError("Indices must be integers or slices, not "
+                            + "{}".format(type(key).__name__))
+
     def __enter__(self):
         if not self.opened:
             self.open()
@@ -444,6 +541,31 @@ class TrnSet(object):
     @property
     def num_types(self):
         return len(self.atom_types)
+
+    def has_neighbor_info(self) -> bool:
+        """
+        Check if the training set file contains neighbor information.
+
+        Returns:
+            True if neighbor information is available (only for HDF5 format),
+            False otherwise.
+        """
+        if self.format != 'hdf5':
+            return False
+
+        if not self.opened:
+            self.open()
+            was_closed = True
+        else:
+            was_closed = False
+
+        try:
+            has_info = hasattr(self._fp.root.structures, 'neighbor_info')
+        finally:
+            if was_closed:
+                self.close()
+
+        return has_info
 
     def to_hdf5(self, filename: os.PathLike, complevel: int = 1):
         """
@@ -618,8 +740,110 @@ class TrnSet(object):
                           "fingerprint": fingerprint,
                           "coords": row['coords'] if read_coords else None,
                           "forces": row['forces'] if read_forces else None})
+
+        # Read neighbor information if available for this structure
+        neighbor_info = None
+        if hasattr(self._fp.root.structures, 'neighbor_info'):
+            neighbor_group = self._fp.root.structures.neighbor_info
+            # Check if this structure has a neighbor info group
+            group_name = f'structure_{idx:06d}'
+            if group_name in neighbor_group:
+                neighbor_info = self._read_neighbor_info_hdf5(idx, num_atoms)
+
+        # Read cell information if available for this structure
+        cell = None
+        pbc = False
+        if hasattr(self._fp.root.structures, 'cells'):
+            cells_group = self._fp.root.structures.cells
+            group_name = f'structure_{idx:06d}'
+            if group_name in cells_group:
+                cell, pbc = self._read_cell_info_hdf5(idx)
+
         return FeaturizedAtomicStructure(
-            path, energy, self.atom_types, atoms)
+            path, energy, self.atom_types, atoms,
+            neighbor_info=neighbor_info, cell=cell, pbc=pbc)
+
+    def _read_neighbor_info_hdf5(self, structure_idx: int,
+                                 num_atoms: int) -> dict:
+        """
+        Read neighbor information for a specific structure from HDF5.
+
+        Uses per-structure group format for O(1) lookup.
+
+        Args:
+            structure_idx: Index of the structure
+            num_atoms: Number of atoms in structure
+
+        Returns:
+            Dictionary with neighbor information:
+                - 'neighbor_counts': (n_atoms,) array of neighbor counts
+                - 'neighbor_lists': List of (nnb,) arrays with neighbor indices
+                - 'neighbor_vectors': List of (nnb, 3) arrays with
+                     displacement vectors
+        """
+        neighbor_group = self._fp.root.structures.neighbor_info
+
+        # Access per-structure group
+        group_name = f'structure_{structure_idx:06d}'
+        if group_name not in neighbor_group:
+            raise ValueError(
+                f"No neighbor info found for structure {structure_idx}"
+            )
+
+        struc_group = neighbor_group._f_get_child(group_name)
+
+        # Read neighbor counts
+        neighbor_counts = struc_group.neighbor_counts[:]
+
+        # Read neighbor lists
+        neighbor_lists = [
+            struc_group.neighbor_lists[i] for i in range(num_atoms)
+        ]
+
+        # Read and reshape neighbor vectors
+        neighbor_vectors = []
+        for i in range(num_atoms):
+            nbvecs_flat = struc_group.neighbor_vectors[i]
+            num_neighbors = neighbor_counts[i]
+            nbvecs = nbvecs_flat.reshape(num_neighbors, 3)
+            neighbor_vectors.append(nbvecs)
+
+        return {
+            'neighbor_counts': neighbor_counts,
+            'neighbor_lists': neighbor_lists,
+            'neighbor_vectors': neighbor_vectors
+        }
+
+    def _read_cell_info_hdf5(self, structure_idx: int):
+        """
+        Read cell information for a specific structure from HDF5.
+
+        Args:
+            structure_idx: Index of the structure
+
+        Returns:
+            Tuple of (cell, pbc) where:
+                - cell: (3, 3) numpy array of lattice vectors
+                - pbc: boolean, True for 3D-periodic
+        """
+        cells_group = self._fp.root.structures.cells
+
+        # Access per-structure group
+        group_name = f'structure_{structure_idx:06d}'
+        if group_name not in cells_group:
+            raise ValueError(
+                f"No cell info found for structure {structure_idx}"
+            )
+
+        cell_group = cells_group._f_get_child(group_name)
+
+        # Read lattice vectors
+        cell = cell_group.lattice_vectors[:]
+
+        # Read pbc (single boolean)
+        pbc = bool(cell_group.pbc[()])
+
+        return cell, pbc
 
     def _read_next_structure_hdf5(self, read_coords, read_forces):
         s = self._read_structure_hdf5(self._istruc, read_coords, read_forces)

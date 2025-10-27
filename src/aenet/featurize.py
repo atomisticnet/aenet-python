@@ -93,7 +93,9 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
                               output_file: str = 'data.train',
                               atomic_energies: Dict[str, float] = None,
                               workdir: os.PathLike = '.',
-                              debug=False,
+                              debug: bool = False,
+                              forces: bool = False,
+                              forcespercent: float = 100.0,
                               deriv_method: str = None,
                               deriv_delta: float = 0.01,
                               deriv_fraction: float = 16.0,
@@ -135,8 +137,11 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
 
         if deriv_method is not None:
             if deriv_method == 'analytical':
-                raise NotImplementedError(
-                    'Analytical derivatives are not yet supported.')
+                forces = True
+                raise Warning(
+                    "Analytical derivatives requested.  The `FORCES' "
+                    "option for training with PyTorch will be activated.  "
+                    "This option is only supported by aenet-PyTorch.")
             elif deriv_method == 'taylor':
                 generate_in += "\nDERIVATIVES\n"
                 generate_in += ("method=taylor delta={delta} fraction={frac} "
@@ -149,6 +154,13 @@ class AenetAUCFeaturizer(AtomicFeaturizer):
             else:
                 raise ValueError(
                     "Unexpected derivative method '{}'".format(deriv_method))
+
+        if forces:
+            if not 0 <= forcespercent <= 100:
+                raise ValueError(
+                    "Forces percent must be between 0 and 100.")
+            generate_in += "\nFORCES"
+            generate_in += "\nFORCESPERCENT {}\n".format(forcespercent)
 
         if debug:
             generate_in += "\nDEBUG\n"

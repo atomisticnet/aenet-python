@@ -433,3 +433,38 @@ class AngularBasis(nn.Module):
         G_ang = T_theta * (fc_ij * fc_ik).unsqueeze(-1)
 
         return G_ang
+
+    def forward_with_derivatives(
+        self, r_ij: torch.Tensor, r_ik: torch.Tensor, cos_theta: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluate angular features and their partial derivatives.
+
+        Returns derivatives w.r.t. each input: r_ij, r_ik, and cos_theta.
+        """
+        # Polynomials and their derivatives w.r.t. cos_theta
+        T_theta, dT_dcos = self.cheb.evaluate_with_derivatives(cos_theta)
+
+        # Cutoff functions and their derivatives
+        fc_ij = self.cheb.cutoff_function(r_ij, self.ang_cutoff)
+        fc_ik = self.cheb.cutoff_function(r_ik, self.ang_cutoff)
+        dfc_drij = self.cheb.cutoff_derivative(r_ij, self.ang_cutoff)
+        dfc_drik = self.cheb.cutoff_derivative(r_ik, self.ang_cutoff)
+
+        # Combined cutoff product
+        cutoff_prod = (fc_ij * fc_ik).unsqueeze(-1)
+
+        # G_ang = T * fc_ij * fc_ik
+        G_ang = T_theta * cutoff_prod
+
+        # Partial derivatives using product rule
+        # dG/d(cos_theta) = (dT/dcos) * fc_ij * fc_ik
+        dG_dcos = dT_dcos * cutoff_prod
+
+        # dG/dr_ij = T * (dfc/drij) * fc_ik
+        dG_drij = T_theta * (dfc_drij * fc_ik).unsqueeze(-1)
+
+        # dG/dr_ik = T * fc_ij * (dfc/drik)
+        dG_drik = T_theta * (fc_ij * dfc_drik).unsqueeze(-1)
+
+        return G_ang, dG_dcos, dG_drij, dG_drik

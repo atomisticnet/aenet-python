@@ -96,6 +96,73 @@ class TorchAUCFeaturizer:
         """Number of atomic species."""
         return len(self.typenames)
 
+    def _featurize_structure_with_neighbors(
+        self,
+        struc: AtomicStructure,
+        **kwargs
+    ) -> tuple:
+        """
+        Internal method to featurize structure and extract neighbor info.
+
+        Args:
+            struc: AtomicStructure instance
+
+        Returns
+        -------
+            Tuple of (features_dict, neighbor_info_dict)
+        """
+        # Get structure data
+        positions = struc.coords[-1]
+        species = struc.types
+
+        # Handle energy
+        energy = struc.energy[-1] if (struc.energy[-1] is not None) else 0.0
+
+        # Handle forces
+        forces_data = struc.forces[-1] if len(struc.forces) > 0 else None
+        if forces_data is not None and len(forces_data) == 0:
+            forces_data = None
+        forces = forces_data
+
+        # Handle PBC
+        cell = struc.avec[-1] if struc.pbc else None
+        pbc = np.array([True, True, True]) if struc.pbc else None
+
+        # Convert to torch tensors
+        positions_torch = torch.from_numpy(positions).to(self.dtype)
+        cell_torch = torch.from_numpy(
+            cell).to(self.dtype) if cell is not None else None
+        pbc_torch = torch.from_numpy(pbc) if pbc is not None else None
+
+        # Featurize with neighbor info
+        with torch.no_grad():
+            features, neighbor_info = \
+                self.descriptor.featurize_with_neighbor_info(
+                    positions_torch, species, cell_torch, pbc_torch
+                )
+            features = features.cpu().numpy()
+
+        # Prepare atomic data
+        atoms = []
+        for i, (sp, coords, feat) in enumerate(zip(
+                                          species, positions, features)):
+            atom_data = {
+                "type": sp,
+                "fingerprint": feat,
+                "coords": coords,
+                "forces": forces[i] if forces is not None else np.zeros(3),
+            }
+            atoms.append(atom_data)
+
+        features_dict = {
+            "path": getattr(struc, 'path', 'unknown'),
+            "energy": energy,
+            "atom_types": self.typenames,
+            "atoms": atoms,
+        }
+
+        return features_dict, neighbor_info
+
     def _featurize_structure_dict(
         self,
         struc: AtomicStructure,
@@ -134,9 +201,9 @@ class TorchAUCFeaturizer:
             cell).to(self.dtype) if cell is not None else None
         pbc_torch = torch.from_numpy(pbc) if pbc is not None else None
 
-        # Featurize
+        # Featurize using convenience wrapper that handles neighbor computation
         with torch.no_grad():
-            features = self.descriptor(
+            features = self.descriptor.forward_from_positions(
                 positions_torch, species, cell_torch, pbc_torch
             ).cpu().numpy()
 
@@ -209,6 +276,8 @@ class TorchAUCFeaturizer:
         hdf5_filename: str = 'features.h5',
         output_file: str = 'generate.out',
         atomic_energies: Optional[Dict[str, float]] = None,
+        include_neighbor_info: bool = False,
+        force_fraction: float = 1.0,
         debug: bool = False,
         **kwargs
     ):
@@ -227,6 +296,13 @@ class TorchAUCFeaturizer:
             hdf5_filename: Name of output HDF5 file
             output_file: Name of output log file (for API compatibility)
             atomic_energies: Dictionary of atomic energies {species: energy}
+            include_neighbor_info: If True, extract and save neighbor
+                                  information for force training
+                                  (default: False)
+            force_fraction: Fraction of structures to include neighbor info
+                          (default: 1.0 = 100%). Only used when
+                          include_neighbor_info=True. Matches aenet-PyTorch
+                          FORCESPERCENT parameter.
             debug: Enable debug output
             **kwargs: Additional arguments (forwarded for compatibility)
         """
@@ -264,22 +340,74 @@ class TorchAUCFeaturizer:
 
         print(f"Featurizing {len(structures)} structures...")
 
-        # Featurize all structures (use internal dict method for HDF5)
+        # Determine which structures should have neighbor info
+        if include_neighbor_info and force_fraction < 1.0:
+            # Randomly select structures for force training
+            n_force = int(len(structures) * force_fraction)
+            force_indices = set(np.random.choice(
+                len(structures), n_force, replace=False
+            ))
+            print(f"  Computing neighbor info for {n_force}/{len(structures)} "
+                  f"structures ({force_fraction*100:.1f}%)")
+        elif include_neighbor_info:
+            force_indices = set(range(len(structures)))
+            print("  Computing neighbor info for all "
+                  + f"{len(structures)} structures")
+        else:
+            force_indices = set()
+
+        # Featurize all structures
         featurized_structures = []
+        neighbor_info_list = [] if include_neighbor_info else None
+        cell_info_list = []
+
         for i, struc in enumerate(structures):
-            feat_struc = self._featurize_structure_dict(struc)
-            featurized_structures.append(feat_struc)
+            # Extract cell information
+            if struc.pbc and struc.avec[-1] is not None:
+                cell_info = {
+                    'cell': struc.avec[-1],
+                    'pbc': True  # 3D-periodic
+                }
+            else:
+                cell_info = None
+            cell_info_list.append(cell_info)
+
+            if i in force_indices:
+                # Compute with neighbor info
+                feat_struc, neighbor_info = \
+                    self._featurize_structure_with_neighbors(struc)
+                featurized_structures.append(feat_struc)
+                neighbor_info_list.append(neighbor_info)
+            else:
+                # Regular featurization without neighbor info
+                feat_struc = self._featurize_structure_dict(struc)
+                featurized_structures.append(feat_struc)
+                if neighbor_info_list is not None:
+                    # Add None placeholder to maintain alignment
+                    neighbor_info_list.append(None)
 
             if (i + 1) % 100 == 0:
                 print(f"  Featurized {i + 1}/{len(structures)} structures")
 
+        # Count periodic structures
+        n_periodic = sum(1 for c in cell_info_list if c is not None)
+        if n_periodic > 0:
+            print(f"  Found {n_periodic} periodic structures")
+
         # Write to HDF5
-        print(f"Writing features to {hdf5_filename}...")
+        if include_neighbor_info:
+            print(f"Writing features with neighbor info to "
+                  f"{hdf5_filename}...")
+        else:
+            print(f"Writing features to {hdf5_filename}...")
+
         write_features_to_hdf5(
             featurized_structures=featurized_structures,
             filename=hdf5_filename,
             typenames=self.typenames,
             atomic_energies=atomic_energies,
+            neighbor_info=neighbor_info_list,
+            cell_info=cell_info_list,
             name="PyTorch-generated training set",
         )
 
@@ -306,6 +434,8 @@ def write_features_to_hdf5(
     filename: os.PathLike,
     typenames: List[str],
     atomic_energies: Dict[str, float],
+    neighbor_info: Optional[List[Dict]] = None,
+    cell_info: Optional[List[Dict]] = None,
     name: str = "Training set",
     normalized: bool = False,
     scale: float = 1.0,
@@ -320,6 +450,16 @@ def write_features_to_hdf5(
         filename: Output HDF5 file path
         typenames: List of atomic species
         atomic_energies: Dictionary of atomic energies
+        neighbor_info: Optional list of neighbor information dictionaries
+                      (one per structure). Each dict should contain:
+                      - 'neighbor_counts': (n_atoms,) array
+                      - 'neighbor_lists': List of n_atoms arrays
+                      - 'neighbor_vectors': List of n_atoms (nnb, 3) arrays
+        cell_info: Optional list of cell information dictionaries
+                  (one per structure). Each dict should contain:
+                  - 'cell': (3, 3) array of lattice vectors (rows)
+                  - 'pbc': boolean, True for 3D-periodic, False for isolated
+                  If None for a structure, that structure is non-periodic.
         name: Dataset name
         normalized: Whether features are normalized
         scale: Feature scaling factor
@@ -452,6 +592,92 @@ def write_features_to_hdf5(
                 features.append(atom['fingerprint'])
 
             iatom += len(s['atoms'])
+
+        # Write cell information if provided
+        if cell_info is not None:
+            # Create cells group
+            cells_group = h5file.create_group(
+                structures, "cells",
+                "Unit cell information for periodic structures"
+            )
+
+            # Write per-structure cell information
+            for struct_id, c_info in enumerate(cell_info):
+                # Skip structures without cell info (non-periodic)
+                if c_info is None:
+                    continue
+
+                # Create group for this structure
+                group_name = f'structure_{struct_id:06d}'
+                cell_group = h5file.create_group(
+                    cells_group, group_name,
+                    f"Cell info for structure {struct_id}"
+                )
+
+                # Write lattice vectors as (3, 3) array (rows are vectors)
+                h5file.create_array(
+                    cell_group, "lattice_vectors",
+                    c_info['cell'].astype(np.float64),
+                    "Lattice vectors as rows (3, 3)"
+                )
+
+                # Write periodic boundary condition (single boolean)
+                h5file.create_array(
+                    cell_group, "pbc",
+                    np.bool_(c_info['pbc']),
+                    "Periodic boundary condition (True for 3D-periodic)"
+                )
+
+        # Write neighbor information if provided
+        if neighbor_info is not None:
+            # Create neighbor_info group
+            neighbor_group = h5file.create_group(
+                structures, "neighbor_info",
+                "Neighbor information for force training"
+            )
+
+            # Write per-structure neighbor information
+            for struct_id, (s, n_info) in enumerate(
+                    zip(featurized_structures, neighbor_info)):
+
+                # Skip structures without neighbor info
+                if n_info is None:
+                    continue
+
+                # Create group for this structure
+                group_name = f'structure_{struct_id:06d}'
+                struc_group = h5file.create_group(
+                    neighbor_group, group_name,
+                    f"Neighbor info for structure {struct_id}"
+                )
+
+                # Write neighbor counts as array
+                n_atoms = len(s['atoms'])
+                h5file.create_array(
+                    struc_group, "neighbor_counts",
+                    n_info['neighbor_counts'].astype(np.uint32),
+                    "Number of neighbors per atom"
+                )
+
+                # Write neighbor lists as VLArray
+                neighbor_lists = h5file.create_vlarray(
+                    struc_group, "neighbor_lists", tb.Int32Atom(),
+                    "Neighbor atom indices per atom",
+                    tb.Filters(complevel, shuffle=False)
+                )
+                for local_atom_id in range(n_atoms):
+                    nblist = n_info['neighbor_lists'][local_atom_id]
+                    neighbor_lists.append(nblist.astype(np.int32))
+
+                # Write neighbor vectors as VLArray
+                neighbor_vectors = h5file.create_vlarray(
+                    struc_group, "neighbor_vectors", tb.Float64Atom(),
+                    "Neighbor displacement vectors (nnb*3) per atom",
+                    tb.Filters(complevel, shuffle=False)
+                )
+                for local_atom_id in range(n_atoms):
+                    nbvecs = n_info['neighbor_vectors'][local_atom_id]
+                    neighbor_vectors.append(nbvecs.flatten())
 
         h5file.flush()
 

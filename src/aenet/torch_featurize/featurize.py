@@ -165,23 +165,27 @@ class ChebyshevDescriptor(nn.Module):
         self,
         positions: torch.Tensor,
         species_indices: torch.Tensor,
-        cell: Optional[torch.Tensor] = None,
-        pbc: Optional[torch.Tensor] = None,
+        neighbor_indices: List[torch.Tensor],
+        neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute radial features using typespin architecture.
+        Compute radial features from pre-computed neighbor information.
 
-        Uses scatter_add for efficient, gradient-preserving accumulation.
+        This is the core implementation that accepts neighbor vectors directly
+        from the local structural environment (LSE), enabling clean gradient
+        computation without re-computing neighbors or applying PBC.
 
         For each atom i:
             - Set 1 (unweighted): sum over neighbors j of G_rad(d_ij)
             - Set 2 (typespin): sum over neighbors j of s_j * G_rad(d_ij)
 
         Args:
-            positions: (N, 3) atomic positions
+            positions: (N, 3) atomic positions (for autograd tracking)
             species_indices: (N,) species index for each atom
-            cell: (3, 3) lattice vectors (None for isolated systems)
-            pbc: (3,) periodic boundary conditions
+            neighbor_indices: List of (nnb_i,) tensors with neighbor
+              atom indices
+            neighbor_vectors: List of (nnb_i, 3) tensors with
+              displacement vectors
 
         Returns
         -------
@@ -190,20 +194,30 @@ class ChebyshevDescriptor(nn.Module):
         n_atoms = len(positions)
         n_rad = self.rad_order + 1
 
-        # Get all neighbors within radial cutoff
-        # Positions are Cartesian, so use fractional=False for PBC
-        neighbor_data = self.nbl.get_neighbors(
-            positions, cell, pbc, fractional=False
-        )
-        edge_index = neighbor_data["edge_index"]
-        distances = neighbor_data["distances"]
+        # Build edge lists from neighbor information
+        center_indices_list = []
+        neighbor_indices_list = []
+        distances_list = []
 
-        # Filter by radial cutoff
-        mask = (distances <= self.rad_cutoff) & (distances > self.min_cutoff)
-        edge_index_rad = edge_index[:, mask]
-        distances_rad = distances[mask]
+        for i, (nb_idx, nb_vec) in enumerate(zip(neighbor_indices,
+                                                 neighbor_vectors)):
+            if len(nb_idx) == 0:
+                continue
 
-        if len(distances_rad) == 0:
+            # Compute distances from vectors
+            distances = torch.norm(nb_vec, dim=-1)
+
+            # Filter by radial cutoff
+            mask = (distances <= self.rad_cutoff
+                    ) & (distances > self.min_cutoff)
+            if mask.any():
+                n_valid = mask.sum().item()
+                center_indices_list.append(torch.full(
+                    (n_valid,), i, dtype=torch.long, device=self.device))
+                neighbor_indices_list.append(nb_idx[mask])
+                distances_list.append(distances[mask])
+
+        if len(distances_list) == 0:
             # Return zeros if no neighbors
             if self.multi:
                 return torch.zeros(
@@ -214,12 +228,13 @@ class ChebyshevDescriptor(nn.Module):
                     n_atoms, n_rad, dtype=self.dtype, device=self.device
                 )
 
+        # Concatenate all edges
+        center_indices = torch.cat(center_indices_list)
+        neighbor_indices_flat = torch.cat(neighbor_indices_list)
+        distances_rad = torch.cat(distances_list)
+
         # Compute radial basis for all pairs
         G_rad = self.rad_basis(distances_rad)  # (n_pairs, n_rad)
-
-        # Get center and neighbor indices
-        center_indices = edge_index_rad[0]
-        neighbor_indices = edge_index_rad[1]
 
         # Unweighted features: scatter_add over neighbors
         rad_features_unweighted = scatter_add(
@@ -230,7 +245,7 @@ class ChebyshevDescriptor(nn.Module):
             return rad_features_unweighted
 
         # Typespin-weighted features (for multi-species only)
-        neighbor_species = species_indices[neighbor_indices]
+        neighbor_species = species_indices[neighbor_indices_flat]
         neighbor_typespin = self.typespin[neighbor_species]  # (n_pairs,)
 
         # Multiply by typespin
@@ -252,24 +267,27 @@ class ChebyshevDescriptor(nn.Module):
         self,
         positions: torch.Tensor,
         species_indices: torch.Tensor,
-        cell: Optional[torch.Tensor] = None,
-        pbc: Optional[torch.Tensor] = None,
+        neighbor_indices: List[torch.Tensor],
+        neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute angular features using typespin architecture.
+        Compute angular features from pre-computed neighbor information.
 
-        Uses vectorized triplet generation and scatter_add for
-        efficient, gradient-preserving accumulation.
+        This is the core implementation that accepts neighbor vectors directly
+        from the local structural environment (LSE), enabling clean gradient
+        computation without re-computing neighbors or applying PBC.
 
         For each atom i with neighbors j, k:
             - Set 1 (unweighted): sum over triplets of G_ang
             - Set 2 (typespin): sum over triplets of s_j * s_k * G_ang
 
         Args:
-            positions: (N, 3) atomic positions
+            positions: (N, 3) atomic positions (for autograd tracking)
             species_indices: (N,) species index for each atom
-            cell: (3, 3) lattice vectors
-            pbc: (3,) periodic boundary conditions
+            neighbor_indices: List of (nnb_i,) tensors with neighbor
+              atom indices
+            neighbor_vectors: List of (nnb_i, 3) tensors with
+              displacement vectors
 
         Returns
         -------
@@ -278,68 +296,38 @@ class ChebyshevDescriptor(nn.Module):
         n_atoms = len(positions)
         n_ang = self.ang_order + 1
 
-        # Get all neighbors within angular cutoff
-        # Positions are Cartesian, so use fractional=False for PBC
-        neighbor_data = self.nbl.get_neighbors(
-            positions, cell, pbc, fractional=False
-        )
-        edge_index = neighbor_data["edge_index"]
-        distances = neighbor_data["distances"]
-
-        # Filter by angular cutoff
-        mask = (distances <= self.ang_cutoff) & (distances > self.min_cutoff)
-        edge_index_ang = edge_index[:, mask]
-        distances_ang = distances[mask]
-
-        if len(distances_ang) < 2:
-            # Return zeros if insufficient neighbors
-            if self.multi:
-                return torch.zeros(
-                    n_atoms, 2 * n_ang, dtype=self.dtype, device=self.device
-                )
-            else:
-                return torch.zeros(
-                    n_atoms, n_ang, dtype=self.dtype, device=self.device
-                )
-
-        # Compute displacement vectors
-        i_indices = edge_index_ang[0]
-        j_indices = edge_index_ang[1]
-
-        if cell is not None:
-            offsets = neighbor_data["offsets"][mask]
-            r_ij = (
-                positions[j_indices] + offsets.to(self.dtype) @ cell
-            ) - positions[i_indices]
-        else:
-            r_ij = positions[j_indices] - positions[i_indices]
-
-        # Normalize displacement vectors
-        r_ij_norm = r_ij / distances_ang.unsqueeze(-1)
-
-        # Generate all valid triplets (i, j, k) where j and k are
-        # neighbors of i
+        # Generate all valid triplets (i, j, k) from neighbor information
         triplet_centers = []
-        triplet_j_idx = []
-        triplet_k_idx = []
+        triplet_j_global = []
+        triplet_k_global = []
+        triplet_j_local = []
+        triplet_k_local = []
 
-        # Group edges by center atom
-        for center_idx in range(n_atoms):
-            neighbor_mask = i_indices == center_idx
-            n_neighbors = neighbor_mask.sum().item()
-
-            if n_neighbors < 2:
+        for i, (nb_idx, nb_vec) in enumerate(zip(neighbor_indices,
+                                                 neighbor_vectors)):
+            if len(nb_idx) < 2:
                 continue
 
-            # Get indices of edges for this center
-            edge_positions = torch.where(neighbor_mask)[0]
+            # Compute distances from vectors
+            distances = torch.norm(nb_vec, dim=-1)
+
+            # Filter by angular cutoff
+            mask = (distances <= self.ang_cutoff
+                    ) & (distances > self.min_cutoff)
+            valid_nb_idx = nb_idx[mask]
+
+            n_valid = len(valid_nb_idx)
+            if n_valid < 2:
+                continue
 
             # Generate all pairs (j, k) for this center
-            for idx_j in range(n_neighbors):
-                for idx_k in range(idx_j + 1, n_neighbors):
-                    triplet_centers.append(center_idx)
-                    triplet_j_idx.append(edge_positions[idx_j].item())
-                    triplet_k_idx.append(edge_positions[idx_k].item())
+            for j_local in range(n_valid):
+                for k_local in range(j_local + 1, n_valid):
+                    triplet_centers.append(i)
+                    triplet_j_global.append(valid_nb_idx[j_local])
+                    triplet_k_global.append(valid_nb_idx[k_local])
+                    triplet_j_local.append(j_local)
+                    triplet_k_local.append(k_local)
 
         if len(triplet_centers) == 0:
             # No valid triplets
@@ -356,21 +344,45 @@ class ChebyshevDescriptor(nn.Module):
         triplet_centers = torch.tensor(
             triplet_centers, dtype=torch.long, device=self.device
         )
-        triplet_j_idx = torch.tensor(
-            triplet_j_idx, dtype=torch.long, device=self.device
+        triplet_j_global = torch.tensor(
+            triplet_j_global, dtype=torch.long, device=self.device
         )
-        triplet_k_idx = torch.tensor(
-            triplet_k_idx, dtype=torch.long, device=self.device
+        triplet_k_global = torch.tensor(
+            triplet_k_global, dtype=torch.long, device=self.device
         )
 
-        # Get distances and vectors for triplets
-        d_ij = distances_ang[triplet_j_idx]
-        d_ik = distances_ang[triplet_k_idx]
-        vec_j = r_ij_norm[triplet_j_idx]
-        vec_k = r_ij_norm[triplet_k_idx]
+        # Collect distances and normalized vectors for all triplets
+        d_ij_list = []
+        d_ik_list = []
+        vec_j_norm_list = []
+        vec_k_norm_list = []
+
+        for idx, center_i in enumerate(triplet_centers):
+            center_i = center_i.item()
+            j_local = triplet_j_local[idx]
+            k_local = triplet_k_local[idx]
+
+            nb_vec = neighbor_vectors[center_i]
+            distances = torch.norm(nb_vec, dim=-1)
+
+            # Filter by cutoff
+            mask = (distances <= self.ang_cutoff
+                    ) & (distances > self.min_cutoff)
+            valid_vec = nb_vec[mask]
+            valid_dist = distances[mask]
+
+            d_ij_list.append(valid_dist[j_local])
+            d_ik_list.append(valid_dist[k_local])
+            vec_j_norm_list.append(valid_vec[j_local] / valid_dist[j_local])
+            vec_k_norm_list.append(valid_vec[k_local] / valid_dist[k_local])
+
+        d_ij = torch.stack(d_ij_list)
+        d_ik = torch.stack(d_ik_list)
+        vec_j_norm = torch.stack(vec_j_norm_list)
+        vec_k_norm = torch.stack(vec_k_norm_list)
 
         # Compute cos(theta_ijk) for all triplets
-        cos_theta = (vec_j * vec_k).sum(dim=1).clamp(-1.0, 1.0)
+        cos_theta = (vec_j_norm * vec_k_norm).sum(dim=1).clamp(-1.0, 1.0)
 
         # Compute angular basis for all triplets
         G_ang = self.ang_basis(d_ij, d_ik, cos_theta)  # (n_triplets, n_ang)
@@ -384,8 +396,8 @@ class ChebyshevDescriptor(nn.Module):
             return ang_features_unweighted
 
         # Typespin-weighted features (for multi-species only)
-        neighbor_j_species = species_indices[j_indices[triplet_j_idx]]
-        neighbor_k_species = species_indices[j_indices[triplet_k_idx]]
+        neighbor_j_species = species_indices[triplet_j_global]
+        neighbor_k_species = species_indices[triplet_k_global]
 
         typespin_j = self.typespin[neighbor_j_species]
         typespin_k = self.typespin[neighbor_k_species]
@@ -410,22 +422,41 @@ class ChebyshevDescriptor(nn.Module):
         self,
         positions: torch.Tensor,
         species: List[str],
+        neighbor_indices: Optional[List[torch.Tensor]] = None,
+        neighbor_vectors: Optional[List[torch.Tensor]] = None,
         cell: Optional[torch.Tensor] = None,
         pbc: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Featurize atomic structure.
 
+        This method supports two calling modes:
+
+        1. With pre-computed neighbors (for gradient computation):
+           forward(positions, species, neighbor_indices, neighbor_vectors)
+
+        2. Legacy mode (automatic neighbor computation):
+           forward(positions, species, cell=cell, pbc=pbc)
+
         Args:
             positions: (N, 3) atomic positions
             species: List of N species names
-            cell: (3, 3) lattice vectors (None for isolated)
-            pbc: (3,) periodic boundary conditions
+            neighbor_indices: List of (nnb_i,) tensors with neighbor
+              atom indices (optional)
+            neighbor_vectors: List of (nnb_i, 3) tensors with
+              displacement vectors (optional)
+            cell: (3, 3) lattice vectors (for legacy mode)
+            pbc: (3,) periodic boundary conditions (for legacy mode)
 
         Returns
         -------
             features: (N, n_features) feature matrix
         """
+        # Legacy mode: compute neighbors automatically
+        if neighbor_indices is None or neighbor_vectors is None:
+            return self.forward_from_positions(positions, species, cell, pbc)
+
+        # New mode: use pre-computed neighbors for gradient computation
         # Convert species to indices
         species_indices = torch.tensor(
             [self.species_to_idx[s] for s in species],
@@ -435,17 +466,15 @@ class ChebyshevDescriptor(nn.Module):
 
         # Move inputs to device
         positions = positions.to(self.device).to(self.dtype)
-        if cell is not None:
-            cell = cell.to(self.device).to(self.dtype)
 
         # Compute radial features
         rad_features = self.compute_radial_features(
-            positions, species_indices, cell, pbc
+            positions, species_indices, neighbor_indices, neighbor_vectors
         )
 
         # Compute angular features
         ang_features = self.compute_angular_features(
-            positions, species_indices, cell, pbc
+            positions, species_indices, neighbor_indices, neighbor_vectors
         )
 
         # Concatenate in Fortran order: [radial_unweighted, angular_unweighted,
@@ -469,6 +498,364 @@ class ChebyshevDescriptor(nn.Module):
 
         return features
 
+    def forward_from_positions(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Convenience method that computes neighbors then calls forward().
+
+        Use this when you don't need gradients and want automatic neighbor
+        computation. For gradient computation, use forward() directly with
+        pre-computed neighbor information.
+
+        Args:
+            positions: (N, 3) atomic positions
+            species: List of N species names
+            cell: (3, 3) lattice vectors (None for isolated)
+            pbc: (3,) periodic boundary conditions
+
+        Returns
+        -------
+            features: (N, n_features) feature matrix
+        """
+        # Move inputs to device
+        positions = positions.to(self.device).to(self.dtype)
+        if cell is not None:
+            cell = cell.to(self.device).to(self.dtype)
+
+        # Get neighbor data using the maximum cutoff
+        neighbor_data = self.nbl.get_neighbors(
+            positions, cell, pbc, fractional=False
+        )
+
+        edge_index = neighbor_data['edge_index']
+        distances = neighbor_data['distances']
+        offsets = neighbor_data['offsets']
+
+        # Filter by minimum cutoff
+        mask = distances > self.min_cutoff
+        edge_index = edge_index[:, mask]
+        distances = distances[mask]
+        if offsets is not None:
+            offsets = offsets[mask]
+
+        # Compute displacement vectors
+        i_indices = edge_index[0]
+        j_indices = edge_index[1]
+
+        if cell is not None and offsets is not None:
+            r_ij = (
+                positions[j_indices] + offsets.to(self.dtype) @ cell
+            ) - positions[i_indices]
+        else:
+            r_ij = positions[j_indices] - positions[i_indices]
+
+        # Organize per atom
+        n_atoms = len(positions)
+        neighbor_indices = []
+        neighbor_vectors = []
+
+        for atom_idx in range(n_atoms):
+            neighbor_mask = i_indices == atom_idx
+            atom_neighbors = j_indices[neighbor_mask]
+            atom_vectors = r_ij[neighbor_mask]
+
+            neighbor_indices.append(atom_neighbors)
+            neighbor_vectors.append(atom_vectors)
+
+        # Call core forward method
+        return self.forward(positions, species,
+                            neighbor_indices, neighbor_vectors)
+
+    def _compute_radial_gradients(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        neighbor_indices: List[torch.Tensor],
+        neighbor_vectors: List[torch.Tensor],
+    ) -> torch.Tensor:
+        """
+        Compute gradients of radial features using a fully vectorized
+        semi-analytical method.
+
+        This method uses the analytical derivatives of the basis functions
+        and the chain rule to compute gradients with respect to atomic
+        positions in a single, vectorized pass.
+
+        Args:
+            positions: (N, 3) atomic positions
+            species_indices: (N,) species index for each atom
+            neighbor_indices: List of neighbor indices per atom
+            neighbor_vectors: List of displacement vectors per atom
+
+        Returns:
+            gradients: (N, n_rad_features, N, 3) gradient tensor
+        """
+        n_atoms = len(positions)
+        n_rad = self.rad_order + 1
+
+        # Build edge lists from neighbor information
+        center_indices_list = []
+        neighbor_indices_list = []
+        vectors_list = []
+
+        for i, (nb_idx, nb_vec) in enumerate(zip(neighbor_indices,
+                                                 neighbor_vectors)):
+            if len(nb_idx) == 0:
+                continue
+
+            distances = torch.norm(nb_vec, dim=-1)
+            mask = (distances <= self.rad_cutoff
+                    ) & (distances > self.min_cutoff)
+            if mask.any():
+                n_valid = mask.sum().item()
+                center_indices_list.append(torch.full(
+                    (n_valid,), i, dtype=torch.long, device=self.device))
+                neighbor_indices_list.append(nb_idx[mask])
+                vectors_list.append(nb_vec[mask])
+
+        if len(vectors_list) == 0:
+            # Return zeros if no neighbors
+            n_rad_features = 2 * n_rad if self.multi else n_rad
+            return torch.zeros(
+                n_atoms, n_rad_features, n_atoms, 3,
+                dtype=self.dtype, device=self.device
+            )
+
+        # Concatenate all edges
+        center_indices = torch.cat(center_indices_list)
+        neighbor_indices_flat = torch.cat(neighbor_indices_list)
+        r_ij = torch.cat(vectors_list)
+
+        # Compute distances and basis derivatives
+        distances = torch.norm(r_ij, dim=-1)
+        _, dG_rad_dr = self.rad_basis.forward_with_derivatives(distances)
+
+        # Chain rule: dG/dr_vec = (dG/dr) * (dr/dr_vec)
+        # dr/dr_vec is the normalized displacement vector
+        dG_rad_drij = dG_rad_dr.unsqueeze(-1) * (
+            r_ij / (distances.unsqueeze(-1) + 1e-10)).unsqueeze(1)
+
+        # Initialize gradient tensor
+        n_rad_features = 2 * n_rad if self.multi else n_rad
+        gradients = torch.zeros(
+            n_atoms, n_rad_features, n_atoms, 3,
+            dtype=self.dtype, device=self.device
+        )
+
+        # Unweighted gradients
+        # Contribution to central atom i: -dG/drij
+        # Contribution to neighbor atom j: +dG/drij
+        # We can do this with two scatter_add operations
+
+        # Reshape for scattering: (n_pairs, n_rad, 3)
+        grad_unweighted = dG_rad_drij
+
+        # Scatter to central atoms (negative contribution)
+        # This is tricky because scatter_add doesn't support (i, j) indexing
+        # We will loop for now, but this can be optimized
+        for pair_idx in range(len(center_indices)):
+            i = center_indices[pair_idx].item()
+            j = neighbor_indices_flat[pair_idx].item()
+
+            gradients[i, :n_rad, i] -= grad_unweighted[pair_idx]
+            gradients[i, :n_rad, j] += grad_unweighted[pair_idx]
+
+        if not self.multi:
+            return gradients
+
+        # Typespin-weighted gradients
+        neighbor_species = species_indices[neighbor_indices_flat]
+        neighbor_typespin = self.typespin[neighbor_species]
+
+        grad_weighted = (grad_unweighted
+                         * neighbor_typespin.unsqueeze(-1).unsqueeze(-1))
+
+        for pair_idx in range(len(center_indices)):
+            i = center_indices[pair_idx].item()
+            j = neighbor_indices_flat[pair_idx].item()
+
+            gradients[i, n_rad:, i] -= grad_weighted[pair_idx]
+            gradients[i, n_rad:, j] += grad_weighted[pair_idx]
+
+        return gradients
+
+    def _compute_angular_gradients(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        neighbor_indices: List[torch.Tensor],
+        neighbor_vectors: List[torch.Tensor],
+    ) -> torch.Tensor:
+        """
+        Compute gradients of angular features using a fully analytical,
+        vectorized method. Avoids autograd on geometric quantities to
+        improve performance and numerical stability (especially under PBC).
+
+        Returns:
+            gradients: (N, n_ang_features, N, 3) gradient tensor
+        """
+        n_atoms = len(positions)
+        n_ang = self.ang_order + 1
+        eps_norm = 1e-12
+        eps_dist = 1e-20
+
+        # Build triplet lists (i, j, k) and corresponding displacement vectors
+        triplet_i: list[int] = []
+        triplet_j: list[int] = []
+        triplet_k: list[int] = []
+        r_ij_list: list[torch.Tensor] = []
+        r_ik_list: list[torch.Tensor] = []
+
+        for i, (nb_idx, nb_vec) in enumerate(zip(neighbor_indices,
+                                                 neighbor_vectors)):
+            if len(nb_idx) < 2:
+                continue
+
+            distances = torch.norm(nb_vec, dim=-1)
+            mask = (distances <= self.ang_cutoff
+                    ) & (distances > self.min_cutoff)
+
+            if not mask.any():
+                continue
+
+            valid_nb_idx = nb_idx[mask]
+            valid_vectors = nb_vec[mask]
+            n_valid = len(valid_nb_idx)
+            if n_valid < 2:
+                continue
+
+            # Generate all unique neighbor pairs (j, k) with j_local < k_local
+            for j_local in range(n_valid):
+                for k_local in range(j_local + 1, n_valid):
+                    triplet_i.append(i)
+                    triplet_j.append(int(valid_nb_idx[j_local].item()))
+                    triplet_k.append(int(valid_nb_idx[k_local].item()))
+                    r_ij_list.append(valid_vectors[j_local])
+                    r_ik_list.append(valid_vectors[k_local])
+
+        if len(triplet_i) == 0:
+            n_ang_features = 2 * n_ang if self.multi else n_ang
+            return torch.zeros(
+                n_atoms, n_ang_features, n_atoms, 3,
+                dtype=self.dtype, device=self.device
+            )
+
+        # Stack and prepare tensors
+        triplet_i_t = torch.tensor(
+            triplet_i, dtype=torch.long, device=self.device)
+        triplet_j_t = torch.tensor(
+            triplet_j, dtype=torch.long, device=self.device)
+        triplet_k_t = torch.tensor(
+            triplet_k, dtype=torch.long, device=self.device)
+        r_ij = torch.stack(r_ij_list
+                           ).to(self.dtype).to(self.device)  # (T, 3)
+        r_ik = torch.stack(r_ik_list
+                           ).to(self.dtype).to(self.device)  # (T, 3)
+
+        # Distances with tiny epsilon to avoid zero-norm issues
+        d_ij = torch.sqrt((r_ij * r_ij).sum(dim=-1) + eps_dist)  # (T,)
+        d_ik = torch.sqrt((r_ik * r_ik).sum(dim=-1) + eps_dist)  # (T,)
+
+        # Unit vectors
+        u_ij = r_ij / (d_ij.unsqueeze(-1) + eps_norm)  # (T, 3)
+        u_ik = r_ik / (d_ik.unsqueeze(-1) + eps_norm)  # (T, 3)
+
+        # Cosine of angle at i
+        cos_theta = (u_ij * u_ik).sum(dim=-1).clamp(-1.0, 1.0)  # (T,)
+
+        # Evaluate angular basis and partial derivatives
+        # Shapes: (T, n_ang)
+        _, dG_dcos, dG_drij, dG_drik = self.ang_basis.forward_with_derivatives(
+            d_ij, d_ik, cos_theta
+        )
+
+        # Geometric derivatives of cos(theta) wrt positions r_j, r_k, r_i
+        # dcos/dr_j = (1/d_ij) * (u_ik - cos_theta * u_ij)
+        # dcos/dr_k = (1/d_ik) * (u_ij - cos_theta * u_ik)
+        # dcos/dr_i = - (dcos/dr_j + dcos/dr_k)
+        dcos_drj = (u_ik - cos_theta.unsqueeze(-1) * u_ij
+                    ) / (d_ij.unsqueeze(-1) + eps_norm)  # (T,3)
+        dcos_drk = (u_ij - cos_theta.unsqueeze(-1) * u_ik
+                    ) / (d_ik.unsqueeze(-1) + eps_norm)  # (T,3)
+        dcos_dri = -(dcos_drj + dcos_drk)  # (T,3)
+
+        # Total gradients per triplet and per angular feature (vectorized)
+        # Shapes for grads_*: (T, n_ang, 3)
+        dG_dcos_e = dG_dcos.unsqueeze(-1)        # (T, n_ang, 1)
+        dG_drij_e = dG_drij.unsqueeze(-1)        # (T, n_ang, 1)
+        dG_drik_e = dG_drik.unsqueeze(-1)        # (T, n_ang, 1)
+        u_ij_e = u_ij.unsqueeze(1)               # (T, 1, 3)
+        u_ik_e = u_ik.unsqueeze(1)               # (T, 1, 3)
+        dcos_drj_e = dcos_drj.unsqueeze(1)       # (T, 1, 3)
+        dcos_drk_e = dcos_drk.unsqueeze(1)       # (T, 1, 3)
+        dcos_dri_e = dcos_dri.unsqueeze(1)       # (T, 1, 3)
+
+        # Chain rule combinations
+        grads_j = dG_dcos_e * dcos_drj_e + dG_drij_e * u_ij_e
+        grads_k = dG_dcos_e * dcos_drk_e + dG_drik_e * u_ik_e
+        grads_i = (dG_dcos_e * dcos_dri_e
+                   - dG_drij_e * u_ij_e - dG_drik_e * u_ik_e)
+
+        # Initialize output gradient tensor
+        n_ang_features = 2 * n_ang if self.multi else n_ang
+        gradients = torch.zeros(
+            n_atoms, n_ang_features, n_atoms, 3,
+            dtype=self.dtype, device=self.device
+        )
+
+        # Prepare flattened center-target indices for efficient scatter
+        # idx = center * n_atoms + target
+        flat_size = n_atoms * n_atoms
+        flat_idx_cc = triplet_i_t * n_atoms + triplet_i_t  # (T,)
+        flat_idx_cj = triplet_i_t * n_atoms + triplet_j_t  # (T,)
+        flat_idx_ck = triplet_i_t * n_atoms + triplet_k_t  # (T,)
+
+        # Accumulate unweighted gradients feature-by-feature
+        for ang_idx in range(n_ang):
+            # (T,3) slices
+            gi = grads_i[:, ang_idx, :]
+            gj = grads_j[:, ang_idx, :]
+            gk = grads_k[:, ang_idx, :]
+
+            # Accumulate into flattened (center, target) axis
+            accum_flat = torch.zeros(
+                flat_size, 3, dtype=self.dtype, device=self.device)
+            accum_flat.index_add_(0, flat_idx_cc, gi)
+            accum_flat.index_add_(0, flat_idx_cj, gj)
+            accum_flat.index_add_(0, flat_idx_ck, gk)
+
+            # Reshape back to (n_atoms, n_atoms, 3) and assign
+            gradients[:, ang_idx, :, :] = accum_flat.view(n_atoms, n_atoms, 3)
+
+        # Typespin-weighted angular gradients (multi-species only)
+        if self.multi:
+            species_j = species_indices[triplet_j_t]
+            species_k = species_indices[triplet_k_t]
+            typespin_prod = (
+                self.typespin[species_j] * self.typespin[species_k]
+                ).unsqueeze(-1)  # (T,1)
+
+            for ang_idx in range(n_ang):
+                gi_w = grads_i[:, ang_idx, :] * typespin_prod
+                gj_w = grads_j[:, ang_idx, :] * typespin_prod
+                gk_w = grads_k[:, ang_idx, :] * typespin_prod
+
+                accum_flat_w = torch.zeros(
+                    flat_size, 3, dtype=self.dtype, device=self.device)
+                accum_flat_w.index_add_(0, flat_idx_cc, gi_w)
+                accum_flat_w.index_add_(0, flat_idx_cj, gj_w)
+                accum_flat_w.index_add_(0, flat_idx_ck, gk_w)
+
+                gradients[:, n_ang + ang_idx, :, :
+                          ] = accum_flat_w.view(n_atoms, n_atoms, 3)
+
+        return gradients
+
     def compute_feature_gradients(
         self,
         positions: torch.Tensor,
@@ -477,9 +864,10 @@ class ChebyshevDescriptor(nn.Module):
         pbc: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute features and their gradients w.r.t. positions.
+        Compute features and their gradients w.r.t. positions efficiently.
 
-        Uses PyTorch autograd to compute ∂features/∂positions.
+        Uses a semi-analytical, vectorized approach that is much faster than
+        the naive feature-by-feature autograd loop.
 
         Args:
             positions: (N, 3) atomic positions
@@ -493,36 +881,84 @@ class ChebyshevDescriptor(nn.Module):
             gradients: (N, F, N, 3) gradient tensor where
                       gradients[i, f, j, k] = ∂feature[i,f]/∂position[j,k]
         """
-        # Enable gradient tracking
-        positions_grad = positions.clone().detach().requires_grad_(True)
+        # Get neighbor information
+        positions_device = positions.to(self.device).to(self.dtype)
+        if cell is not None:
+            cell = cell.to(self.device).to(self.dtype)
 
-        # Compute features
-        features = self.forward(positions_grad, species, cell, pbc)
-
-        N, F = features.shape
-        gradients = torch.zeros(
-            N, F, N, 3, dtype=self.dtype, device=self.device
+        neighbor_data = self.nbl.get_neighbors(
+            positions_device, cell, pbc, fractional=False
         )
 
-        # Compute gradient for each feature of each atom
-        for i in range(N):
-            for f in range(F):
-                # Create grad_outputs tensor
-                grad_out = torch.zeros_like(features)
-                grad_out[i, f] = 1.0
+        edge_index = neighbor_data['edge_index']
+        distances = neighbor_data['distances']
+        offsets = neighbor_data['offsets']
 
-                # Compute gradient
-                grad = torch.autograd.grad(
-                    features,
-                    positions_grad,
-                    grad_outputs=grad_out,
-                    retain_graph=True,
-                    create_graph=False,
-                )[0]
+        mask = distances > self.min_cutoff
+        edge_index = edge_index[:, mask]
+        if offsets is not None:
+            offsets = offsets[mask]
 
-                gradients[i, f] = grad
+        i_indices = edge_index[0]
+        j_indices = edge_index[1]
 
-        return features.detach(), gradients
+        if cell is not None and offsets is not None:
+            r_ij = (
+                positions_device[j_indices] + offsets.to(self.dtype) @ cell
+            ) - positions_device[i_indices]
+        else:
+            r_ij = positions_device[j_indices] - positions_device[i_indices]
+
+        n_atoms = len(positions)
+        neighbor_indices = []
+        neighbor_vectors = []
+        for atom_idx in range(n_atoms):
+            neighbor_mask = i_indices == atom_idx
+            neighbor_indices.append(j_indices[neighbor_mask])
+            neighbor_vectors.append(r_ij[neighbor_mask])
+
+        # Compute features
+        features = self.forward(
+            positions, species, neighbor_indices, neighbor_vectors
+        )
+
+        # Convert species to indices for gradient computation
+        species_indices = torch.tensor(
+            [self.species_to_idx[s] for s in species],
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        # Compute radial and angular gradients
+        rad_grads = self._compute_radial_gradients(
+            positions, species_indices, neighbor_indices, neighbor_vectors
+        )
+        ang_grads = self._compute_angular_gradients(
+            positions, species_indices, neighbor_indices, neighbor_vectors
+        )
+
+        # Combine gradients in the correct feature order
+        n_rad = self.rad_order + 1
+        n_ang = self.ang_order + 1
+
+        gradients = torch.zeros(
+            n_atoms, self.n_features, n_atoms, 3,
+            dtype=self.dtype, device=self.device
+        )
+
+        if self.multi:
+            # Order: [rad_unweighted, ang_unweighted, rad_weighted,
+            # ang_weighted]
+            gradients[:, :n_rad] = rad_grads[:, :n_rad]
+            gradients[:, n_rad:n_rad + n_ang] = ang_grads[:, :n_ang]
+            gradients[:, n_rad + n_ang:2 * n_rad + n_ang
+                      ] = rad_grads[:, n_rad:]
+            gradients[:, 2 * n_rad + n_ang:] = ang_grads[:, n_ang:]
+        else:
+            gradients[:, :n_rad] = rad_grads
+            gradients[:, n_rad:] = ang_grads
+
+        return features, gradients
 
     def compute_forces_from_energy(
         self,
@@ -553,8 +989,9 @@ class ChebyshevDescriptor(nn.Module):
         # Enable gradient tracking for positions
         positions_grad = positions.clone().detach().requires_grad_(True)
 
-        # Compute features
-        features = self.forward(positions_grad, species, cell, pbc)
+        # Compute features using convenience wrapper
+        features = self.forward_from_positions(
+            positions_grad, species, cell, pbc)
 
         # Predict energy
         energy = energy_model(features).sum()
@@ -595,12 +1032,142 @@ class ChebyshevDescriptor(nn.Module):
         )
         pbc_torch = torch.from_numpy(pbc) if pbc is not None else None
 
-        # Featurize
+        # Featurize using convenience wrapper
         with torch.no_grad():
-            features = self.forward(pos_torch, species, cell_torch, pbc_torch)
+            features = self.forward_from_positions(
+                pos_torch, species, cell_torch, pbc_torch)
 
         # Convert back to numpy
         return features.cpu().numpy()
+
+    def featurize_with_neighbor_info(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        cell: Optional[torch.Tensor] = None,
+        pbc: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Featurize structure and extract neighbor information for
+        force training.
+
+        This method computes atomic features and extracts neighbor lists and
+        displacement vectors needed for computing feature derivatives during
+        force training. The neighbor information can be saved to HDF5 for
+        later use with on-demand derivative computation.
+
+        Args:
+            positions: (N, 3) atomic positions (Cartesian coordinates)
+            species: List of N species names
+            cell: (3, 3) lattice vectors as rows (None for isolated systems)
+            pbc: (3,) periodic boundary conditions (default: all True if
+              cell provided)
+
+        Returns
+        -------
+            features: (N, n_features) feature tensor
+            neighbor_info: Dictionary containing:
+                - 'neighbor_counts': (N,) number of neighbors per atom
+                - 'neighbor_lists': List of N arrays, each containing
+                      neighbor indices
+                - 'neighbor_vectors': List of N arrays, each (nnb, 3)
+                      displacement vectors
+                - 'max_neighbors': int, maximum number of neighbors
+                      across all atoms
+
+        Example
+        -------
+            >>> descriptor = ChebyshevDescriptor(['O', 'H'], 10, 4.0, 3, 1.5)
+            >>> positions = torch.tensor([[0.0, 0.0, 0.0],
+            ...                           [0.0, 0.0, 1.0],
+            ...                           [0.0, 1.0, 0.0]])
+            >>> features, neighbor_info = \
+            ...         descriptor.featurize_with_neighbor_info(
+            ...     positions, ['O', 'H', 'H']
+            ... )
+            >>> print(neighbor_info['neighbor_counts'])  # tensor([2, 1, 1])
+            >>> print(neighbor_info['max_neighbors'])    # 2
+
+        Notes
+        -----
+        The neighbor cutoff used is the maximum of rad_cutoff and ang_cutoff
+        to ensure all neighbors relevant for both radial and angular features
+        are included.
+
+        The displacement vectors are computed as r_j - r_i for neighbor j
+        of atom i, and include periodic image offsets when applicable.
+        """
+        # Move inputs to device
+        positions = positions.to(self.device).to(self.dtype)
+        if cell is not None:
+            cell = cell.to(self.device).to(self.dtype)
+
+        # Get neighbor data using the maximum cutoff
+        # Use fractional=False since positions are assumed Cartesian
+        neighbor_data = self.nbl.get_neighbors(
+            positions, cell, pbc, fractional=False
+        )
+
+        edge_index = neighbor_data['edge_index']
+        distances = neighbor_data['distances']
+        offsets = neighbor_data['offsets']  # None for isolated systems
+
+        # Filter by minimum cutoff (remove too-close neighbors)
+        mask = distances > self.min_cutoff
+        edge_index = edge_index[:, mask]
+        distances = distances[mask]
+        if offsets is not None:
+            offsets = offsets[mask]
+
+        # Compute displacement vectors for all neighbor pairs
+        i_indices = edge_index[0]
+        j_indices = edge_index[1]
+
+        if cell is not None and offsets is not None:
+            # Periodic system: include cell offsets
+            r_ij = (
+                positions[j_indices] + offsets.to(self.dtype) @ cell
+            ) - positions[i_indices]
+        else:
+            # Isolated system
+            r_ij = positions[j_indices] - positions[i_indices]
+
+        # Organize neighbor information per atom
+        n_atoms = len(positions)
+        neighbor_counts = torch.zeros(
+            n_atoms, dtype=torch.long, device=self.device)
+        neighbor_indices_list = []
+        neighbor_vectors_list = []
+
+        for atom_idx in range(n_atoms):
+            # Find all neighbors of this atom
+            neighbor_mask = i_indices == atom_idx
+            atom_neighbors = j_indices[neighbor_mask]
+            atom_vectors = r_ij[neighbor_mask]
+
+            neighbor_counts[atom_idx] = len(atom_neighbors)
+            neighbor_indices_list.append(atom_neighbors)
+            neighbor_vectors_list.append(atom_vectors)
+
+        # Compute features using core forward method with neighbor data
+        features = self.forward(
+            positions, species, neighbor_indices_list, neighbor_vectors_list)
+
+        # Package neighbor info for output (convert to numpy)
+        neighbor_lists_np = [nb.cpu().numpy() for nb in neighbor_indices_list]
+        neighbor_vectors_np = [vec.cpu().numpy()
+                               for vec in neighbor_vectors_list]
+
+        max_neighbors = neighbor_counts.max().item() if n_atoms > 0 else 0
+
+        neighbor_info = {
+            'neighbor_counts': neighbor_counts.cpu().numpy(),
+            'neighbor_lists': neighbor_lists_np,
+            'neighbor_vectors': neighbor_vectors_np,
+            'max_neighbors': max_neighbors,
+        }
+
+        return features, neighbor_info
 
 
 class BatchedFeaturizer(nn.Module):
@@ -650,7 +1217,9 @@ class BatchedFeaturizer(nn.Module):
             cell = batch_cells[batch_idx] if batch_cells else None
             pbc = batch_pbc[batch_idx] if batch_pbc else None
 
-            features = self.featurizer(pos, species, cell, pbc)
+            # Use convenience wrapper
+            features = self.featurizer.forward_from_positions(
+                pos, species, cell, pbc)
             all_features.append(features)
             all_batch_indices.append(
                 torch.full((len(pos),), batch_idx, dtype=torch.long)

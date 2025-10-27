@@ -52,6 +52,8 @@ Contents
    usage/trainset
    usage/training
    dev/commandline
+   dev/analytical_gradients
+   dev/angular_gradient_math
 
 API Reference
 -------------
