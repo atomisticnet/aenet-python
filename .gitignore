@@ -11,3 +11,10 @@ dist/
 build/
 notebooks-work/
 .virtual_documents
+
+fortran/
+
+# Sphinx build and generated files
+docs/_build/
+docs/api/generated/
+docs/source/api/generated/
