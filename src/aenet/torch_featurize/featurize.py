@@ -579,8 +579,7 @@ class ChebyshevDescriptor(nn.Module):
         neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute gradients of radial features using a fully vectorized
-        semi-analytical method.
+        Compute gradients of radial features using a fully vectorized semi-analytical method.
 
         This method uses the analytical derivatives of the basis functions
         and the chain rule to compute gradients with respect to atomic
@@ -592,7 +591,8 @@ class ChebyshevDescriptor(nn.Module):
             neighbor_indices: List of neighbor indices per atom
             neighbor_vectors: List of displacement vectors per atom
 
-        Returns:
+        Returns
+        -------
             gradients: (N, n_rad_features, N, 3) gradient tensor
         """
         n_atoms = len(positions)
@@ -692,11 +692,13 @@ class ChebyshevDescriptor(nn.Module):
         neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute gradients of angular features using a fully analytical,
-        vectorized method. Avoids autograd on geometric quantities to
+        Compute gradients of angular features using a fully analytical, vectorized method.
+
+        Avoids autograd on geometric quantities to
         improve performance and numerical stability (especially under PBC).
 
-        Returns:
+        Returns
+        -------
             gradients: (N, n_ang_features, N, 3) gradient tensor
         """
         n_atoms = len(positions)
@@ -960,6 +962,77 @@ class ChebyshevDescriptor(nn.Module):
 
         return features, gradients
 
+    def compute_feature_gradients_from_neighbor_info(
+        self,
+        positions: torch.Tensor,
+        species: List[str],
+        neighbor_indices: List[torch.Tensor],
+        neighbor_vectors: List[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute features and their gradients using precomputed neighbor info.
+
+        This avoids recomputing neighbors and displacement vectors by reusing
+        neighbor_indices and neighbor_vectors produced earlier (e.g., by
+        featurize_with_neighbor_info).
+
+        Args:
+            positions: (N, 3) atomic positions
+            species: List of N species names
+            neighbor_indices: List of (nnb_i,) tensors with neighbor indices
+            neighbor_vectors: List of (nnb_i, 3) tensors with displacement vectors
+
+        Returns
+        -------
+            features: (N, F) feature tensor
+            gradients: (N, F, N, 3) gradient tensor where
+                       gradients[i, f, j, k] = ∂feature[i,f]/∂position[j,k]
+        """
+        # Move positions to device/dtype
+        positions_device = positions.to(self.device).to(self.dtype)
+
+        # Compute features using provided neighbor data
+        features = self.forward(
+            positions_device, species, neighbor_indices, neighbor_vectors
+        )
+
+        # Species indices
+        species_indices = torch.tensor(
+            [self.species_to_idx[s] for s in species],
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        # Compute radial and angular gradients using provided neighbor data
+        rad_grads = self._compute_radial_gradients(
+            positions_device, species_indices, neighbor_indices, neighbor_vectors
+        )
+        ang_grads = self._compute_angular_gradients(
+            positions_device, species_indices, neighbor_indices, neighbor_vectors
+        )
+
+        # Combine in correct feature order
+        n_rad = self.rad_order + 1
+        n_ang = self.ang_order + 1
+
+        n_atoms = positions_device.shape[0]
+        gradients = torch.zeros(
+            n_atoms, self.n_features, n_atoms, 3,
+            dtype=self.dtype, device=self.device
+        )
+
+        if self.multi:
+            # [rad_unweighted, ang_unweighted, rad_weighted, ang_weighted]
+            gradients[:, :n_rad] = rad_grads[:, :n_rad]
+            gradients[:, n_rad:n_rad + n_ang] = ang_grads[:, :n_ang]
+            gradients[:, n_rad + n_ang:2 * n_rad + n_ang] = rad_grads[:, n_rad:]
+            gradients[:, 2 * n_rad + n_ang:] = ang_grads[:, n_ang:]
+        else:
+            gradients[:, :n_rad] = rad_grads
+            gradients[:, n_rad:] = ang_grads
+
+        return features, gradients
+
     def compute_forces_from_energy(
         self,
         positions: torch.Tensor,
@@ -1048,8 +1121,7 @@ class ChebyshevDescriptor(nn.Module):
         pbc: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
         """
-        Featurize structure and extract neighbor information for
-        force training.
+        Featurize structure and extract neighbor information for force training.
 
         This method computes atomic features and extracts neighbor lists and
         displacement vectors needed for computing feature derivatives during

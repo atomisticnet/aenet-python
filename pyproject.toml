@@ -130,3 +130,8 @@ quote-style = "double"
 indent-style = "space"
 # Use line endings consistent with the OS
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+markers = [
+    "cpu: mark tests intended for CPU-only execution or labeled as CPU",
+]
