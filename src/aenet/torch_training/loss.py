@@ -186,25 +186,29 @@ def compute_force_loss(
     if neighbor_info is not None and hasattr(
         descriptor, "compute_feature_gradients_from_neighbor_info"
     ):
-        # Convert neighbor_info lists to tensors on same device/dtype as positions
+        # Convert neighbor_info lists to tensors on same
+        # device/dtype as positions
         nb_idx_list_t: list[torch.Tensor] = []
         nb_vec_list_t: list[torch.Tensor] = []
         for nb_idx, nb_vec in zip(
             neighbor_info["neighbor_lists"], neighbor_info["neighbor_vectors"]
         ):
             nb_idx_list_t.append(
-                torch.as_tensor(nb_idx, dtype=torch.long, device=positions.device)
+                torch.as_tensor(nb_idx, dtype=torch.long,
+                                device=positions.device)
             )
             nb_vec_list_t.append(
-                torch.as_tensor(nb_vec, dtype=positions.dtype, device=positions.device)
+                torch.as_tensor(nb_vec, dtype=positions.dtype,
+                                device=positions.device)
             )
 
-        features, grad_features = descriptor.compute_feature_gradients_from_neighbor_info(
-            positions=positions,
-            species=species,
-            neighbor_indices=nb_idx_list_t,
-            neighbor_vectors=nb_vec_list_t,
-        )
+        features, grad_features = \
+            descriptor.compute_feature_gradients_from_neighbor_info(
+                positions=positions,
+                species=species,
+                neighbor_indices=nb_idx_list_t,
+                neighbor_vectors=nb_vec_list_t,
+            )
     else:
         # Fallback: recompute neighbor information (slower)
         features, grad_features = descriptor.compute_feature_gradients(

@@ -10,12 +10,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ..model_adapter import EnergyModelAdapter
 from ..loss import (
+    compute_combined_loss,
     compute_energy_loss,
     compute_force_loss,
-    compute_combined_loss,
 )
+from ..model_adapter import EnergyModelAdapter
 
 
 class DummyNetAtom(nn.Module):
@@ -26,7 +26,8 @@ class DummyNetAtom(nn.Module):
     - device attribute
     """
 
-    def __init__(self, in_features_per_species, device="cpu", dtype=torch.float64):
+    def __init__(self, in_features_per_species,
+                 device="cpu", dtype=torch.float64):
         super().__init__()
         self.device = device
         self.dtype = dtype
@@ -54,14 +55,16 @@ class DummyDescriptor:
         self.features = features
         self.grad_features = grad_features
 
-    def compute_feature_gradients(self, positions, species, cell=None, pbc=None):
+    def compute_feature_gradients(self, positions, species,
+                                  cell=None, pbc=None):
         # Ignore inputs; return stored tensors
         return self.features.clone(), self.grad_features.clone()
 
     def compute_feature_gradients_from_neighbor_info(
         self, positions, species, neighbor_indices, neighbor_vectors
     ):
-        # Same behavior; we test that neighbor_info and non-neighbor_info paths match
+        # Same behavior; we test that neighbor_info and
+        # non-neighbor_info paths match
         return self.features.clone(), self.grad_features.clone()
 
 
@@ -82,10 +85,12 @@ class TestEnergyModelAdapter:
         # Initialize weights/biases for reproducibility
         with torch.no_grad():
             # species 0
-            net.functions[0][0].weight.copy_(torch.tensor([[0.1, -0.2, 0.3]], dtype=dtype))
+            net.functions[0][0].weight.copy_(
+                torch.tensor([[0.1, -0.2, 0.3]], dtype=dtype))
             net.functions[0][0].bias.copy_(torch.tensor([0.5], dtype=dtype))
             # species 1
-            net.functions[1][0].weight.copy_(torch.tensor([[0.4, 0.0, -0.1]], dtype=dtype))
+            net.functions[1][0].weight.copy_(
+                torch.tensor([[0.4, 0.0, -0.1]], dtype=dtype))
             net.functions[1][0].bias.copy_(torch.tensor([-0.2], dtype=dtype))
 
         adapter = EnergyModelAdapter(net, n_species=2)
@@ -94,11 +99,11 @@ class TestEnergyModelAdapter:
         species_indices = torch.tensor([0, 1, 0, 1, 0], dtype=torch.long)
         features = torch.tensor(
             [
-                [1.0, 2.0, 3.0],   # sp0
-                [0.5, -1.0, 2.0],  # sp1
-                [0.0, 0.0, 1.0],   # sp0
-                [3.0, 1.0, 0.0],   # sp1
-                [-1.0, 2.0, -2.0], # sp0
+                [1.0, 2.0, 3.0],    # sp0
+                [0.5, -1.0, 2.0],   # sp1
+                [0.0, 0.0, 1.0],    # sp0
+                [3.0, 1.0, 0.0],    # sp1
+                [-1.0, 2.0, -2.0],  # sp0
             ],
             dtype=dtype,
         )
@@ -140,9 +145,11 @@ class TestEnergyLoss:
         net = DummyNetAtom(in_features_per_species, device=device, dtype=dtype)
         # Simple weights for determinism
         with torch.no_grad():
-            net.functions[0][0].weight.copy_(torch.tensor([[1.0, 0.0]], dtype=dtype))
+            net.functions[0][0].weight.copy_(
+                torch.tensor([[1.0, 0.0]], dtype=dtype))
             net.functions[0][0].bias.copy_(torch.tensor([0.0], dtype=dtype))
-            net.functions[1][0].weight.copy_(torch.tensor([[0.0, 1.0]], dtype=dtype))
+            net.functions[1][0].weight.copy_(
+                torch.tensor([[0.0, 1.0]], dtype=dtype))
             net.functions[1][0].bias.copy_(torch.tensor([0.0], dtype=dtype))
 
         adapter = EnergyModelAdapter(net, n_species=2)
@@ -220,9 +227,11 @@ class TestForceLoss:
         # Positions/species (unused by DummyDescriptor but required by API)
         positions = torch.zeros(N, 3, dtype=dtype)
         species = ["A" if i % 2 == 0 else "B" for i in range(N)]
-        species_indices = torch.tensor([0 if s == "A" else 1 for s in species], dtype=torch.long)
+        species_indices = torch.tensor(
+            [0 if s == "A" else 1 for s in species], dtype=torch.long)
 
-        # Reference forces: use zeros to test consistency (we only validate equality paths)
+        # Reference forces: use zeros to test consistency
+        # (we only validate equality paths)
         forces_ref = torch.zeros(N, 3, dtype=dtype)
 
         # No neighbor_info path
@@ -283,7 +292,6 @@ class TestCombinedLoss:
         """
         dtype = torch.float64
         # Fabricate small tensors
-        B = 2
         N = 3
         F = 2
 
@@ -305,11 +313,12 @@ class TestCombinedLoss:
             ],
             dtype=dtype,
         )
-        energy_ref = torch.tensor([4.0, 4.0], dtype=dtype)  # Pred E: 4 and 4 (match)
+        energy_ref = torch.tensor([4.0, 4.0], dtype=dtype)
 
         # Dummy descriptor that returns gradients contracting to zero forces
         zero_grad = torch.zeros(N, F, N, 3, dtype=dtype)
-        descriptor = DummyDescriptor(features=features, grad_features=zero_grad)
+        descriptor = DummyDescriptor(features=features,
+                                     grad_features=zero_grad)
         positions = torch.zeros(N, 3, dtype=dtype)
         species = ["X"] * N
         forces_ref = torch.zeros(N, 3, dtype=dtype)
@@ -370,5 +379,6 @@ class TestCombinedLoss:
             E_scaling=1.0,
             use_forces=True,
         )
-        expected = (1.0 - 0.25) * metricsa["energy_loss"] + 0.25 * metricsa["force_loss"]
+        expected = ((1.0 - 0.25) * metricsa["energy_loss"]
+                    + 0.25 * metricsa["force_loss"])
         assert torch.allclose(combineda, expected, atol=1e-12)

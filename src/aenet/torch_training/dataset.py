@@ -15,7 +15,7 @@ from torch.utils.data import Dataset
 
 from .config import Structure
 
-__all__ = ['StructureDataset']
+__all__ = ['StructureDataset', 'CachedStructureDataset']
 
 
 class StructureDataset(Dataset):
@@ -292,11 +292,103 @@ class StructureDataset(Dataset):
         }
 
 
-def train_test_split(
-    dataset: StructureDataset,
-    test_fraction: float = 0.1,
-    seed: Optional[int] = None,
-) -> Tuple[StructureDataset, StructureDataset]:
+class CachedStructureDataset(Dataset):
+    """
+    Dataset that caches per-structure features for energy-only training.
+
+    This avoids per-epoch featurization cost by computing features once
+    at initialization. Force-related fields are disabled (use_forces=False).
+    """
+    def __init__(
+        self,
+        structures: List[Structure],
+        descriptor,  # ChebyshevDescriptor
+        max_energy: Optional[float] = None,
+        max_forces: Optional[float] = None,
+        seed: Optional[int] = None,
+    ):
+        self.descriptor = descriptor
+        self.max_energy = max_energy
+        self.max_forces = max_forces
+        self.seed = seed
+
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+
+        # Filter structures using the same logic as StructureDataset
+        self.structures = self._filter_structures(structures)
+
+        # Build cached samples
+        self._cached: List[dict] = []
+        with torch.no_grad():
+            for i, struct in enumerate(self.structures):
+                positions = torch.as_tensor(
+                    struct.positions, dtype=descriptor.dtype)
+                cell = (
+                    torch.as_tensor(struct.cell, dtype=descriptor.dtype)
+                    if struct.cell is not None else None
+                )
+                pbc = (
+                    torch.as_tensor(struct.pbc)
+                    if struct.pbc is not None else None
+                )
+                # Energy-only: features are sufficient;
+                # use forward_from_positions
+                features = descriptor.forward_from_positions(
+                    positions, struct.species, cell, pbc)
+                species_indices = torch.tensor(
+                    [descriptor.species_to_idx[s] for s in struct.species],
+                    dtype=torch.long
+                )
+                sample = {
+                    'features': features,
+                    'species_indices': species_indices,
+                    'n_atoms': struct.n_atoms,
+                    'energy': float(struct.energy),
+                    'species': struct.species,
+                    # Force-related fields disabled for cached energy-only path
+                    'positions': None,
+                    'forces': None,
+                    'neighbor_info': None,
+                    'use_forces': False,
+                    'cell': cell,
+                    'pbc': pbc,
+                    'name': (struct.name if struct.name is not None
+                             else f"struct_{i}"),
+                }
+                self._cached.append(sample)
+
+    def _filter_structures(
+        self,
+        structures: List[Structure]
+    ) -> List[Structure]:
+        filtered: List[Structure] = []
+        for struct in structures:
+            # Energy threshold
+            if self.max_energy is not None:
+                energy_per_atom = struct.energy / struct.n_atoms
+                if energy_per_atom > self.max_energy:
+                    continue
+            # Force threshold
+            if self.max_forces is not None and struct.has_forces():
+                max_force = np.abs(struct.forces).max()
+                if max_force > self.max_forces:
+                    continue
+            filtered.append(struct)
+        return filtered
+
+    def __len__(self) -> int:
+        return len(self._cached)
+
+    def __getitem__(self, idx: int) -> dict:
+        return self._cached[idx]
+
+
+def train_test_split(dataset: StructureDataset,
+                     test_fraction: float = 0.1,
+                     seed: Optional[int] = None,
+                     ) -> Tuple[StructureDataset, StructureDataset]:
     """
     Split dataset into training and test sets.
 

@@ -1,5 +1,4 @@
 import math
-import os
 from pathlib import Path
 
 import numpy as np
@@ -111,7 +110,8 @@ def test_energy_only_smoke(tmp_path: Path):
     assert ckpt_dir.exists()
     # Either checkpoint_epoch_0000.pt or best_model.pt (or both)
     files = {p.name for p in ckpt_dir.iterdir()}
-    assert any(name.startswith("checkpoint_epoch_") and name.endswith(".pt") for name in files)
+    assert any(name.startswith("checkpoint_epoch_")
+               and name.endswith(".pt") for name in files)
 
 
 @pytest.mark.cpu

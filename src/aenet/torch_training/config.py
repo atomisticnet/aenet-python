@@ -261,12 +261,21 @@ class TorchTrainingConfig:
     # Normalization controls (defaults match aenet-Fortran/PyTorch behavior)
     normalize_features: bool = True
     normalize_energy: bool = True
+    # Cached features path (energy-only optimization)
+    cached_features: bool = False
+    # DataLoader parallelism (on-the-fly featurization)
+    num_workers: int = 0
+    prefetch_factor: int = 2
+    persistent_workers: bool = True
     # Optional overrides/stats (if not provided, computed from training split)
     # feature statistics format:
     # {'mean': np.ndarray[F], 'std': np.ndarray[F]}
     feature_stats: Optional[Dict[str, Any]] = None
     E_shift: Optional[float] = None  # per-atom shift
     E_scaling: Optional[float] = None  # energy scaling
+    # Progress display
+    show_progress: bool = True
+    show_batch_progress: bool = False
 
     def __post_init__(self):
         """Validate parameters after initialization."""
@@ -313,6 +322,15 @@ class TorchTrainingConfig:
         if self.iterations < 0:
             raise ValueError(
                 f"iterations must be >= 0, got {self.iterations}"
+            )
+        # Validate DataLoader workers
+        if self.num_workers < 0:
+            raise ValueError(
+                f"num_workers must be >= 0, got {self.num_workers}"
+            )
+        if self.prefetch_factor < 1:
+            raise ValueError(
+                f"prefetch_factor must be >= 1, got {self.prefetch_factor}"
             )
 
         # Default method to Adam if not provided

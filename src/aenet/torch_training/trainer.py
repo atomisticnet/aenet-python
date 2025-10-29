@@ -5,7 +5,7 @@ Implements TorchANNPotential which mirrors aenet.mlip.ANNPotential-style API
 for training and prediction, using:
 - ChebyshevDescriptor (on-the-fly features + neighbor_info)
 - EnergyModelAdapter over aenet-PyTorch NetAtom
-- Loss functions from src/aenet/torch_training/loss.py
+- Modular components for building, training, and inference
 
 Notes
 -----
@@ -18,8 +18,6 @@ Notes
 from __future__ import annotations
 
 import time
-import math
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,10 +25,26 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from .config import TorchTrainingConfig, Structure, TrainingMethod, Adam, SGD
+# Progress bar (match aenet.mlip behavior)
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:
+    tqdm = None  # type: ignore
+
+from .config import TorchTrainingConfig, Structure, TrainingMethod
 from .dataset import StructureDataset, train_test_split
 from .model_adapter import EnergyModelAdapter
-from .loss import compute_energy_loss, compute_force_loss
+
+# Refactored modules
+from .builders import NetworkBuilder, OptimizerBuilder
+from .training import (
+    CheckpointManager,
+    MetricsTracker,
+    NormalizationManager,
+    TrainingLoop,
+)
+from .training import training_loop as training_loop_mod
+from .inference import Predictor
 
 
 def _resolve_device(config: TorchTrainingConfig) -> torch.device:
@@ -39,281 +53,17 @@ def _resolve_device(config: TorchTrainingConfig) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _method_batch_size(method: TrainingMethod) -> int:
-    if hasattr(method, "batchsize"):
-        return int(getattr(method, "batchsize"))
-    if hasattr(method, "batch_size"):
-        return int(getattr(method, "batch_size"))
-    return 32
-
-
-def _import_netatom() -> Optional[type]:
+def _iter_progress(iterable, enable: bool, desc: str):
     """
-    Dynamically import aenet-PyTorch NetAtom from external/aenet-pytorch.
-
-    Returns
-    -------
-    NetAtom class or None if not found.
+    Wrap an iterable with tqdm progress bar if enabled and available.
     """
-    try:
-        # trainer.py -> torch_training -> aenet -> src -> project root
-        root = Path(__file__).resolve().parents[3]
-        net_path = root / "external" / "aenet-pytorch" / "src" / "network.py"
-        if not net_path.exists():
-            return None
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "aenet_pytorch.network", str(net_path)
-        )
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[assignment]
-        if hasattr(module, "NetAtom"):
-            return getattr(module, "NetAtom")
-        return None
-    except Exception:
-        return None
-
-
-def _validate_arch(
-    arch: Dict[str, List[Tuple[int, str]]],
-    species_order: List[str],
-) -> Tuple[List[List[int]], List[List[str]]]:
-    """
-    Validate architecture and produce per-species hidden sizes and activations.
-
-    Parameters
-    ----------
-    arch : dict
-        {species_symbol: [(nodes, activation), ...]} (output layer is implicit)
-    species_order : list[str]
-        Species ordering to align with descriptor/species_indices
-
-    Returns
-    -------
-    hidden_sizes : list[list[int]]
-    activations : list[list[str]]
-
-    Raises
-    ------
-    ValueError on unsupported activation or missing species.
-    """
-    supported = {"linear", "tanh", "sigmoid"}
-    hidden_sizes: List[List[int]] = []
-    activations: List[List[str]] = []
-
-    for s in species_order:
-        if s not in arch:
-            raise ValueError(f"Species '{s}' missing in architecture.")
-        layers = arch[s]
-        hs: List[int] = []
-        acts: List[str] = []
-        for nodes, act in layers:
-            act_l = act.lower()
-            if act_l not in supported:
-                raise ValueError(
-                    f"Unsupported activation '{act}' for species '{s}'. "
-                    f"Supported: {sorted(supported)}"
-                )
-            hs.append(int(nodes))
-            acts.append(act_l)
-        if len(hs) == 0:
-            raise ValueError(f"Architecture for species '{s}' must be non-empty.")
-        hidden_sizes.append(hs)
-        activations.append(acts)
-    return hidden_sizes, activations
-
-
-def _build_fallback_per_species_mlps(
-    n_features: int,
-    species: List[str],
-    hidden_sizes: List[List[int]],
-    activations: List[List[str]],
-) -> nn.ModuleList:
-    """
-    Fallback builder that mimics NetAtom.functions[iesp] layout.
-
-    Returns
-    -------
-    nn.ModuleList of per-species nn.Sequential models mapping (F) -> (1)
-    """
-    act_map: Dict[str, nn.Module] = {
-        "linear": nn.Identity(),
-        "tanh": nn.Tanh(),
-        "sigmoid": nn.Sigmoid(),
-    }
-    seqs: List[nn.Sequential] = []
-    for i, _sp in enumerate(species):
-        hs = hidden_sizes[i]
-        acts = activations[i]
-        layers: List[Tuple[str, nn.Module]] = []
-        # First linear + act
-        layers.append((f"Linear_Sp{i+1}_F1", nn.Linear(n_features, hs[0])))
-        layers.append((f"Active_Sp{i+1}_F1", act_map[acts[0]]))
-        # Hidden stacks
-        for j in range(1, len(hs)):
-            layers.append(
-                (f"Linear_Sp{i+1}_F{j+1}", nn.Linear(hs[j - 1], hs[j]))
-            )
-            layers.append((f"Active_Sp{i+1}_F{j+1}", act_map[acts[j]]))
-        # Output layer
-        layers.append((f"Linear_Sp{i+1}_F{len(hs)+1}", nn.Linear(hs[-1], 1)))
-        seqs.append(nn.Sequential(dict(layers)))  # type: ignore[arg-type]
-    return nn.ModuleList(seqs)
-
-
-def _build_network_from_arch(
-    arch: Dict[str, List[Tuple[int, str]]],
-    descriptor,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> nn.Module:
-    """
-    Build NetAtom (preferred) or fallback per-species MLPs.
-
-    Returns
-    -------
-    net : nn.Module
-        - If NetAtom available: an instance with attributes:
-            .functions: ModuleList of per-species Sequential MLPs
-            .device: device string
-        - Else: a small wrapper exposing .functions and .device
-    """
-    species = list(descriptor.species)
-    n_features = int(descriptor.get_n_features())
-    hidden_sizes, activations = _validate_arch(arch, species)
-    NetAtom = _import_netatom()
-
-    if NetAtom is not None:
-        # NetAtom expects lists per species
-        input_size = [n_features for _ in species]
-        alpha = 1.0
-        net = NetAtom(
-            input_size=input_size,
-            hidden_size=hidden_sizes,
-            species=species,
-            activations=activations,
-            alpha=alpha,
-            device=str(device),
-        )
-        # Ensure dtype/device
-        if dtype == torch.float64:
-            net = net.double()
-        else:
-            net = net.float()
-        # NetAtom stores device string
-        net.device = str(device)
-        net.to(device)
-        return net
-
-    # Fallback: simple wrapper with .functions and .device
-    class _FallbackNet(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.functions = _build_fallback_per_species_mlps(
-                n_features=n_features,
-                species=species,
-                hidden_sizes=hidden_sizes,
-                activations=activations,
-            )
-            self.species = species  # for debugging
-            self.device = str(device)
-
-        def forward(self, *args, **kwargs):  # not used; adapter calls .functions
-            raise RuntimeError("Use EnergyModelAdapter to call per-atom energies.")
-
-    net = _FallbackNet()
-    if dtype == torch.float64:
-        net = net.double()
-    else:
-        net = net.float()
-    net.to(device)
-    return net
-
-
-def _optimizer_from_config(
-    params, method: TrainingMethod
-) -> torch.optim.Optimizer:
-    if isinstance(method, Adam):
-        return torch.optim.Adam(
-            params,
-            lr=float(method.mu),
-            betas=(float(method.beta1), float(method.beta2)),
-            eps=float(method.epsilon),
-            weight_decay=float(method.weight_decay),
-        )
-    if isinstance(method, SGD):
-        return torch.optim.SGD(
-            params,
-            lr=float(method.lr),
-            momentum=float(method.momentum),
-            weight_decay=float(method.weight_decay),
-        )
-    # Default to Adam with conservative params if unknown
-    return torch.optim.Adam(params, lr=1e-3)
-
-
-def _maybe_scheduler(
-    optimizer: torch.optim.Optimizer,
-    use_scheduler: bool,
-    scheduler_patience: int,
-    scheduler_factor: float,
-    scheduler_min_lr: float,
-):
-    if not use_scheduler:
-        return None
-    return torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=scheduler_factor,
-        patience=scheduler_patience,
-        min_lr=scheduler_min_lr,
-        verbose=False,
-    )
-
-
-def _ensure_dir(path: Path):
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def _rotate_checkpoints(ckpt_dir: Path, max_to_keep: int):
-    ckpts = sorted(ckpt_dir.glob("checkpoint_epoch_*.pt"))
-    if len(ckpts) <= max_to_keep:
-        return
-    to_remove = ckpts[: len(ckpts) - max_to_keep]
-    for p in to_remove:
+    if enable and tqdm is not None:
         try:
-            p.unlink()
+            total = len(iterable)  # type: ignore[arg-type]
         except Exception:
-            pass
-
-
-def _serialize_config(config: TorchTrainingConfig) -> Dict[str, Any]:
-    # Dataclass to dict, but nested classes may not be dataclasses
-    d = asdict(config)
-    if isinstance(config.method, TrainingMethod):
-        # Replace method with a simple dict
-        d["method"] = {
-            "name": getattr(config.method, "method_name", "unknown"),
-            **{k: v for k, v in config.method.__dict__.items()},
-        }
-    return d
-
-
-def _descriptor_config(desc) -> Dict[str, Any]:
-    return {
-        "species": list(desc.species),
-        "rad_order": int(desc.rad_order),
-        "rad_cutoff": float(desc.rad_cutoff),
-        "ang_order": int(desc.ang_order),
-        "ang_cutoff": float(desc.ang_cutoff),
-        "min_cutoff": float(desc.min_cutoff),
-        "dtype": str(desc.dtype).replace("torch.", ""),
-        "device": str(desc.device),
-        "n_features": int(desc.get_n_features()),
-    }
+            total = None
+        return tqdm(iterable, total=total, desc=desc, ncols=80, leave=False)
+    return iterable
 
 
 def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
@@ -322,7 +72,8 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
 
     Returns a dict with:
       - energy view (all structures):
-          features: (N,F), species_indices: (N,), n_atoms: (B,), energy_ref: (B,)
+          features: (N,F), species_indices: (N,), n_atoms: (B,),
+          energy_ref: (B,)
       - force view (only selected structures):
           positions_f, species_f (list[str]), species_indices_f: (Nf,),
           forces_ref_f: (Nf,3), neighbor_info_f: dict (lists length Nf)
@@ -354,7 +105,8 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         energy_ref_list.append(float(sample["energy"]))
 
     # Build energy-view tensors
-    features = torch.cat(features_list, dim=0) if features_list else torch.empty(0, 0)
+    features = (torch.cat(features_list, dim=0)
+                if features_list else torch.empty(0, 0))
     species_indices = (
         torch.cat(species_idx_list, dim=0)
         if species_idx_list
@@ -390,11 +142,13 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         base_atom_idx_force += int(pos.shape[0])
 
     force_view_present = len(positions_f_list) > 0
-    positions_f = torch.cat(positions_f_list, dim=0) if force_view_present else None
+    positions_f = (torch.cat(positions_f_list, dim=0)
+                   if force_view_present else None)
     species_indices_f = (
         torch.cat(species_idx_f_list, dim=0) if force_view_present else None
     )
-    forces_ref_f = torch.cat(forces_f_list, dim=0) if force_view_present else None
+    forces_ref_f = (torch.cat(forces_f_list, dim=0)
+                    if force_view_present else None)
     neighbor_info_f = (
         {"neighbor_lists": nb_lists_f, "neighbor_vectors": nb_vectors_f}
         if force_view_present
@@ -416,9 +170,29 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     }
 
 
+def _descriptor_config(desc) -> Dict[str, Any]:
+    """Serialize descriptor configuration to a plain dict."""
+    try:
+        n_features = int(desc.get_n_features())
+    except Exception:
+        n_features = None  # type: ignore[assignment]
+    return {
+        "species": list(getattr(desc, "species", [])),
+        "rad_order": int(getattr(desc, "rad_order", 0)),
+        "rad_cutoff": float(getattr(desc, "rad_cutoff", 0.0)),
+        "ang_order": int(getattr(desc, "ang_order", 0)),
+        "ang_cutoff": float(getattr(desc, "ang_cutoff", 0.0)),
+        "min_cutoff": float(getattr(desc, "min_cutoff", 0.0)),
+        "dtype": str(getattr(desc, "dtype", "")).replace("torch.", ""),
+        "device": str(getattr(desc, "device", "")),
+        "n_features": n_features if n_features is not None else 0,
+    }
+
+
 class TorchANNPotential:
     """
-    PyTorch MLIP trainer using on-the-fly featurization and aenet-PyTorch NetAtom.
+    PyTorch MLIP trainer using on-the-fly featurization and
+    aenet-PyTorch NetAtom.
 
     Parameters
     ----------
@@ -435,12 +209,12 @@ class TorchANNPotential:
         self.device = torch.device(str(descriptor.device))
         self.dtype = descriptor.dtype
 
-        # Build underlying network and adapter
-        net = _build_network_from_arch(
-            arch=self.arch, descriptor=self.descriptor, device=self.device, dtype=self.dtype
-        )
+        # Build underlying network and adapter using NetworkBuilder
+        builder = NetworkBuilder(descriptor=descriptor, device=self.device, dtype=self.dtype)
+        net = builder.build_network(arch=self.arch)
         self.net = net
-        self.model = EnergyModelAdapter(net=net, n_species=len(descriptor.species))
+        self.model = EnergyModelAdapter(
+            net=net, n_species=len(descriptor.species))
         # Ensure adapter on same device/dtype
         if self.dtype == torch.float64:
             self.model = self.model.double()
@@ -448,32 +222,33 @@ class TorchANNPotential:
             self.model = self.model.float()
         self.model.to(self.device)
 
-        # Training state
-        self.history: Dict[str, List[float]] = {
-            "train_energy_rmse": [],
-            "test_energy_rmse": [],
-            "train_force_rmse": [],
-            "test_force_rmse": [],
-            "learning_rates": [],
-            "epoch_times": [],
-            "epoch_forward_time": [],
-            "epoch_backward_time": [],
-        }
+        # Training state - use MetricsTracker
+        self._metrics = MetricsTracker(track_detailed_timing=True)
         self.best_val: Optional[float] = None
 
-        # Normalization state
-        self._normalize_features: bool = False
-        self._normalize_energy: bool = False
-        self._feature_mean: Optional[torch.Tensor] = None  # (F,)
-        self._feature_std: Optional[torch.Tensor] = None   # (F,)
-        self._E_shift: float = 0.0  # per-atom shift
-        self._E_scaling: float = 1.0
+        # Normalization - will be initialized during training
+        self._normalizer: Optional[NormalizationManager] = None
+
+        # Atomic reference energies
+        self._E_atomic: Optional[Dict[str, float]] = None
+
+        # Energy target (cohesive vs total) - set during training
+        self._energy_target: str = "cohesive"
+
+    @property
+    def history(self) -> Dict[str, List[float]]:
+        """Access training history through metrics tracker."""
+        return self._metrics.get_history()
+
+    @history.setter
+    def history(self, value: Dict[str, List[float]]):
+        """Set training history (for loading from checkpoint)."""
+        self._metrics.set_history(value)
 
     def train(
         self,
         structures: List[Structure],
         config: Optional[TorchTrainingConfig] = None,
-        # Phase 3 trainer options:
         checkpoint_dir: Optional[str] = "checkpoints",
         checkpoint_interval: int = 1,
         max_checkpoints: Optional[int] = None,
@@ -497,7 +272,6 @@ class TorchANNPotential:
 
         # Resolve device/dtype and memory mode
         device = _resolve_device(config)
-        # For now, treat 'mixed' like 'gpu'
         memory_mode = config.memory_mode
         if memory_mode not in ("cpu", "gpu", "mixed"):
             raise ValueError(f"Invalid memory_mode '{memory_mode}'")
@@ -509,11 +283,11 @@ class TorchANNPotential:
         else:
             self.model = self.model.float()
 
-        # Cohesive energy configuration and timing flag
-        self._energy_target = getattr(config, "energy_target", "cohesive")
-        self._timing = bool(getattr(config, "timing", False))
-        self._E_atomic_by_index = None
-        if self._energy_target == "cohesive":
+        # Cohesive energy configuration
+        energy_target = getattr(config, "energy_target", "cohesive")
+        self._energy_target = energy_target  # Store for later use in predict
+        E_atomic_by_index = None
+        if energy_target == "cohesive":
             E_atomic_cfg = getattr(config, "E_atomic", None)
             if E_atomic_cfg:
                 e_list: List[float] = []
@@ -525,133 +299,167 @@ class TorchANNPotential:
                         e_list.append(0.0)
                         missing.append(s)
                 if missing:
-                    print(f"[WARN] E_atomic missing for species {missing}; treating as 0.0 for cohesive conversion.")
-                self._E_atomic_by_index = torch.tensor(e_list, dtype=self.dtype, device=device)
+                    print(f"[WARN] E_atomic missing for species {missing}; "
+                          + "treating as 0.0 for cohesive conversion.")
+                E_atomic_by_index = torch.tensor(
+                    e_list, dtype=self.dtype, device=device)
+                # Persist dictionary form for later prediction/export
+                try:
+                    self._E_atomic = {str(k): float(v)
+                                      for k, v in E_atomic_cfg.items()}
+                except Exception:
+                    self._E_atomic = dict(E_atomic_cfg)
             else:
-                print("[WARN] energy_target='cohesive' but config.E_atomic not provided; training will use provided energies unchanged.")
+                print("[WARN] energy_target='cohesive' but config.E_atomic "
+                      "not provided; training will use provided energies "
+                      "unchanged.")
 
         # Dataset and split
-        full_ds = StructureDataset(
-            structures=structures,
-            descriptor=self.descriptor,
-            force_fraction=config.force_fraction,
-            force_sampling=config.force_sampling,
-            max_energy=config.max_energy,
-            max_forces=config.max_forces,
-            seed=None,
-        )
-        if config.testpercent > 0:
-            test_fraction = config.testpercent / 100.0
-            train_ds, test_ds = train_test_split(full_ds, test_fraction=test_fraction)
+        if bool(getattr(config, "cached_features", False)
+                ) and float(config.alpha) == 0.0:
+            # Energy-only cached-features path
+            structures_all = structures
+            if config.testpercent > 0:
+                test_fraction = config.testpercent / 100.0
+                import random as _rand
+                idx = list(range(len(structures_all)))
+                _rand.shuffle(idx)
+                n_test = int(len(idx) * test_fraction)
+                test_idx = set(idx[:n_test])
+                train_idx = set(idx[n_test:])
+                train_structs = [structures_all[i] for i in sorted(train_idx)]
+                test_structs = [structures_all[i] for i in sorted(test_idx)]
+            else:
+                train_structs = structures_all
+                test_structs = []
+            from .dataset import CachedStructureDataset
+            train_ds = CachedStructureDataset(
+                structures=train_structs,
+                descriptor=self.descriptor,
+                max_energy=config.max_energy,
+                max_forces=config.max_forces,
+                seed=None,
+            )
+            test_ds = (
+                CachedStructureDataset(
+                    structures=test_structs,
+                    descriptor=self.descriptor,
+                    max_energy=config.max_energy,
+                    max_forces=config.max_forces,
+                    seed=None,
+                )
+                if (config.testpercent > 0 and len(test_structs) > 0)
+                else None
+            )
         else:
-            train_ds, test_ds = full_ds, None
+            full_ds = StructureDataset(
+                structures=structures,
+                descriptor=self.descriptor,
+                force_fraction=config.force_fraction,
+                force_sampling=config.force_sampling,
+                max_energy=config.max_energy,
+                max_forces=config.max_forces,
+                seed=None,
+            )
+            if config.testpercent > 0:
+                test_fraction = config.testpercent / 100.0
+                train_ds, test_ds = train_test_split(
+                    full_ds, test_fraction=test_fraction)
+            else:
+                train_ds, test_ds = full_ds, None
 
         # DataLoaders
-        batch_size = _method_batch_size(config.method)  # type: ignore[arg-type]
+        batch_size = OptimizerBuilder.get_batch_size(config.method)
+        dl_kwargs: Dict[str, Any] = {}
+        nw = int(getattr(config, "num_workers", 0))
+        if nw > 0:
+            dl_kwargs.update(
+                dict(
+                    num_workers=nw,
+                    prefetch_factor=int(
+                        getattr(config, "prefetch_factor", 2)),
+                    persistent_workers=bool(
+                        getattr(config, "persistent_workers", True)),
+                )
+            )
+        else:
+            dl_kwargs.update(dict(num_workers=0))
+
         train_loader = DataLoader(
-            train_ds, batch_size=batch_size, shuffle=True, collate_fn=_collate_fn
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=_collate_fn,
+            **dl_kwargs,
         )
         test_loader = (
-            DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=_collate_fn)
+            DataLoader(
+                test_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=_collate_fn,
+                **dl_kwargs,
+            )
             if test_ds is not None
             else None
         )
 
-        # Normalization configuration
-        self._normalize_features = bool(getattr(config, "normalize_features", True))
-        self._normalize_energy = bool(getattr(config, "normalize_energy", True))
+        # Initialize normalization manager
+        normalize_features = bool(getattr(config, "normalize_features", True))
+        normalize_energy = bool(getattr(config, "normalize_energy", True))
 
-        # Compute/assign normalization statistics from training split only
-        # Feature stats: mean/std per feature dimension
-        # Energy stats: per-atom E_min/E_max/E_avg and E_shift/E_scaling
-        try:
-            F = int(self.descriptor.get_n_features())
-        except Exception:
-            F = None  # type: ignore[assignment]
+        self._normalizer = NormalizationManager(
+            normalize_features=normalize_features,
+            normalize_energy=normalize_energy,
+            dtype=self.dtype,
+            device=device,
+        )
 
         # Stats DataLoader (no shuffle)
         stats_loader = DataLoader(
-            train_ds, batch_size=batch_size, shuffle=False, collate_fn=_collate_fn
+            train_ds, batch_size=batch_size,
+            shuffle=False, collate_fn=_collate_fn
         )
 
+        # Compute normalization statistics
+        try:
+            n_features = int(self.descriptor.get_n_features())
+        except Exception:
+            n_features = None  # type: ignore[assignment]
+
         # Feature stats
-        self._feature_mean = None
-        self._feature_std = None
-        if self._normalize_features and F is not None:
-            if getattr(config, "feature_stats", None):
-                # Use provided stats (expects numpy arrays)
-                fs = getattr(config, "feature_stats")
-                mean_np = fs.get("mean", None)
-                std_np = fs.get("std", None) or fs.get("cov", None)
+        if normalize_features and n_features is not None:
+            provided_stats = getattr(config, "feature_stats", None)
+            if provided_stats:
+                mean_np = provided_stats.get("mean", None)
+                std_np = provided_stats.get("std", None) or provided_stats.get("cov", None)
                 if mean_np is not None and std_np is not None:
-                    self._feature_mean = torch.as_tensor(mean_np, dtype=self.dtype, device=device).view(-1)
-                    self._feature_std = torch.as_tensor(std_np, dtype=self.dtype, device=device).view(-1)
-            if self._feature_mean is None or self._feature_std is None:
-                # Compute from training split
-                sum_f = torch.zeros(F, dtype=self.dtype, device="cpu")
-                sumsq_f = torch.zeros(F, dtype=self.dtype, device="cpu")
-                total_atoms_stats = 0
-                with torch.no_grad():
-                    for b in stats_loader:
-                        feats = b["features"]
-                        feats = feats.to(dtype=self.dtype, device="cpu")
-                        sum_f += feats.sum(dim=0).cpu()
-                        sumsq_f += (feats * feats).sum(dim=0).cpu()
-                        total_atoms_stats += int(feats.shape[0])
-                if total_atoms_stats > 0:
-                    mean = sum_f / float(total_atoms_stats)
-                    var = torch.clamp(sumsq_f / float(total_atoms_stats) - mean * mean, min=0.0)
-                    std = torch.sqrt(var + torch.as_tensor(1e-12, dtype=var.dtype))
-                    self._feature_mean = mean.to(device=device)
-                    self._feature_std = std.to(device=device)
+                    self._normalizer.set_feature_stats(mean_np, std_np)
+
+            if not self._normalizer.has_feature_stats():
+                self._normalizer.compute_feature_stats(stats_loader, n_features)
 
         # Energy normalization stats
-        # Prefer overrides if provided
-        if getattr(config, "E_shift", None) is not None:
-            self._E_shift = float(getattr(config, "E_shift"))
-        if getattr(config, "E_scaling", None) is not None:
-            self._E_scaling = float(getattr(config, "E_scaling"))
+        if normalize_energy:
+            # Check for provided overrides
+            provided_shift = getattr(config, "E_shift", None)
+            provided_scaling = getattr(config, "E_scaling", None)
 
-        if self._normalize_energy and (getattr(config, "E_shift", None) is None or getattr(config, "E_scaling", None) is None):
-            # Compute per-atom energy min/max/avg from chosen target space
-            e_min = None
-            e_max = None
-            e_sum = 0.0
-            n_struct = 0
-            with torch.no_grad():
-                for b in stats_loader:
-                    n_atoms_b = b["n_atoms"].to(device)
-                    energy_ref_b = b["energy_ref"].to(device, dtype=self.dtype)
-                    species_indices_b = b["species_indices"].to(device)
-                    # Convert totals to cohesive if requested and E_atomic available
-                    energy_target_b = energy_ref_b
-                    if getattr(self, "_energy_target", "cohesive") == "cohesive" and getattr(self, "_E_atomic_by_index", None) is not None:
-                        per_atom_Ea_b = self._E_atomic_by_index[species_indices_b]
-                        batch_idx_b = torch.repeat_interleave(
-                            torch.arange(len(n_atoms_b), device=device), n_atoms_b.long()
-                        )
-                        Ea_sum_b = torch.zeros(len(n_atoms_b), dtype=energy_ref_b.dtype, device=device)
-                        Ea_sum_b.scatter_add_(0, batch_idx_b, per_atom_Ea_b)
-                        energy_target_b = energy_ref_b - Ea_sum_b
-                    # Per-atom energies for structures
-                    e_pa = energy_target_b / n_atoms_b
-                    # Update stats
-                    e_min = float(torch.min(e_pa).item()) if e_min is None else min(e_min, float(torch.min(e_pa).item()))
-                    e_max = float(torch.max(e_pa).item()) if e_max is None else max(e_max, float(torch.max(e_pa).item()))
-                    e_sum += float(torch.sum(e_pa).item())
-                    n_struct += int(len(n_atoms_b))
-            if e_min is not None and e_max is not None and e_max > e_min:
-                # Match aenet: normalize to [-1, 1]
-                self._E_scaling = float(2.0 / (e_max - e_min))
-                self._E_shift = float(0.5 * (e_max + e_min))
+            if provided_shift is not None and provided_scaling is not None:
+                self._normalizer.set_energy_stats(
+                    shift=float(provided_shift),
+                    scaling=float(provided_scaling)
+                )
             else:
-                # Degenerate case: disable energy normalization
-                self._E_scaling = 1.0
-                self._E_shift = 0.0
+                # Compute from data
+                self._normalizer.compute_energy_stats(
+                    stats_loader, E_atomic_by_index
+                )
 
-        # Optimizer and optional scheduler
-        optimizer = _optimizer_from_config(self.model.parameters(), config.method)  # type: ignore[arg-type]
-        scheduler = _maybe_scheduler(
+        # Optimizer and scheduler using OptimizerBuilder
+        opt_builder = OptimizerBuilder(self.model)
+        optimizer = opt_builder.build_optimizer(config.method)
+        scheduler = opt_builder.build_scheduler(
             optimizer,
             use_scheduler=bool(use_scheduler) and (test_loader is not None),
             scheduler_patience=int(scheduler_patience),
@@ -659,249 +467,169 @@ class TorchANNPotential:
             scheduler_min_lr=float(scheduler_min_lr),
         )
 
-        # Checkpoint directory
-        ckpt_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
-        if ckpt_dir is not None:
-            _ensure_dir(ckpt_dir)
+        # Checkpoint manager
+        ckpt_manager = None
+        if checkpoint_dir is not None:
+            ckpt_manager = CheckpointManager(
+                checkpoint_dir=checkpoint_dir,
+                max_to_keep=max_checkpoints,
+                save_best=save_best,
+            )
 
         start_epoch = 0
-        if resume_from is not None:
-            self._load_checkpoint(resume_from, optimizer)
-
-            # Attempt to infer start_epoch from filename
-            try:
-                name = Path(resume_from).name
-                if name.startswith("checkpoint_epoch_") and name.endswith(".pt"):
-                    start_epoch = int(name[len("checkpoint_epoch_") : -3]) + 1
-            except Exception:
-                start_epoch = 0
+        if resume_from is not None and ckpt_manager is not None:
+            payload = ckpt_manager.load_checkpoint(
+                resume_from, self.model, optimizer, device
+            )
+            if payload:
+                # Restore training state
+                if "history" in payload:
+                    self._metrics.set_history(payload["history"])
+                if "best_val_loss" in payload:
+                    self.best_val = payload["best_val_loss"]
+                if "normalization" in payload:
+                    self._normalizer.set_state(payload["normalization"])
+                # Infer start epoch
+                start_epoch = ckpt_manager.infer_start_epoch(resume_from)
 
         n_epochs = int(config.iterations)
-        alpha = float(config.alpha)  # alias of force_weight
+        alpha = float(config.alpha)
+
+        # Training loop instance
+        training_loop = TrainingLoop(
+            model=self.model,
+            descriptor=self.descriptor,
+            normalizer=self._normalizer,
+            device=device,
+            dtype=self.dtype,
+        )
+
+        # Progress bar configuration
+        show_progress = bool(getattr(config, "show_progress", True))
+        show_batch = bool(getattr(config, "show_batch_progress", False)
+                          ) and show_progress
+
+        # Ensure inner batch progress bars use trainer.tqdm (for tests)
+        if show_batch:
+            try:
+                training_loop_mod.tqdm = tqdm
+            except Exception:
+                pass
+
+        pbar = (
+            tqdm(total=(n_epochs - start_epoch), desc="Training", ncols=80)
+            if show_progress and tqdm is not None
+            else None
+        )
 
         for epoch in range(start_epoch, n_epochs):
             t0 = time.time()
-            # Force sampling (random) each epoch
-            if hasattr(train_ds, "resample_force_structures") and config.force_sampling == "random":
+            # Force sampling each epoch
+            if hasattr(train_ds, "resample_force_structures"
+                       ) and config.force_sampling == "random":
                 train_ds.resample_force_structures()
 
             # Train one epoch
-            train_energy_rmse, train_force_rmse = self._run_epoch(
+            train_energy_rmse, train_force_rmse, train_timing = training_loop.run_epoch(
                 loader=train_loader,
                 optimizer=optimizer,
-                device=device,
                 alpha=alpha,
+                energy_target=energy_target,
+                E_atomic_by_index=E_atomic_by_index,
                 train=True,
+                show_batch_progress=show_batch,
             )
 
             # Validation
+            val_energy_rmse = float("nan")
+            val_force_rmse = float("nan")
+            val_timing = {}
             if test_loader is not None:
-                val_energy_rmse, val_force_rmse = self._run_epoch(
+                val_energy_rmse, val_force_rmse, val_timing = training_loop.run_epoch(
                     loader=test_loader,
                     optimizer=None,
-                    device=device,
                     alpha=alpha,
+                    energy_target=energy_target,
+                    E_atomic_by_index=E_atomic_by_index,
                     train=False,
+                    show_batch_progress=False,
                 )
+
+                # Compute validation loss for monitoring
+                import math
                 val_loss_monitor = (
-                    (1 - alpha) * val_energy_rmse + (alpha * val_force_rmse if not math.isnan(val_force_rmse) else 0.0)
+                    (1 - alpha) * val_energy_rmse
+                    + (alpha * val_force_rmse
+                       if not math.isnan(val_force_rmse) else 0.0)
                 )
+
                 # Best model tracking
-                if save_best:
-                    improved = (self.best_val is None) or (val_loss_monitor < float(self.best_val))
-                    if improved:
-                        self.best_val = float(val_loss_monitor)
-                        if ckpt_dir is not None:
-                            best_path = ckpt_dir / "best_model.pt"
-                            self._save_checkpoint(best_path, epoch, optimizer)
+                if save_best and ckpt_manager is not None:
+                    if ckpt_manager.should_save_best(val_loss_monitor):
+                        self.best_val = float(ckpt_manager.best_val_loss) if ckpt_manager.best_val_loss is not None else float(val_loss_monitor)
+                        ckpt_manager.save_best_model(
+                            model=self.model,
+                            optimizer=optimizer,
+                            epoch=epoch,
+                            history=self._metrics.get_history(),
+                            architecture=self.arch,
+                            descriptor_config=_descriptor_config(self.descriptor),
+                        )
+
                 # Scheduler
                 if scheduler is not None:
                     scheduler.step(val_loss_monitor)
-            else:
-                val_energy_rmse, val_force_rmse = float("nan"), float("nan")
 
-            # History/logging
-            self.history["train_energy_rmse"].append(float(train_energy_rmse))
-            self.history["train_force_rmse"].append(float(train_force_rmse))
-            self.history["test_energy_rmse"].append(float(val_energy_rmse))
-            self.history["test_force_rmse"].append(float(val_force_rmse))
-            # Learning rate (first param group)
-            self.history["learning_rates"].append(float(optimizer.param_groups[0]["lr"]))
-            # Timing
-            self.history["epoch_times"].append(time.time() - t0)
-            self.history["epoch_forward_time"].append(float(getattr(self, "_last_forward_time", 0.0)))
-            self.history["epoch_backward_time"].append(float(getattr(self, "_last_backward_time", 0.0)))
-
-            # Checkpointing
-            if ckpt_dir is not None and checkpoint_interval > 0:
-                if ((epoch + 1) % int(checkpoint_interval)) == 0:
-                    ckpt_path = ckpt_dir / f"checkpoint_epoch_{epoch:04d}.pt"
-                    self._save_checkpoint(ckpt_path, epoch, optimizer)
-                    if max_checkpoints is not None and max_checkpoints > 0:
-                        _rotate_checkpoints(ckpt_dir, max_to_keep=int(max_checkpoints))
-
-        return self.history
-
-    def _run_epoch(
-        self,
-        loader: DataLoader,
-        optimizer: Optional[torch.optim.Optimizer],
-        device: torch.device,
-        alpha: float,
-        train: bool,
-    ) -> Tuple[float, float]:
-        """
-        Run one epoch over loader and return (energy_rmse, force_rmse).
-
-        Notes
-        -----
-        - We don't wrap validation with torch.no_grad() because force loss
-          uses autograd to compute dE/dG via network; no backward/optimizer
-          is called for validation.
-        """
-        energy_losses: List[float] = []
-        force_losses: List[float] = []
-        forward_time_total: float = 0.0
-        backward_time_total: float = 0.0
-        for batch in loader:
-            # Energy view tensors
-            features = batch["features"].to(device)
-            species_indices = batch["species_indices"].to(device)
-            n_atoms = batch["n_atoms"].to(device)
-            # energy_ref shape aligns with features dtype
-            energy_ref = batch["energy_ref"].to(device)
-
-            # Ensure dtype consistency
-            if self.dtype == torch.float64:
-                features = features.double()
-                energy_ref = energy_ref.double()
-            else:
-                features = features.float()
-                energy_ref = energy_ref.float()
-
-            # Convert targets to cohesive energies if configured and E_atomic provided
-            if getattr(self, "_energy_target", "cohesive") == "cohesive" and getattr(self, "_E_atomic_by_index", None) is not None:
-                per_atom_Ea = self._E_atomic_by_index[species_indices]
-                batch_idx = torch.repeat_interleave(
-                    torch.arange(len(n_atoms), device=device), n_atoms.long()
-                )
-                Ea_sum = torch.zeros(len(n_atoms), dtype=energy_ref.dtype, device=device)
-                Ea_sum.scatter_add_(0, batch_idx, per_atom_Ea)
-                energy_ref = energy_ref - Ea_sum
-
-            t_forward_start = time.perf_counter()
-
-            # Feature normalization (if enabled)
-            if self._normalize_features and self._feature_mean is not None and self._feature_std is not None:
-                fm = self._feature_mean.to(device=device, dtype=features.dtype)
-                fs = torch.clamp(self._feature_std.to(device=device, dtype=features.dtype), min=1e-12)
-                features = (features - fm) / fs
-
-            # Energy loss
-            E_shift = self._E_shift if self._normalize_energy else 0.0
-            E_scaling = self._E_scaling if self._normalize_energy else 1.0
-            energy_loss_t, _ = compute_energy_loss(
-                features=features,
-                energy_ref=energy_ref,
-                n_atoms=n_atoms,
-                network=self.model,
-                species_indices=species_indices,
-                E_shift=float(E_shift),
-                E_scaling=float(E_scaling),
+            # Update metrics
+            epoch_time = time.time() - t0
+            self._metrics.update(
+                train_energy_rmse=float(train_energy_rmse),
+                train_force_rmse=float(train_force_rmse),
+                test_energy_rmse=float(val_energy_rmse),
+                test_force_rmse=float(val_force_rmse),
+                learning_rate=float(optimizer.param_groups[0]["lr"]),
+                epoch_time=epoch_time,
+                forward_time=training_loop.last_forward_time,
+                backward_time=training_loop.last_backward_time,
+                train_timing=train_timing,
+                val_timing=val_timing,
             )
 
-            # Optional force loss
-            force_loss_t: Optional[torch.Tensor] = None
-            if alpha > 0.0 and batch["positions_f"] is not None:
-                positions_f = batch["positions_f"].to(device)
-                forces_ref_f = batch["forces_ref_f"].to(device)
-                species_indices_f = batch["species_indices_f"].to(device)
-                species_f = batch["species_f"]  # list[str]
-                neighbor_info_f = batch["neighbor_info_f"]  # dict of lists
+            # Update progress bar
+            if pbar is not None:
+                import math
+                lr_val = float(optimizer.param_groups[0]["lr"])
+                pf: Dict[str, Any] = {
+                    "trE": f"{train_energy_rmse:.4g}",
+                    "lr": f"{lr_val:.2e}",
+                    "fwd": f"{training_loop.last_forward_time:.2f}s",
+                    "bwd": f"{training_loop.last_backward_time:.2f}s",
+                }
+                if not math.isnan(train_force_rmse):
+                    pf["trF"] = f"{train_force_rmse:.4g}"
+                if not math.isnan(val_energy_rmse):
+                    pf["vaE"] = f"{val_energy_rmse:.4g}"
+                if not math.isnan(val_force_rmse):
+                    pf["vaF"] = f"{val_force_rmse:.4g}"
+                pbar.set_postfix(pf)
+                pbar.update(1)
 
-                # dtype
-                if self.dtype == torch.float64:
-                    positions_f = positions_f.double()
-                    forces_ref_f = forces_ref_f.double()
-                else:
-                    positions_f = positions_f.float()
-                    forces_ref_f = forces_ref_f.float()
+            # Checkpointing
+            if ckpt_manager is not None and checkpoint_interval > 0:
+                if ((epoch + 1) % int(checkpoint_interval)) == 0:
+                    ckpt_manager.save_checkpoint(
+                        model=self.model,
+                        optimizer=optimizer,
+                        epoch=epoch,
+                        history=self._metrics.get_history(),
+                        architecture=self.arch,
+                        descriptor_config=_descriptor_config(self.descriptor),
+                    )
 
-                force_loss_t, _ = compute_force_loss(
-                    positions=positions_f,
-                    species=species_f,
-                    forces_ref=forces_ref_f,
-                    descriptor=self.descriptor,
-                    network=self.model,
-                    species_indices=species_indices_f,
-                    cell=None,
-                    pbc=None,
-                    E_scaling=float(E_scaling),
-                    neighbor_info=neighbor_info_f,
-                    chunk_size=None,
-                    feature_mean=(self._feature_mean if self._normalize_features else None),
-                    feature_std=(self._feature_std if self._normalize_features else None),
-                )
+        if pbar is not None:
+            pbar.close()
 
-            # Combine
-            if force_loss_t is None:
-                combined = (1.0 - alpha) * energy_loss_t
-            else:
-                combined = (1.0 - alpha) * energy_loss_t + alpha * force_loss_t
-
-            t_forward_end = time.perf_counter()
-            forward_time_total += (t_forward_end - t_forward_start)
-
-            if train and optimizer is not None:
-                t_backward_start = time.perf_counter()
-                optimizer.zero_grad(set_to_none=True)
-                combined.backward()
-                optimizer.step()
-                t_backward_end = time.perf_counter()
-                backward_time_total += (t_backward_end - t_backward_start)
-
-            energy_losses.append(float(energy_loss_t.detach().cpu()))
-            if force_loss_t is not None:
-                force_losses.append(float(force_loss_t.detach().cpu()))
-
-        energy_rmse = float(sum(energy_losses) / max(1, len(energy_losses)))
-        force_rmse = float(sum(force_losses) / max(1, len(force_losses))) if force_losses else float("nan")
-        # record timing for this epoch
-        self._last_forward_time = forward_time_total
-        self._last_backward_time = backward_time_total
-        return energy_rmse, force_rmse
-
-    def _save_checkpoint(
-        self,
-        path: Path,
-        epoch: int,
-        optimizer: torch.optim.Optimizer,
-    ):
-        payload = {
-            "epoch": int(epoch),
-            "model_state_dict": self.model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "history": self.history,
-            "architecture": self.arch,
-            "descriptor_config": _descriptor_config(self.descriptor),
-            "best_val_loss": float(self.best_val) if self.best_val is not None else None,
-        }
-        try:
-            torch.save(payload, str(path))
-        except Exception as e:
-            # Best-effort; do not crash training
-            print(f"[WARN] Failed to save checkpoint at {path}: {e}")
-
-    def _load_checkpoint(self, path: str, optimizer: torch.optim.Optimizer):
-        try:
-            payload = torch.load(path, map_location=self.device)
-            self.model.load_state_dict(payload["model_state_dict"])
-            optimizer.load_state_dict(payload["optimizer_state_dict"])
-            if "history" in payload and isinstance(payload["history"], dict):
-                self.history = payload["history"]
-            self.best_val = payload.get("best_val_loss", None)
-        except Exception as e:
-            print(f"[WARN] Failed to load checkpoint '{path}': {e}")
+        return self._metrics.get_history()
 
     @torch.no_grad()
     def predict(
@@ -917,71 +645,57 @@ class TorchANNPotential:
         energies : List[float]
         forces : Optional[List[Tensor]]  # (N_i, 3) per-structure if requested
         """
-        energies: List[float] = []
-        forces_out: List[torch.Tensor] = []
+        # Create predictor instance
+        energy_target = getattr(self, "_energy_target", "cohesive")
+        if not hasattr(self, "_energy_target"):
+            energy_target = "cohesive"  # default for backward compatibility
 
-        for st in structures:
-            # Build tensors
-            positions = torch.from_numpy(st.positions).to(self.device)
-            if self.dtype == torch.float64:
-                positions = positions.double()
-            else:
-                positions = positions.float()
+        predictor = Predictor(
+            model=self.model,
+            descriptor=self.descriptor,
+            normalizer=self._normalizer,
+            energy_target=energy_target,
+            E_atomic=self._E_atomic,
+            device=self.device,
+            dtype=self.dtype,
+        )
 
-            # Featurize and neighbor info
-            features, nb_info = self.descriptor.featurize_with_neighbor_info(
-                positions, st.species, None, None
-            )
-            species_indices = torch.tensor(
-                [self.descriptor.species_to_idx[s] for s in st.species],
-                dtype=torch.long,
-                device=self.device,
-            )
-            if self.dtype == torch.float64:
-                features = features.double()
-            else:
-                features = features.float()
+        return predictor.predict(structures, predict_forces=predict_forces)
 
-            # Feature normalization (if enabled)
-            if self._feature_mean is not None and self._feature_std is not None and self._normalize_features:
-                fm = self._feature_mean.to(device=self.device, dtype=features.dtype)
-                fs = torch.clamp(self._feature_std.to(device=self.device, dtype=features.dtype), min=1e-12)
-                features = (features - fm) / fs
+    def cohesive_energy(
+        self,
+        structure: Structure,
+        atomic_energies: Optional[Dict[str, float]] = None,
+    ) -> float:
+        """
+        Compute cohesive energy from a structure with total energy.
 
-            # Energies (normalized model output)
-            E_atomic = self.model(features, species_indices)
-            E_pred_norm = E_atomic.sum()
-            # Denormalize to cohesive energy if enabled
-            if self._normalize_energy:
-                E_coh = float((E_pred_norm / self._E_scaling + self._E_shift * len(st.species)).detach().cpu())
-            else:
-                E_coh = float(E_pred_norm.detach().cpu())
-            energies.append(E_coh)
+        Parameters
+        ----------
+        structure : Structure
+            Structure containing total energy and species list.
+        atomic_energies : dict[str, float], optional
+            Per-species atomic reference energies. If None, uses trainer's
+            stored E_atomic from training.
 
-            if predict_forces:
-                # Use semi-analytical gradient path to predict forces
-                # Prepare neighbor_info to pass through compute_force_loss
-                neighbor_info = {
-                    "neighbor_lists": nb_info["neighbor_lists"],
-                    "neighbor_vectors": nb_info["neighbor_vectors"],
-                }
-                # Dummy zeros for forces_ref; we only want predictions
-                forces_ref = torch.zeros_like(positions)
-                loss_f, forces_pred = compute_force_loss(
-                    positions=positions.clone(),
-                    species=st.species,
-                    forces_ref=forces_ref,
-                    descriptor=self.descriptor,
-                    network=self.model,
-                    species_indices=species_indices,
-                    cell=None,
-                    pbc=None,
-                    E_scaling=float(self._E_scaling),
-                    neighbor_info=neighbor_info,
-                    chunk_size=None,
-                    feature_mean=(self._feature_mean if self._normalize_features else None),
-                    feature_std=(self._feature_std if self._normalize_features else None),
-                )
-                forces_out.append(forces_pred.detach().cpu())
+        Returns
+        -------
+        float
+            Cohesive energy (total - sum of atomic reference energies).
 
-        return energies, (forces_out if predict_forces else None)
+        Raises
+        ------
+        ValueError
+            If no atomic energies are available.
+        """
+        predictor = Predictor(
+            model=self.model,
+            descriptor=self.descriptor,
+            normalizer=self._normalizer,
+            energy_target="total",
+            E_atomic=atomic_energies if atomic_energies is not None else self._E_atomic,
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+        return predictor.cohesive_energy(structure)

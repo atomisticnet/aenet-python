@@ -17,6 +17,16 @@ from .model_adapter import EnergyModelAdapter
 from .trainer import TorchANNPotential
 from .model_export import save_model, load_model, export_history
 
+# Modular components
+from .builders import NetworkBuilder, OptimizerBuilder
+from .training import (
+    CheckpointManager,
+    MetricsTracker,
+    NormalizationManager,
+    TrainingLoop,
+)
+from .inference import Predictor
+
 __all__ = [
     'Structure',
     'TorchTrainingConfig',
@@ -33,6 +43,14 @@ __all__ = [
     'save_model',
     'load_model',
     'export_history',
+    # Modular components
+    'NetworkBuilder',
+    'OptimizerBuilder',
+    'CheckpointManager',
+    'MetricsTracker',
+    'NormalizationManager',
+    'TrainingLoop',
+    'Predictor',
 ]
 
 __version__ = '0.1.0'

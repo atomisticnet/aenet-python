@@ -122,7 +122,8 @@ def save_model(
 
     # Normalization metadata (serialize tensors to lists)
     norm_meta: Dict[str, Any] = {
-        "normalize_features": bool(getattr(trainer, "_normalize_features", False)),
+        "normalize_features": bool(
+            getattr(trainer, "_normalize_features", False)),
         "normalize_energy": bool(getattr(trainer, "_normalize_energy", False)),
         "E_shift": float(getattr(trainer, "_E_shift", 0.0)),
         "E_scaling": float(getattr(trainer, "_E_scaling", 1.0)),
@@ -153,6 +154,10 @@ def save_model(
                           if trainer.best_val is not None else None),
         "training_config": _serialize_training_config(training_config),
         "normalization": norm_meta,
+        # Persist energy target and atomic reference
+        # energies for prediction semantics
+        "energy_target": getattr(trainer, "_energy_target", "cohesive"),
+        "E_atomic": getattr(trainer, "_E_atomic", None),
         "extra_metadata": extra_metadata or {},
     }
 
@@ -211,23 +216,34 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
     # Restore normalization metadata if present
     norm_meta = payload.get("normalization", {}) or {}
     try:
-        trainer._normalize_features = bool(norm_meta.get("normalize_features", False))  # type: ignore[attr-defined]
-        trainer._normalize_energy = bool(norm_meta.get("normalize_energy", False))      # type: ignore[attr-defined]
-        trainer._E_shift = float(norm_meta.get("E_shift", 0.0))                         # type: ignore[attr-defined]
-        trainer._E_scaling = float(norm_meta.get("E_scaling", 1.0))                     # type: ignore[attr-defined]
+        trainer._normalize_features = bool(
+            norm_meta.get("normalize_features", False))
+        trainer._normalize_energy = bool(
+            norm_meta.get("normalize_energy", False))
+        trainer._E_shift = float(norm_meta.get("E_shift", 0.0))
+        trainer._E_scaling = float(norm_meta.get("E_scaling", 1.0))
         fm = norm_meta.get("feature_mean", None)
         fs = norm_meta.get("feature_std", None)
         if fm is not None:
-            trainer._feature_mean = torch.as_tensor(  # type: ignore[attr-defined]
+            trainer._feature_mean = torch.as_tensor(
                 fm, dtype=trainer.dtype, device=trainer.device
             )
         if fs is not None:
-            trainer._feature_std = torch.as_tensor(  # type: ignore[attr-defined]
+            trainer._feature_std = torch.as_tensor(
                 fs, dtype=trainer.dtype, device=trainer.device
             )
     except Exception:
-        # Best-effort; prediction still works without normalization restoration
+        # Best-effort; prediction still works without
+        # normalization restoration
         pass
+
+    # Restore energy target and atomic reference energies if present
+    try:
+        trainer._energy_target = payload.get("energy_target", "cohesive")
+    except Exception:
+        # Keep default if not present
+        pass
+    trainer._E_atomic = payload.get("E_atomic", None)
 
     # Compose metadata (excluding large tensors)
     meta_keys = [
@@ -243,6 +259,8 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
         "training_config",
         "extra_metadata",
         "normalization",
+        "energy_target",
+        "E_atomic",
     ]
     metadata = {k: payload.get(k) for k in meta_keys if k in payload}
 
