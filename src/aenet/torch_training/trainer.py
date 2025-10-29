@@ -18,11 +18,9 @@ Notes
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
 # Progress bar (match aenet.mlip behavior)
@@ -31,7 +29,7 @@ try:
 except Exception:
     tqdm = None  # type: ignore
 
-from .config import TorchTrainingConfig, Structure, TrainingMethod
+from .config import TorchTrainingConfig, Structure
 from .dataset import StructureDataset, train_test_split
 from .model_adapter import EnergyModelAdapter
 
@@ -75,9 +73,20 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
           features: (N,F), species_indices: (N,), n_atoms: (B,),
           energy_ref: (B,)
       - force view (only selected structures):
-          positions_f, species_f (list[str]), species_indices_f: (Nf,),
-          forces_ref_f: (Nf,3), neighbor_info_f: dict (lists length Nf)
-      - misc: batch_sizes and masks for debugging
+          positions_f: (Nf,3), species_f (list[str]),
+          species_indices_f: (Nf,), forces_ref_f: (Nf,3),
+          neighbor_info_f: dict (lists length Nf),
+          graph_f: Optional[dict] batched CSR neighbor graph for the
+              force view (keys: center_ptr[int32 Nf+1], nbr_idx[int32 E],
+              r_ij[E,3], d_ij[E]),
+          triplets_f: Optional[dict] batched TripletIndex for the force
+              view (keys: tri_i/tri_j/tri_k[int32 T],
+              tri_j_local/tri_k_local[int32 T])
+      - bookkeeping:
+          n_atoms_force_total: int, total atoms from structures that have
+            force labels in this batch (regardless of selection)
+          n_atoms_force_supervised: int, total atoms supervised for forces
+            in this batch (sum over selected force structures)
     """
     # Energy view aggregation (all structures)
     features_list: List[torch.Tensor] = []
@@ -90,12 +99,24 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     species_f_names: List[str] = []
     species_idx_f_list: List[torch.Tensor] = []
     forces_f_list: List[torch.Tensor] = []
-    nb_lists_f: List[Any] = []         # list of numpy arrays (indices)
-    nb_vectors_f: List[Any] = []       # list of numpy arrays (vectors)
+    nb_lists_f: List[Any] = []          # list of numpy arrays (indices)
+    nb_vectors_f: List[Any] = []        # list of numpy arrays (vectors)
+    # Optional batched CSR/Triplets parts for force view
+    deg_parts: List[torch.Tensor] = []  # degrees per center (concat later)
+    nbr_idx_parts: List[torch.Tensor] = []
+    r_ij_parts: List[torch.Tensor] = []
+    d_ij_parts: List[torch.Tensor] = []
+    tri_i_parts: List[torch.Tensor] = []
+    tri_j_parts: List[torch.Tensor] = []
+    tri_k_parts: List[torch.Tensor] = []
+    tri_j_local_parts: List[torch.Tensor] = []
+    tri_k_local_parts: List[torch.Tensor] = []
 
     # We also need neighbor_info for the full batch of force-selected atoms
     # We will offset neighbor indices when concatenating.
     base_atom_idx_force = 0
+    # Track total atoms with available force labels in this batch
+    n_atoms_force_total: int = 0
 
     for sample in batch:
         N = int(sample["n_atoms"])
@@ -103,6 +124,10 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         species_idx_list.append(sample["species_indices"])
         n_atoms_list.append(N)
         energy_ref_list.append(float(sample["energy"]))
+        # Count atoms from structures that have force labels
+        # (regardless of selection)
+        if bool(sample.get("has_forces", False)):
+            n_atoms_force_total += N
 
     # Build energy-view tensors
     features = (torch.cat(features_list, dim=0)
@@ -130,6 +155,35 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         species_idx_f_list.append(species_idx)
         species_f_names.extend(species_names)
 
+        # Accumulate CSR/Triplets parts if present on sample
+        try:
+            g = sample.get("graph", None)
+            if g is not None:
+                cp = torch.as_tensor(g["center_ptr"])
+                # degrees for this structure
+                deg_parts.append((cp[1:] - cp[:-1]).to(torch.int64))
+                # neighbor arrays with atom index offset
+                nbr_idx_parts.append(torch.as_tensor(g["nbr_idx"]).to(
+                    torch.int64) + base_atom_idx_force)
+                r_ij_parts.append(torch.as_tensor(g["r_ij"]))
+                d_ij_parts.append(torch.as_tensor(g["d_ij"]))
+                # optional triplets
+                t = sample.get("triplets", None)
+                if t is not None:
+                    tri_i_parts.append(torch.as_tensor(t["tri_i"]).to(
+                        torch.int64) + base_atom_idx_force)
+                    tri_j_parts.append(torch.as_tensor(t["tri_j"]).to(
+                        torch.int64) + base_atom_idx_force)
+                    tri_k_parts.append(torch.as_tensor(t["tri_k"]).to(
+                        torch.int64) + base_atom_idx_force)
+                    tri_j_local_parts.append(
+                        torch.as_tensor(t["tri_j_local"]).to(torch.int64))
+                    tri_k_local_parts.append(
+                        torch.as_tensor(t["tri_k_local"]).to(torch.int64))
+        except Exception:
+            # If graph pieces are missing or malformed, skip silently
+            pass
+
         # Offset neighbor indices by base_atom_idx_force
         for arr in nb_info["neighbor_lists"]:
             if arr is None or len(arr) == 0:
@@ -155,6 +209,43 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         else None
     )
 
+    # Build batched CSR/Triplets for force view if any parts were collected
+    graph_f = None
+    triplets_f = None
+    if force_view_present and len(deg_parts) > 0:
+        try:
+            total_centers = int(positions_f.shape[0])
+            deg_cat = (torch.cat(deg_parts) if len(deg_parts) > 0
+                       else torch.empty(0, dtype=torch.int64))
+            center_ptr = torch.zeros(total_centers + 1, dtype=torch.int64)
+            if deg_cat.numel() == total_centers:
+                center_ptr[1:] = torch.cumsum(deg_cat, dim=0)
+            # Concatenate edge arrays
+            if len(nbr_idx_parts) > 0:
+                nbr_idx_b = torch.cat(nbr_idx_parts).to(torch.int32)
+                r_ij_b = torch.cat(r_ij_parts)
+                d_ij_b = torch.cat(d_ij_parts)
+                graph_f = {
+                    "center_ptr": center_ptr.to(torch.int32),
+                    "nbr_idx": nbr_idx_b,
+                    "r_ij": r_ij_b,
+                    "d_ij": d_ij_b,
+                }
+            # Concatenate triplets if present
+            if len(tri_i_parts) > 0:
+                triplets_f = {
+                    "tri_i": torch.cat(tri_i_parts).to(torch.int32),
+                    "tri_j": torch.cat(tri_j_parts).to(torch.int32),
+                    "tri_k": torch.cat(tri_k_parts).to(torch.int32),
+                    "tri_j_local": torch.cat(
+                        tri_j_local_parts).to(torch.int32),
+                    "tri_k_local": torch.cat(
+                        tri_k_local_parts).to(torch.int32),
+                }
+        except Exception:
+            graph_f = None
+            triplets_f = None
+
     return {
         # Energy view
         "features": features,
@@ -167,6 +258,12 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         "species_indices_f": species_indices_f,
         "forces_ref_f": forces_ref_f,
         "neighbor_info_f": neighbor_info_f,
+        "graph_f": graph_f,
+        "triplets_f": triplets_f,
+        # Bookkeeping for unbiased scaling / diagnostics
+        "n_atoms_force_total": n_atoms_force_total,
+        "n_atoms_force_supervised": (int(positions_f.shape[0])
+                                     if force_view_present else 0),
     }
 
 
@@ -210,7 +307,9 @@ class TorchANNPotential:
         self.dtype = descriptor.dtype
 
         # Build underlying network and adapter using NetworkBuilder
-        builder = NetworkBuilder(descriptor=descriptor, device=self.device, dtype=self.dtype)
+        builder = NetworkBuilder(descriptor=descriptor,
+                                 device=self.device,
+                                 dtype=self.dtype)
         net = builder.build_network(arch=self.arch)
         self.net = net
         self.model = EnergyModelAdapter(
@@ -272,6 +371,7 @@ class TorchANNPotential:
 
         # Resolve device/dtype and memory mode
         device = _resolve_device(config)
+        self.device = device  # sync trainer device with resolved device
         memory_mode = config.memory_mode
         if memory_mode not in ("cpu", "gpu", "mixed"):
             raise ValueError(f"Invalid memory_mode '{memory_mode}'")
@@ -282,6 +382,8 @@ class TorchANNPotential:
             self.model = self.model.double()
         else:
             self.model = self.model.float()
+        # Ensure final placement on resolved device
+        self.model.to(device)
 
         # Cohesive energy configuration
         energy_target = getattr(config, "energy_target", "cohesive")
@@ -359,6 +461,19 @@ class TorchANNPotential:
                 force_sampling=config.force_sampling,
                 max_energy=config.max_energy,
                 max_forces=config.max_forces,
+                min_force_structures_per_epoch=getattr(
+                    config, "force_min_structures_per_epoch", None
+                ),
+                cached_features_for_force=bool(
+                    getattr(config, "cached_features_for_force", False)
+                ),
+                cache_neighbors=bool(
+                    getattr(config, "cache_neighbors", False)
+                ),
+                cache_triplets=bool(
+                    getattr(config, "cache_triplets", False)
+                ),
+                cache_persist_dir=getattr(config, "cache_persist_dir", None),
                 seed=None,
             )
             if config.testpercent > 0:
@@ -432,12 +547,14 @@ class TorchANNPotential:
             provided_stats = getattr(config, "feature_stats", None)
             if provided_stats:
                 mean_np = provided_stats.get("mean", None)
-                std_np = provided_stats.get("std", None) or provided_stats.get("cov", None)
+                std_np = provided_stats.get(
+                    "std", None) or provided_stats.get("cov", None)
                 if mean_np is not None and std_np is not None:
                     self._normalizer.set_feature_stats(mean_np, std_np)
 
             if not self._normalizer.has_feature_stats():
-                self._normalizer.compute_feature_stats(stats_loader, n_features)
+                self._normalizer.compute_feature_stats(
+                    stats_loader, n_features)
 
         # Energy normalization stats
         if normalize_energy:
@@ -524,13 +641,24 @@ class TorchANNPotential:
 
         for epoch in range(start_epoch, n_epochs):
             t0 = time.time()
-            # Force sampling each epoch
-            if hasattr(train_ds, "resample_force_structures"
-                       ) and config.force_sampling == "random":
-                train_ds.resample_force_structures()
+            # Force sampling per epoch-window (respect config flags)
+            if hasattr(train_ds, "resample_force_structures"):
+                epochs_per_window = int(
+                    getattr(config, "epochs_per_force_window", 1)
+                )
+                should_resample = (
+                    config.force_sampling == "random"
+                    and bool(getattr(
+                        config, "force_resample_each_epoch", True))
+                    and ((epoch - start_epoch)
+                         % max(1, epochs_per_window) == 0)
+                )
+                if should_resample:
+                    train_ds.resample_force_structures()
 
             # Train one epoch
-            train_energy_rmse, train_force_rmse, train_timing = training_loop.run_epoch(
+            (train_energy_rmse, train_force_rmse, train_timing
+             ) = training_loop.run_epoch(
                 loader=train_loader,
                 optimizer=optimizer,
                 alpha=alpha,
@@ -538,6 +666,8 @@ class TorchANNPotential:
                 E_atomic_by_index=E_atomic_by_index,
                 train=True,
                 show_batch_progress=show_batch,
+                force_scale_unbiased=bool(
+                    getattr(config, "force_scale_unbiased", False)),
             )
 
             # Validation
@@ -545,7 +675,8 @@ class TorchANNPotential:
             val_force_rmse = float("nan")
             val_timing = {}
             if test_loader is not None:
-                val_energy_rmse, val_force_rmse, val_timing = training_loop.run_epoch(
+                (val_energy_rmse, val_force_rmse, val_timing
+                 ) = training_loop.run_epoch(
                     loader=test_loader,
                     optimizer=None,
                     alpha=alpha,
@@ -553,6 +684,8 @@ class TorchANNPotential:
                     E_atomic_by_index=E_atomic_by_index,
                     train=False,
                     show_batch_progress=False,
+                    force_scale_unbiased=bool(
+                        getattr(config, "force_scale_unbiased", False)),
                 )
 
                 # Compute validation loss for monitoring
@@ -566,14 +699,19 @@ class TorchANNPotential:
                 # Best model tracking
                 if save_best and ckpt_manager is not None:
                     if ckpt_manager.should_save_best(val_loss_monitor):
-                        self.best_val = float(ckpt_manager.best_val_loss) if ckpt_manager.best_val_loss is not None else float(val_loss_monitor)
+                        self.best_val = (
+                            float(ckpt_manager.best_val_loss)
+                            if ckpt_manager.best_val_loss is not None
+                            else float(val_loss_monitor)
+                            )
                         ckpt_manager.save_best_model(
                             model=self.model,
                             optimizer=optimizer,
                             epoch=epoch,
                             history=self._metrics.get_history(),
                             architecture=self.arch,
-                            descriptor_config=_descriptor_config(self.descriptor),
+                            descriptor_config=_descriptor_config(
+                                self.descriptor),
                         )
 
                 # Scheduler
@@ -693,7 +831,9 @@ class TorchANNPotential:
             descriptor=self.descriptor,
             normalizer=self._normalizer,
             energy_target="total",
-            E_atomic=atomic_energies if atomic_energies is not None else self._E_atomic,
+            E_atomic=(atomic_energies
+                      if atomic_energies is not None
+                      else self._E_atomic),
             device=self.device,
             dtype=self.dtype,
         )

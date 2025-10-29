@@ -10,6 +10,8 @@ OLD*
 dist/
 build/
 notebooks-work/
+profiling/
+outputs/
 .virtual_documents
 
 fortran/

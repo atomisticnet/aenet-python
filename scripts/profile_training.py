@@ -7,9 +7,11 @@ Modes:
   - training: end-to-end training profiling on XSF data (TiO2)
   - both: run features then training
 
-Examples:
+Examples
+--------
   # Feature-only (synthetic supercells)
-  conda run -n aenet-torch python scripts/profile_training.py --mode features --sizes 2 4 6 --repeats 3
+  conda run -n aenet-torch python scripts/profile_training.py \
+    --mode features --sizes 2 4 6 --repeats 3
 
   # Training profiling on TiO2 data (on-the-fly featurization)
   conda run -n aenet-torch python scripts/profile_training.py --mode training \
@@ -22,21 +24,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import traceback
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 
+from aenet.formats.xsf import XSFParser
+
 # Local imports from this repository
 from aenet.torch_featurize.featurize import ChebyshevDescriptor
-from aenet.formats.xsf import XSFParser
-from aenet.torch_training.config import Structure, TorchTrainingConfig, Adam
+from aenet.torch_training.config import Adam, Structure, TorchTrainingConfig
 from aenet.torch_training.trainer import TorchANNPotential
 
 # ------------- Utilities -------------
@@ -74,10 +75,19 @@ def system_info() -> Dict[str, Any]:
     return info
 
 
+def resolve_dtype_for_device(device: str, precision: str) -> torch.dtype:
+    if precision == "float32":
+        return torch.float32
+    if precision == "float64":
+        return torch.float64
+    # auto: default to fp32 on CPU; keep fp32 for CUDA here (GPU tuning later)
+    return torch.float32
+
 # ------------- Feature/Gradient Micro-benchmarks -------------
 
 
-def build_sc_cell(n: int, alat: float, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
+def build_sc_cell(n: int, alat: float,
+                  dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
     coords = []
     for i in range(n):
         for j in range(n):
@@ -88,14 +98,18 @@ def build_sc_cell(n: int, alat: float, dtype: torch.dtype) -> Tuple[torch.Tensor
     return positions, cell
 
 
-def jitter_positions(positions: torch.Tensor, scale: float = 1e-3) -> torch.Tensor:
+def jitter_positions(positions: torch.Tensor,
+                     scale: float = 1e-3) -> torch.Tensor:
     if scale <= 0:
         return positions
     noise = (torch.rand_like(positions) - 0.5) * 2.0 * scale
     return positions + noise
 
 
-def count_pairs_triplets(positions: torch.Tensor, cell: torch.Tensor, pbc: torch.Tensor, descriptor: ChebyshevDescriptor) -> Tuple[int, int]:
+def count_pairs_triplets(positions: torch.Tensor,
+                         cell: torch.Tensor,
+                         pbc: torch.Tensor,
+                         descriptor: ChebyshevDescriptor) -> Tuple[int, int]:
     positions = positions.to(descriptor.dtype).to(descriptor.device)
     cell = cell.to(descriptor.dtype).to(descriptor.device)
 
@@ -122,7 +136,8 @@ def count_pairs_triplets(positions: torch.Tensor, cell: torch.Tensor, pbc: torch
 
     # Compute displacement vectors with offsets
     if cell is not None and offsets is not None:
-        r_ij = (positions[j_idx] + offsets.to(descriptor.dtype) @ cell) - positions[i_idx]
+        r_ij = (positions[j_idx] + offsets.to(descriptor.dtype)
+                @ cell) - positions[i_idx]
     else:
         r_ij = positions[j_idx] - positions[i_idx]
     d_ij = torch.norm(r_ij, dim=-1)
@@ -134,15 +149,17 @@ def count_pairs_triplets(positions: torch.Tensor, cell: torch.Tensor, pbc: torch
     n_triplets = 0
     if len(i_idx_ang) > 0:
         max_i = int(i_idx_ang.max().item()) + 1
-        counts = torch.bincount(i_idx_ang, minlength=max(positions.shape[0], max_i))
+        counts = torch.bincount(
+            i_idx_ang, minlength=max(positions.shape[0], max_i))
         n_triplets = int(torch.sum(counts * (counts - 1) // 2).item())
 
     return n_pairs, n_triplets
 
 
 def profile_features_once(n: int, args: argparse.Namespace) -> Dict[str, Any]:
-    dtype = torch.float64
     device = "cpu"  # CPU only per current scope
+    precision = getattr(args, "precision", "auto")
+    dtype = resolve_dtype_for_device(device, precision)
 
     alat = args.alat
     positions, cell = build_sc_cell(n, alat, dtype)
@@ -151,7 +168,8 @@ def profile_features_once(n: int, args: argparse.Namespace) -> Dict[str, Any]:
 
     # Descriptor configuration
     species_list: List[str] = ["H"] if args.single_species else ["A", "B"]
-    species = (["H"] * len(positions) if args.single_species else ["A"] * len(positions))
+    species = (["H"] * len(positions)
+               if args.single_species else ["A"] * len(positions))
 
     descriptor = ChebyshevDescriptor(
         species=species_list,
@@ -167,7 +185,8 @@ def profile_features_once(n: int, args: argparse.Namespace) -> Dict[str, Any]:
     _ = descriptor.forward_from_positions(positions, species, cell, pbc)
 
     # Count neighbors
-    n_pairs, n_triplets = count_pairs_triplets(positions, cell, pbc, descriptor)
+    n_pairs, n_triplets = count_pairs_triplets(
+        positions, cell, pbc, descriptor)
 
     # Profile features
     feat_times: List[float] = []
@@ -188,6 +207,7 @@ def profile_features_once(n: int, args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "n": n,
         "atoms": positions.shape[0],
+        "dtype": str(dtype).replace("torch.", ""),
         "pairs": n_pairs,
         "triplets": n_triplets,
         "feat_mean": float(np.mean(feat_times)),
@@ -251,6 +271,9 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
     xsf_dir = Path(args.xsf_dir)
     structures = load_xsf_structures(xsf_dir, limit=args.limit)
 
+    # Resolve dtype
+    dtype = resolve_dtype_for_device("cpu", getattr(args, "precision", "auto"))
+
     # Descriptor parameters (reuse feature-mode params)
     species = species_from_structures(structures)
     descriptor = ChebyshevDescriptor(
@@ -260,11 +283,12 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
         ang_order=args.ang_order,
         ang_cutoff=args.ang_cutoff,
         device="cpu",
-        dtype=torch.float64,
+        dtype=dtype,
     )
 
     # Dataset and DataLoader
     from torch.utils.data import DataLoader as _DL
+
     from aenet.torch_training.dataset import StructureDataset as _DS
     from aenet.torch_training.trainer import _collate_fn as _collate
 
@@ -285,7 +309,8 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
             dict(
                 num_workers=nw,
                 prefetch_factor=int(getattr(args, "prefetch_factor", 2)),
-                persistent_workers=bool(getattr(args, "persistent_workers", "on") == "on"),
+                persistent_workers=bool(
+                    getattr(args, "persistent_workers", "on") == "on"),
             )
         )
     else:
@@ -323,13 +348,17 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
         batches += 1
         batch_times.append(time.perf_counter() - t_b0)
     total_iter_time = time.perf_counter() - t0
-    mean_batch_time = (float(np.mean(batch_times)) if len(batch_times) > 0 else float("nan"))
-    atoms_per_sec = (float(total_atoms) / total_iter_time) if total_iter_time > 0.0 else float("nan")
+    mean_batch_time = (float(np.mean(batch_times))
+                       if len(batch_times) > 0 else float("nan"))
+    atoms_per_sec = (float(total_atoms) / total_iter_time
+                     ) if total_iter_time > 0.0 else float("nan")
 
     summary = {
         "dataset": {
             "n_structures": len(structures),
-            "avg_atoms_per_structure": float(np.mean([len(s.positions) for s in structures])) if structures else 0.0,
+            "avg_atoms_per_structure": float(
+                np.mean([len(s.positions) for s in structures])
+                ) if structures else 0.0,
             "total_atoms": int(sum(len(s.positions) for s in structures)),
             "species": species,
             "xsf_dir": str(xsf_dir),
@@ -340,12 +369,14 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
             "ang_order": args.ang_order,
             "ang_cutoff": args.ang_cutoff,
             "n_features": int(descriptor.get_n_features()),
+            "dtype": str(descriptor.dtype).replace("torch.", ""),
         },
         "loader": {
             "batch_size": int(args.batch_size),
             "num_workers": nw,
             "prefetch_factor": int(getattr(args, "prefetch_factor", 2)),
-            "persistent_workers": bool(getattr(args, "persistent_workers", "on") == "on"),
+            "persistent_workers": bool(
+                getattr(args, "persistent_workers", "on") == "on"),
         },
         "timing": {
             "total_iter_time": total_iter_time,
@@ -359,7 +390,8 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
     print("DataLoader Featurization Benchmark (CPU)")
     print("=======================================")
     print(f"Structures      : {summary['dataset']['n_structures']}")
-    print(f"Avg atoms/struct: {summary['dataset']['avg_atoms_per_structure']:.1f}")
+    print("Avg atoms/struct: "
+          + f"{summary['dataset']['avg_atoms_per_structure']:.1f}")
     print(f"Total atoms     : {summary['dataset']['total_atoms']}")
     print(f"Species         : {summary['dataset']['species']}")
     print(f"Batch size      : {summary['loader']['batch_size']}")
@@ -376,7 +408,8 @@ def run_dataload_mode(args: argparse.Namespace) -> Dict[str, Any]:
     return {"dataload_profile": summary}
 
 
-def load_xsf_structures(xsf_dir: Path, limit: Optional[int] = None) -> List[Structure]:
+def load_xsf_structures(xsf_dir: Path,
+                        limit: Optional[int] = None) -> List[Structure]:
     files = sorted([p for p in xsf_dir.glob("*.xsf")])
     if limit is not None:
         files = files[: int(limit)]
@@ -390,17 +423,20 @@ def load_xsf_structures(xsf_dir: Path, limit: Optional[int] = None) -> List[Stru
         positions = np.array(s.coords[-1])
         species = list(s.types)
         # Energy
-        if getattr(s, "energy", None) is None or len(s.energy) == 0 or s.energy[-1] is None:
+        if (getattr(s, "energy", None) is None
+                or len(s.energy) == 0 or s.energy[-1] is None):
             raise RuntimeError(f"Structure {p.name} is not energy-labeled.")
         energy = float(s.energy[-1])
         # Forces (optional)
-        if getattr(s, "forces", None) is not None and len(s.forces) > 0 and s.forces[-1] is not None:
+        if (getattr(s, "forces", None) is not None
+                and len(s.forces) > 0 and s.forces[-1] is not None):
             forces = np.array(s.forces[-1])
         else:
             forces = None
         # Cell and PBC
         cell = np.array(s.avec[-1]) if getattr(s, "pbc", False) else None
-        pbc = np.array([True, True, True]) if getattr(s, "pbc", False) else None
+        pbc = np.array([True, True, True]
+                       ) if getattr(s, "pbc", False) else None
 
         out.append(
             Structure(
@@ -427,7 +463,8 @@ def species_from_structures(structures: List[Structure]) -> List[str]:
     return sp
 
 
-def default_arch_for_species(species: List[str]) -> Dict[str, List[Tuple[int, str]]]:
+def default_arch_for_species(
+        species: List[str]) -> Dict[str, List[Tuple[int, str]]]:
     # Simple two-hidden-layer tanh architecture per species
     arch: Dict[str, List[Tuple[int, str]]] = {}
     for el in species:
@@ -441,6 +478,9 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
     xsf_dir = Path(args.xsf_dir)
     structures = load_xsf_structures(xsf_dir, limit=args.limit)
 
+    # Resolve dtype
+    dtype = resolve_dtype_for_device("cpu", getattr(args, "precision", "auto"))
+
     # Descriptor parameters
     species = species_from_structures(structures)
     descriptor = ChebyshevDescriptor(
@@ -450,7 +490,7 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
         ang_order=args.ang_order,
         ang_cutoff=args.ang_cutoff,
         device="cpu",
-        dtype=torch.float64,
+        dtype=dtype,
     )
 
     # Model architecture
@@ -459,15 +499,25 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
     # Potential/trainer
     pot = TorchANNPotential(arch=arch, descriptor=descriptor)
 
-    # Training config (CPU, no scheduler; energy_target=total to avoid atomic ref issues)
+    # Training config (CPU, no scheduler; energy_target=total
+    # to avoid atomic ref issues)
     method = Adam(mu=args.lr, batchsize=args.batch_size)
     cfg = TorchTrainingConfig(
         iterations=args.epochs,
         method=method,
         testpercent=args.testpercent,
         force_weight=args.force_weight,
-        force_fraction=1.0,
-        force_sampling="random",
+        force_fraction=float(args.force_fraction),
+        force_sampling=str(args.force_sampling),
+        force_resample_each_epoch=(args.force_resample_each_epoch == "on"),
+        force_min_structures_per_epoch=int(
+            args.force_min_structures_per_epoch),
+        force_scale_unbiased=(args.force_scale_unbiased == "on"),
+        cached_features_for_force=(args.cached_features_for_force == "on"),
+        cache_neighbors=(args.cache_neighbors == "on"),
+        cache_triplets=(args.cache_triplets == "on"),
+        cache_persist_dir=(args.cache_persist_dir if args.cache_persist_dir else None),
+        epochs_per_force_window=int(args.epochs_per_force_window),
         memory_mode="cpu",
         max_energy=None,
         max_forces=None,
@@ -475,6 +525,7 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
         save_forces=False,
         timing=False,
         device="cpu",
+        precision=args.precision,
         energy_target="total",  # use total energies as labels
         E_atomic=None,
         normalize_features=True,
@@ -504,45 +555,55 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
 
     # Summaries
     n_epochs = len(history.get("epoch_times", []))
-    mean_epoch_time = float(np.mean(history["epoch_times"])) if n_epochs > 0 else float("nan")
-    mean_forward_time = float(np.mean(history["epoch_forward_time"])) if n_epochs > 0 else float("nan")
-    mean_backward_time = float(np.mean(history["epoch_backward_time"])) if n_epochs > 0 else float("nan")
+    mean_epoch_time = float(np.mean(history["epoch_times"])
+                            ) if n_epochs > 0 else float("nan")
+    mean_forward_time = float(np.mean(history["epoch_forward_time"])
+                              ) if n_epochs > 0 else float("nan")
+    mean_backward_time = float(np.mean(history["epoch_backward_time"])
+                               ) if n_epochs > 0 else float("nan")
     # New detailed timings (available when trainer instrumentation is present)
     # Training split
     mean_data_loading_time_train = (
         float(np.mean(history["epoch_data_loading_time_train"]))
-        if "epoch_data_loading_time_train" in history and len(history["epoch_data_loading_time_train"]) > 0
+        if ("epoch_data_loading_time_train" in history
+            and len(history["epoch_data_loading_time_train"]) > 0)
         else float("nan")
     )
     mean_loss_time_train = (
         float(np.mean(history["epoch_loss_time_train"]))
-        if "epoch_loss_time_train" in history and len(history["epoch_loss_time_train"]) > 0
+        if ("epoch_loss_time_train" in history
+            and len(history["epoch_loss_time_train"]) > 0)
         else float("nan")
     )
     mean_optimizer_time_train = (
         float(np.mean(history["epoch_optimizer_time_train"]))
-        if "epoch_optimizer_time_train" in history and len(history["epoch_optimizer_time_train"]) > 0
+        if ("epoch_optimizer_time_train" in history
+            and len(history["epoch_optimizer_time_train"]) > 0)
         else float("nan")
     )
     mean_train_time = (
         float(np.mean(history["epoch_train_time"]))
-        if "epoch_train_time" in history and len(history["epoch_train_time"]) > 0
+        if ("epoch_train_time" in history
+            and len(history["epoch_train_time"]) > 0)
         else float("nan")
     )
     # Validation split
     mean_data_loading_time_val = (
         float(np.mean(history["epoch_data_loading_time_val"]))
-        if "epoch_data_loading_time_val" in history and len(history["epoch_data_loading_time_val"]) > 0
+        if ("epoch_data_loading_time_val" in history
+            and len(history["epoch_data_loading_time_val"]) > 0)
         else float("nan")
     )
     mean_loss_time_val = (
         float(np.mean(history["epoch_loss_time_val"]))
-        if "epoch_loss_time_val" in history and len(history["epoch_loss_time_val"]) > 0
+        if ("epoch_loss_time_val" in history
+            and len(history["epoch_loss_time_val"]) > 0)
         else float("nan")
     )
     mean_optimizer_time_val = (
         float(np.mean(history["epoch_optimizer_time_val"]))
-        if "epoch_optimizer_time_val" in history and len(history["epoch_optimizer_time_val"]) > 0
+        if ("epoch_optimizer_time_val" in history
+            and len(history["epoch_optimizer_time_val"]) > 0)
         else float("nan")
     )
     mean_val_time = (
@@ -552,16 +613,20 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
     )
     # Totals across splits (when available)
     mean_data_loading_time_total = (
-        (0.0 if np.isnan(mean_data_loading_time_train) else mean_data_loading_time_train)
-        + (0.0 if np.isnan(mean_data_loading_time_val) else mean_data_loading_time_val)
+        (0.0 if np.isnan(mean_data_loading_time_train)
+         else mean_data_loading_time_train)
+        + (0.0 if np.isnan(mean_data_loading_time_val)
+           else mean_data_loading_time_val)
     )
     mean_loss_time_total = (
         (0.0 if np.isnan(mean_loss_time_train) else mean_loss_time_train)
         + (0.0 if np.isnan(mean_loss_time_val) else mean_loss_time_val)
     )
     mean_optimizer_time_total = (
-        (0.0 if np.isnan(mean_optimizer_time_train) else mean_optimizer_time_train)
-        + (0.0 if np.isnan(mean_optimizer_time_val) else mean_optimizer_time_val)
+        (0.0 if np.isnan(mean_optimizer_time_train)
+         else mean_optimizer_time_train)
+        + (0.0 if np.isnan(mean_optimizer_time_val)
+           else mean_optimizer_time_val)
     )
     featurization_fraction = (
         (mean_data_loading_time_total / mean_epoch_time)
@@ -584,11 +649,23 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
             "ang_order": args.ang_order,
             "ang_cutoff": args.ang_cutoff,
             "n_features": int(descriptor.get_n_features()),
+            "dtype": str(descriptor.dtype).replace("torch.", ""),
         },
         "training": {
             "epochs": args.epochs,
             "batch_size": args.batch_size,
             "force_weight": args.force_weight,
+            "force_fraction": args.force_fraction,
+            "force_sampling": args.force_sampling,
+            "force_resample_each_epoch": args.force_resample_each_epoch,
+            "force_min_structures_per_epoch": (
+                args.force_min_structures_per_epoch),
+            "force_scale_unbiased": args.force_scale_unbiased,
+            "cached_features_for_force": args.cached_features_for_force,
+            "cache_neighbors": args.cache_neighbors,
+            "cache_triplets": args.cache_triplets,
+            "cache_persist_dir": args.cache_persist_dir,
+            "epochs_per_force_window": args.epochs_per_force_window,
             "testpercent": args.testpercent,
             "lr": args.lr,
             "arch_hidden": arch,
@@ -617,20 +694,33 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
             "epoch_times": history.get("epoch_times", []),
             "epoch_forward_time": history.get("epoch_forward_time", []),
             "epoch_backward_time": history.get("epoch_backward_time", []),
-            "epoch_data_loading_time_train": history.get("epoch_data_loading_time_train", []),
+            "epoch_data_loading_time_train": history.get(
+                "epoch_data_loading_time_train", []),
             "epoch_loss_time_train": history.get("epoch_loss_time_train", []),
-            "epoch_optimizer_time_train": history.get("epoch_optimizer_time_train", []),
-            "epoch_data_loading_time_val": history.get("epoch_data_loading_time_val", []),
-            "epoch_loss_time_val": history.get("epoch_loss_time_val", []),
-            "epoch_optimizer_time_val": history.get("epoch_optimizer_time_val", []),
+            "epoch_optimizer_time_train": history.get(
+                "epoch_optimizer_time_train", []),
+            "epoch_data_loading_time_val": history.get(
+                "epoch_data_loading_time_val", []),
+            "epoch_loss_time_val": history.get(
+                "epoch_loss_time_val", []),
+            "epoch_optimizer_time_val": history.get(
+                "epoch_optimizer_time_val", []),
             "epoch_train_time": history.get("epoch_train_time", []),
             "epoch_val_time": history.get("epoch_val_time", []),
         },
         "history_tail": {
-            "train_energy_rmse_last": (history["train_energy_rmse"][-1] if history["train_energy_rmse"] else None),
-            "train_force_rmse_last": (history["train_force_rmse"][-1] if history["train_force_rmse"] else None),
-            "test_energy_rmse_last": (history["test_energy_rmse"][-1] if history["test_energy_rmse"] else None),
-            "test_force_rmse_last": (history["test_force_rmse"][-1] if history["test_force_rmse"] else None),
+            "train_energy_rmse_last": (
+                history["train_energy_rmse"][-1]
+                if history["train_energy_rmse"] else None),
+            "train_force_rmse_last": (
+                history["train_force_rmse"][-1]
+                if history["train_force_rmse"] else None),
+            "test_energy_rmse_last": (
+                history["test_energy_rmse"][-1]
+                if history["test_energy_rmse"] else None),
+            "test_force_rmse_last": (
+                history["test_force_rmse"][-1]
+                if history["test_force_rmse"] else None),
         },
     }
 
@@ -728,6 +818,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default="off",
         help="Use cached-features mode for energy-only training (precompute once).",
     )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        choices=["auto", "float32", "float64"],
+        default="auto",
+        help="Numeric precision (default auto uses float32 on CPU).",
+    )
     # DataLoader worker controls (Issue 2)
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader workers for on-the-fly featurization.")
     parser.add_argument("--prefetch-factor", type=int, default=2, help="DataLoader prefetch_factor when num_workers>0.")
@@ -737,6 +834,76 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         choices=["off", "on"],
         default="on",
         help="Enable persistent_workers in DataLoader when num_workers>0.",
+    )
+    # Force subsampling controls (Issue 4)
+    parser.add_argument(
+        "--force-fraction",
+        type=float,
+        default=1.0,
+        help="Fraction of force-labeled structures supervised per epoch [0..1].",
+    )
+    parser.add_argument(
+        "--force-sampling",
+        type=str,
+        choices=["random", "fixed"],
+        default="random",
+        help="Force structure sampling mode.",
+    )
+    parser.add_argument(
+        "--force-resample-each-epoch",
+        type=str,
+        choices=["off", "on"],
+        default="on",
+        help="Resample force structures every epoch when force_sampling=random.",
+    )
+    parser.add_argument(
+        "--force-min-structures-per-epoch",
+        type=int,
+        default=1,
+        help="Minimum number of force-labeled structures per epoch.",
+    )
+    parser.add_argument(
+        "--force-scale-unbiased",
+        type=str,
+        choices=["off", "on"],
+        default="off",
+        help="Apply sqrt(1/f) scaling to force RMSE when sub-sampling forces.",
+    )
+    # Mixed-run feature caching for non-force structures
+    parser.add_argument(
+        "--cached-features-for-force",
+        type=str,
+        choices=["off", "on"],
+        default="off",
+        help="Cache features for structures not selected for forces in current window.",
+    )
+    parser.add_argument(
+        "--epochs-per-force-window",
+        type=int,
+        default=1,
+        help="Resample random force subset every this many epochs (>=1).",
+    )
+    # Neighbor caching (Issue 5)
+    parser.add_argument(
+        "--cache-neighbors",
+        type=str,
+        choices=["off", "on"],
+        default="off",
+        help="Cache per-structure neighbor graphs across epochs to reduce data loading.",
+    )
+    # Triplet/CSR caching and persistence (Issue 5 Phase 2 / Issue 7)
+    parser.add_argument(
+        "--cache-triplets",
+        type=str,
+        choices=["off", "on"],
+        default="off",
+        help="Build and cache CSR + Triplet indices per structure and use vectorized paths.",
+    )
+    parser.add_argument(
+        "--cache-persist-dir",
+        type=str,
+        default=None,
+        help="Optional directory to persist cached CSR/Triplets to disk (future).",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     return parser.parse_args(argv)

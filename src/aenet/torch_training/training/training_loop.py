@@ -86,6 +86,7 @@ class TrainingLoop:
         E_atomic_by_index: Optional[torch.Tensor] = None,
         train: bool = True,
         show_batch_progress: bool = False,
+        force_scale_unbiased: bool = False,
     ) -> Tuple[float, float, Dict[str, float]]:
         """
         Run one epoch over loader.
@@ -106,6 +107,11 @@ class TrainingLoop:
             Whether this is training (True) or validation (False).
         show_batch_progress : bool
             Whether to show per-batch progress bar.
+        force_scale_unbiased : bool
+            If True, apply optional sqrt(1/f) scaling to the per-batch
+            force RMSE, where f is the supervised fraction of atoms
+            with available force labels. This approximates constant
+            loss magnitude when sub-sampling forces.
 
         Returns
         -------
@@ -227,7 +233,32 @@ class TrainingLoop:
                         if self.normalizer.normalize_features
                         else None
                     ),
+                    graph=batch.get("graph_f", None),
+                    triplets=batch.get("triplets_f", None),
+                    center_indices=None,
                 )
+
+                # Optional unbiased scaling of RMSE based on
+                # supervised fraction
+                if force_scale_unbiased:
+                    try:
+                        eff_total = int(batch.get("n_atoms_force_total", 0))
+                        eff_supervised = int(
+                            batch.get("n_atoms_force_supervised", 0))
+                        if eff_total > 0:
+                            eff_f = float(eff_supervised) / float(eff_total)
+                            if eff_f > 0.0 and eff_f < 1.0:
+                                scale = torch.tensor(
+                                    eff_f,
+                                    dtype=force_loss_t.dtype,
+                                    device=force_loss_t.device,
+                                )
+                                # Approximate scaling for RMSE (MSE would
+                                # not require scaling)
+                                force_loss_t = force_loss_t / torch.sqrt(scale)
+                    except Exception:
+                        # If bookkeeping not present, skip scaling
+                        pass
 
             # Combine losses
             if force_loss_t is None:

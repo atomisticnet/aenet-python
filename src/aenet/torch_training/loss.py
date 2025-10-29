@@ -136,6 +136,9 @@ def compute_force_loss(
     chunk_size: Optional[int] = None,
     feature_mean: Optional[torch.Tensor] = None,
     feature_std: Optional[torch.Tensor] = None,
+    graph: Optional[Dict] = None,
+    triplets: Optional[Dict] = None,
+    center_indices: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute force loss (RMSE) using semi-analytical gradients.
@@ -168,6 +171,21 @@ def compute_force_loss(
           - 'neighbor_lists': list of length N with (nnb_i,) arrays
           - 'neighbor_vectors': list of length N with (nnb_i, 3) arrays
         If provided, avoids recomputing neighbors.
+    graph : dict, optional
+        Batched CSR neighbor graph for the current force view with keys:
+          - 'center_ptr': (Nf+1,) int32 CSR row pointers
+          - 'nbr_idx': (E,) int32 neighbor indices (offset to force view)
+          - 'r_ij': (E, 3) dtype displacement vectors
+          - 'd_ij': (E,) dtype distances
+        If provided, enables fully vectorized feature/gradient computation.
+    triplets : dict, optional
+        Batched TripletIndex with keys:
+          - 'tri_i','tri_j','tri_k': (T,) int32
+          - 'tri_j_local','tri_k_local': (T,) int32 local CSR indices
+        Optional; if omitted, only radial paths are used.
+    center_indices : torch.Tensor, optional
+        (M,) indices of centers to include (filtering) in the batched graph
+        coordinate space. If None, all centers in the force view are used.
     chunk_size : int, optional
         If set, contract forces in chunks along i-dimension to reduce
         peak memory usage.
@@ -183,11 +201,29 @@ def compute_force_loss(
     positions = positions.clone().detach().requires_grad_(True)
 
     # Compute features and their gradients w.r.t. positions
-    if neighbor_info is not None and hasattr(
+    if graph is not None and hasattr(
+        descriptor, "compute_feature_gradients_with_graph"
+    ):
+        # Use CSR/Triplets vectorized path
+        (features, grad_features
+         ) = descriptor.compute_feature_gradients_with_graph(
+            positions=positions,
+            species_indices=species_indices.to(device=positions.device),
+            graph={k: (v.to(positions.device)
+                       if isinstance(v, torch.Tensor) else v)
+                   for k, v in graph.items()},
+            triplets=({k: (v.to(positions.device)
+                           if isinstance(v, torch.Tensor) else v)
+                       for k, v in triplets.items()}
+                      if triplets is not None else None),
+            center_indices=center_indices.to(device=positions.device)
+            if center_indices is not None else None,
+        )
+    elif neighbor_info is not None and hasattr(
         descriptor, "compute_feature_gradients_from_neighbor_info"
     ):
-        # Convert neighbor_info lists to tensors on same
-        # device/dtype as positions
+        # Convert neighbor_info lists to tensors on
+        # same device/dtype as positions
         nb_idx_list_t: list[torch.Tensor] = []
         nb_vec_list_t: list[torch.Tensor] = []
         for nb_idx, nb_vec in zip(
@@ -201,14 +237,13 @@ def compute_force_loss(
                 torch.as_tensor(nb_vec, dtype=positions.dtype,
                                 device=positions.device)
             )
-
-        features, grad_features = \
-            descriptor.compute_feature_gradients_from_neighbor_info(
-                positions=positions,
-                species=species,
-                neighbor_indices=nb_idx_list_t,
-                neighbor_vectors=nb_vec_list_t,
-            )
+        (features, grad_features
+         ) = descriptor.compute_feature_gradients_from_neighbor_info(
+            positions=positions,
+            species=species,
+            neighbor_indices=nb_idx_list_t,
+            neighbor_vectors=nb_vec_list_t,
+        )
     else:
         # Fallback: recompute neighbor information (slower)
         features, grad_features = descriptor.compute_feature_gradients(

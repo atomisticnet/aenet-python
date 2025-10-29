@@ -219,6 +219,42 @@ class TorchTrainingConfig:
     force_sampling : str, optional
         Force sampling strategy: 'random' (resample each epoch) or 'fixed'
         (fixed subset). Default: 'random'
+    force_resample_each_epoch : bool, optional
+        When force_sampling='random', resample the subset at the beginning
+        of each epoch. Default: True
+    force_min_structures_per_epoch : int, optional
+        Minimum number of force-labeled structures to include per epoch,
+        regardless of force_fraction. Default: 1
+    force_scale_unbiased : bool, optional
+        If True, apply sqrt(1/f) scaling to the per-batch force RMSE, where
+        f is the supervised fraction of atoms from force-labeled structures,
+        to approximate a constant scale under sub-sampling. Default: False
+    cached_features_for_force : bool, optional
+        When alpha>0, cache features for structures that are not selected
+        for force supervision in the current epoch-window. For those
+        energy-only structures, reuse cached features and skip
+        neighbor_info computation.  Default: False
+    cache_neighbors : bool, optional
+        Cache per-structure neighbor graphs (indices and displacement vectors)
+        to avoid repeated neighbor searches across epochs when geometries are
+        fixed. When True, neighbor graphs are computed once per structure and
+        reused for both energy and force paths. Default: False
+    cache_triplets : bool, optional
+        Build and cache CSR neighbor graphs and precomputed angular triplet
+        indices per structure to enable vectorized featurization and gradient
+        paths (removes Python-level enumeration loops). Default: False
+    cache_persist_dir : str, optional
+        Optional root directory for persisted graph/triplet caches
+        (planned follow-up). When provided, caches may be serialized to disk
+        and reloaded across runs. Default: None
+    cache_scope : {'train', 'val', 'all'}, optional
+        Scope limiting which dataset split(s) should be cached/persisted,
+        allowing memory/I-O control. Default: 'all'
+    epochs_per_force_window : int, optional
+        Resample the random subset of force-supervised structures every this
+        many epochs (when force_sampling='random'). 1 = resample every epoch
+        (default behavior). Values >1 amortize cached features across multiple
+        epochs. Default: 1
     memory_mode : str, optional
         Memory management strategy: 'cpu', 'gpu', or 'mixed'.
         Default: 'gpu'
@@ -248,6 +284,24 @@ class TorchTrainingConfig:
     force_weight: float = 0.0
     force_fraction: float = 1.0
     force_sampling: Literal['random', 'fixed'] = 'random'
+    # Force subsampling controls
+    force_resample_each_epoch: bool = True
+    force_min_structures_per_epoch: Optional[int] = 1
+    force_scale_unbiased: bool = False
+    # Mixed-run caching: cache features for non-force structures
+    # in current window
+    cached_features_for_force: bool = False
+    # Cache per-structure neighbor graphs to avoid repeated neighbor
+    # searches across epochs (indices and displacement vectors)
+    cache_neighbors: bool = False
+    # CSR + Triplet caching/vectorization (Issue 5 Phase 2 / Issue 7)
+    cache_triplets: bool = False
+    # Optional on-disk persistence root (Phase 4 follow-up may enable writing)
+    cache_persist_dir: Optional[str] = None
+    # Scope for caching/persistence
+    cache_scope: Literal['train', 'val', 'all'] = 'all'
+    # Resample random force subset every this many epochs (1 = each epoch)
+    epochs_per_force_window: int = 1
     memory_mode: Literal['cpu', 'gpu', 'mixed'] = 'gpu'
     max_energy: Optional[float] = None
     max_forces: Optional[float] = None
@@ -255,6 +309,8 @@ class TorchTrainingConfig:
     save_forces: bool = False
     timing: bool = False
     device: Optional[str] = None
+    # Default numeric precision control for training/inference
+    precision: Literal['auto', 'float32', 'float64'] = 'auto'
     # Energy target space and atomic reference energies
     energy_target: Literal['cohesive', 'total'] = 'cohesive'
     E_atomic: Optional[Dict[str, float]] = None
@@ -304,6 +360,14 @@ class TorchTrainingConfig:
                 f"got '{self.force_sampling}'"
             )
 
+        # Validate force_min_structures_per_epoch
+        if (self.force_min_structures_per_epoch is not None
+                and self.force_min_structures_per_epoch < 0):
+            raise ValueError(
+                f"force_min_structures_per_epoch must be >= 0 or None, "
+                f"got {self.force_min_structures_per_epoch}"
+            )
+
         # Validate memory_mode
         if self.memory_mode not in ['cpu', 'gpu', 'mixed']:
             raise ValueError(
@@ -311,11 +375,32 @@ class TorchTrainingConfig:
                 f"got '{self.memory_mode}'"
             )
 
+        # Validate cache_scope
+        if self.cache_scope not in ['train', 'val', 'all']:
+            raise ValueError(
+                f"cache_scope must be 'train', 'val', or 'all', "
+                f"got '{self.cache_scope}'"
+            )
+
+        # Validate epochs_per_force_window
+        if int(self.epochs_per_force_window) < 1:
+            raise ValueError(
+                f"epochs_per_force_window must be >= 1, "
+                f"got {self.epochs_per_force_window}"
+            )
+
         # Validate energy_target
         if self.energy_target not in ['cohesive', 'total']:
             raise ValueError(
                 f"energy_target must be 'cohesive' or 'total', "
                 f"got '{self.energy_target}'"
+            )
+
+        # Validate precision
+        if self.precision not in ['auto', 'float32', 'float64']:
+            raise ValueError(
+                f"precision must be 'auto', 'float32', or 'float64', "
+                f"got '{self.precision}'"
             )
 
         # Validate iterations

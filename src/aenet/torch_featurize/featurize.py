@@ -14,6 +14,7 @@ from torch_scatter import scatter_add
 
 from .chebyshev import AngularBasis, RadialBasis
 from .neighborlist import TorchNeighborList
+from .graph import center_ids_of_edge as _center_ids_of_edge
 
 
 class ChebyshevDescriptor(nn.Module):
@@ -579,7 +580,8 @@ class ChebyshevDescriptor(nn.Module):
         neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute gradients of radial features using a fully vectorized semi-analytical method.
+        Compute gradients of radial features using a fully vectorized
+        semi-analytical method.
 
         This method uses the analytical derivatives of the basis functions
         and the chain rule to compute gradients with respect to atomic
@@ -692,7 +694,8 @@ class ChebyshevDescriptor(nn.Module):
         neighbor_vectors: List[torch.Tensor],
     ) -> torch.Tensor:
         """
-        Compute gradients of angular features using a fully analytical, vectorized method.
+        Compute gradients of angular features using a fully analytical,
+        vectorized method.
 
         Avoids autograd on geometric quantities to
         improve performance and numerical stability (especially under PBC).
@@ -962,6 +965,286 @@ class ChebyshevDescriptor(nn.Module):
 
         return features, gradients
 
+    def forward_with_graph(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        graph,
+        triplets=None,
+        center_indices: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Vectorized forward using CSR neighbor graph and optional triplets.
+
+        Args:
+            positions: (N,3) positions, used only for dtype/device alignment
+            species_indices: (N,) long tensor of species indices
+            graph: NeighborGraph dict with keys
+                   center_ptr[int32 N+1], nbr_idx[int32 E],
+                   r_ij[float E,3], d_ij[float E]
+            triplets: Optional TripletIndex dict with keys
+                      tri_i/j/k[int32 T], tri_j_local/tri_k_local[int32 T]
+            center_indices: Optional (M,) indices of centers to include
+                            (not used in forward accumulation here)
+
+        Returns
+        -------
+            features: (N, F)
+        """
+        device = self.device
+        dtype = self.dtype
+        positions = positions.to(device=device, dtype=dtype)
+        species_indices = species_indices.to(device=device)
+
+        N = positions.shape[0]
+        n_rad = self.rad_order + 1
+        n_ang = self.ang_order + 1
+
+        # Edge-level arrays
+        nbr_idx = graph["nbr_idx"].to(device=device, dtype=torch.int64)
+        d_ij = graph["d_ij"].to(device=device, dtype=dtype)
+        # Centers per edge from CSR
+        center_of_edge = _center_ids_of_edge(graph).to(
+            device=device, dtype=torch.int64)
+
+        # Radial basis on all edges
+        G_rad = self.rad_basis(d_ij)  # (E, n_rad)
+
+        # Scatter to centers (unweighted radial)
+        rad_unw = scatter_add(G_rad, center_of_edge, dim=0, dim_size=N)
+
+        if self.multi:
+            # Typespin-weighted radial
+            neigh_types = species_indices[nbr_idx]
+            tspin_j = self.typespin[neigh_types]  # (E,)
+            G_rad_w = G_rad * tspin_j.unsqueeze(-1)
+            rad_w = scatter_add(G_rad_w, center_of_edge, dim=0, dim_size=N)
+        else:
+            rad_w = None
+
+        # Angular features if triplets provided
+        if triplets is not None and n_ang > 0:
+            center_ptr = graph["center_ptr"].to(
+                device=device, dtype=torch.int64)
+            r_edges = graph["r_ij"].to(device=device, dtype=dtype)
+
+            tri_i = triplets["tri_i"].to(device=device, dtype=torch.int64)
+            tri_j = triplets["tri_j"].to(device=device, dtype=torch.int64)
+            tri_k = triplets["tri_k"].to(device=device, dtype=torch.int64)
+            tri_j_local = triplets["tri_j_local"].to(
+                device=device, dtype=torch.int64)
+            tri_k_local = triplets["tri_k_local"].to(
+                device=device, dtype=torch.int64)
+
+            # Edge indices within r_ij for (i,j) and (i,k)
+            start_i = center_ptr[tri_i]  # (T,)
+            edge_j_idx = start_i + tri_j_local  # (T,)
+            edge_k_idx = start_i + tri_k_local  # (T,)
+
+            r_ij_vec = r_edges[edge_j_idx]  # (T,3)
+            r_ik_vec = r_edges[edge_k_idx]  # (T,3)
+
+            eps = 1e-20
+            d_ij_t = torch.sqrt((r_ij_vec * r_ij_vec).sum(dim=-1) + eps)
+            d_ik_t = torch.sqrt((r_ik_vec * r_ik_vec).sum(dim=-1) + eps)
+            u_ij = r_ij_vec / (d_ij_t.unsqueeze(-1) + 1e-12)
+            u_ik = r_ik_vec / (d_ik_t.unsqueeze(-1) + 1e-12)
+
+            cos_theta = (u_ij * u_ik).sum(dim=-1).clamp(-1.0, 1.0)
+
+            # Angular basis over all triplets
+            G_ang = self.ang_basis(d_ij_t, d_ik_t, cos_theta)  # (T, n_ang)
+
+            ang_unw = scatter_add(G_ang, tri_i, dim=0, dim_size=N)
+
+            if self.multi:
+                tspin_prod = (self.typespin[species_indices[tri_j]]
+                              * self.typespin[species_indices[tri_k]])
+                G_ang_w = G_ang * tspin_prod.unsqueeze(-1)
+                ang_w = scatter_add(G_ang_w, tri_i, dim=0, dim_size=N)
+            else:
+                ang_w = None
+        else:
+            ang_unw = torch.zeros(N, n_ang, dtype=dtype, device=device)
+            ang_w = torch.zeros_like(ang_unw) if self.multi else None
+
+        # Assemble features in Fortran order used elsewhere
+        if self.multi:
+            features = torch.cat([rad_unw[:, :n_rad],
+                                  ang_unw[:, :n_ang],
+                                  rad_w[:, :n_rad],
+                                  ang_w[:, :n_ang]], dim=1)
+        else:
+            features = torch.cat([rad_unw[:, :n_rad],
+                                  ang_unw[:, :n_ang]], dim=1)
+        return features
+
+    def compute_feature_gradients_with_graph(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        graph,
+        triplets,
+        center_indices: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Vectorized features and gradients using CSR neighbors and triplets.
+
+        Returns
+        -------
+            features: (N, F)
+            gradients: (N, F, N, 3)
+        """
+        device = self.device
+        dtype = self.dtype
+        positions = positions.to(device=device, dtype=dtype)
+        species_indices = species_indices.to(device=device)
+
+        N = positions.shape[0]
+        n_rad = self.rad_order + 1
+        n_ang = self.ang_order + 1
+
+        # Forward pass via graph
+        features = self.forward_with_graph(
+            positions=positions,
+            species_indices=species_indices,
+            graph=graph,
+            triplets=triplets,
+            center_indices=center_indices,
+        )
+
+        # Prepare output gradients
+        n_features = self.get_n_features()
+        gradients = torch.zeros(N, n_features, N, 3,
+                                dtype=dtype, device=device)
+
+        # Edge-level data for radial gradients
+        nbr_idx = graph["nbr_idx"].to(device=device, dtype=torch.int64)
+        r_edges = graph["r_ij"].to(device=device, dtype=dtype)
+        d_edges = torch.norm(r_edges, dim=-1).clamp_min(1e-20)
+        u_edges = r_edges / (d_edges.unsqueeze(-1) + 1e-12)
+        center_of_edge = _center_ids_of_edge(graph).to(
+            device=device, dtype=torch.int64)
+
+        # dG/dr for radial basis
+        _, dG_dr = self.rad_basis.forward_with_derivatives(
+            d_edges)  # (E, n_rad)
+        dG_drij = dG_dr.unsqueeze(-1) * u_edges.unsqueeze(1)  # (E, n_rad, 3)
+
+        # Accumulate unweighted radial gradients
+        flat_size = N * N
+        idx_cc = (center_of_edge * N + center_of_edge)  # (E,)
+        idx_cj = (center_of_edge * N + nbr_idx)         # (E,)
+
+        for k in range(n_rad):
+            accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
+            gk = dG_drij[:, k, :]  # (E,3)
+            accum.index_add_(0, idx_cc, -gk)
+            accum.index_add_(0, idx_cj, gk)
+            gradients[:, k, :, :] = accum.view(N, N, 3)
+
+        if self.multi:
+            # Weighted radial with typespin(j)
+            # (E,1,1) broadcast over (n_rad,3)
+            tspin_j = self.typespin[species_indices[nbr_idx]].view(-1, 1, 1)
+            dG_w = dG_drij * tspin_j  # (E, n_rad, 3)
+            for k in range(n_rad):
+                accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
+                gk = dG_w[:, k, :]
+                accum.index_add_(0, idx_cc, -gk)
+                accum.index_add_(0, idx_cj, gk)
+                gradients[:, n_rad + n_ang + k, :, :] = accum.view(N, N, 3)
+
+        # Angular gradients via triplets
+        if triplets is not None and n_ang > 0:
+            center_ptr = graph["center_ptr"].to(
+                device=device, dtype=torch.int64)
+
+            tri_i = triplets["tri_i"].to(device=device, dtype=torch.int64)
+            tri_j = triplets["tri_j"].to(device=device, dtype=torch.int64)
+            tri_k = triplets["tri_k"].to(device=device, dtype=torch.int64)
+            tri_j_local = triplets["tri_j_local"].to(
+                device=device, dtype=torch.int64)
+            tri_k_local = triplets["tri_k_local"].to(
+                device=device, dtype=torch.int64)
+
+            start_i = center_ptr[tri_i]
+            edge_j_idx = start_i + tri_j_local
+            edge_k_idx = start_i + tri_k_local
+
+            r_ij = r_edges[edge_j_idx]
+            r_ik = r_edges[edge_k_idx]
+
+            eps = 1e-20
+            d_ij = torch.sqrt((r_ij * r_ij).sum(dim=-1) + eps)
+            d_ik = torch.sqrt((r_ik * r_ik).sum(dim=-1) + eps)
+            u_ij = r_ij / (d_ij.unsqueeze(-1) + 1e-12)
+            u_ik = r_ik / (d_ik.unsqueeze(-1) + 1e-12)
+
+            # Angular basis derivatives
+            (_, dG_dcos, dG_drij, dG_drik
+             ) = self.ang_basis.forward_with_derivatives(
+                d_ij, d_ik, (u_ij * u_ik).sum(dim=-1).clamp(-1.0, 1.0)
+            )  # (T, n_ang) each
+
+            # Geometry derivatives of cos(theta)
+            cos_theta = (u_ij * u_ik).sum(dim=-1)
+            dcos_drj = (u_ik - cos_theta.unsqueeze(-1) * u_ij
+                        ) / (d_ij.unsqueeze(-1) + 1e-12)
+            dcos_drk = (u_ij - cos_theta.unsqueeze(-1) * u_ik
+                        ) / (d_ik.unsqueeze(-1) + 1e-12)
+            dcos_dri = -(dcos_drj + dcos_drk)
+
+            dG_dcos_e = dG_dcos.unsqueeze(-1)   # (T, n_ang, 1)
+            dG_drij_e = dG_drij.unsqueeze(-1)   # (T, n_ang, 1)
+            dG_drik_e = dG_drik.unsqueeze(-1)   # (T, n_ang, 1)
+            u_ij_e = u_ij.unsqueeze(1)          # (T, 1, 3)
+            u_ik_e = u_ik.unsqueeze(1)          # (T, 1, 3)
+            dcos_drj_e = dcos_drj.unsqueeze(1)  # (T, 1, 3)
+            dcos_drk_e = dcos_drk.unsqueeze(1)  # (T, 1, 3)
+            dcos_dri_e = dcos_dri.unsqueeze(1)  # (T, 1, 3)
+
+            grads_j = (dG_dcos_e * dcos_drj_e
+                       + dG_drij_e * u_ij_e)  # (T,n_ang,3)
+            grads_k = (dG_dcos_e * dcos_drk_e
+                       + dG_drik_e * u_ik_e)  # (T,n_ang,3)
+            grads_i = (dG_dcos_e * dcos_dri_e
+                       - dG_drij_e * u_ij_e
+                       - dG_drik_e * u_ik_e)
+
+            flat_size = N * N
+            idx_cc = tri_i * N + tri_i
+            idx_cj = tri_i * N + tri_j
+            idx_ck = tri_i * N + tri_k
+
+            # Unweighted
+            for a in range(n_ang):
+                accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
+                gi = grads_i[:, a, :]
+                gj = grads_j[:, a, :]
+                gk = grads_k[:, a, :]
+                accum.index_add_(0, idx_cc, gi)
+                accum.index_add_(0, idx_cj, gj)
+                accum.index_add_(0, idx_ck, gk)
+                gradients[:, n_rad + a, :, :] = accum.view(N, N, 3)
+
+            if self.multi:
+                tsp = (self.typespin[species_indices[tri_j]] *
+                       self.typespin[species_indices[tri_k]]).unsqueeze(-1)
+                for a in range(n_ang):
+                    accum = torch.zeros(flat_size, 3,
+                                        dtype=dtype, device=device)
+                    gi = grads_i[:, a, :] * tsp
+                    gj = grads_j[:, a, :] * tsp
+                    gk = grads_k[:, a, :] * tsp
+                    accum.index_add_(0, idx_cc, gi)
+                    accum.index_add_(0, idx_cj, gj)
+                    accum.index_add_(0, idx_ck, gk)
+                    gradients[:, 2 * n_rad + n_ang + a, :, :
+                              ] = accum.view(N, N, 3)
+
+        return features, gradients
+
     def compute_feature_gradients_from_neighbor_info(
         self,
         positions: torch.Tensor,
@@ -980,7 +1263,8 @@ class ChebyshevDescriptor(nn.Module):
             positions: (N, 3) atomic positions
             species: List of N species names
             neighbor_indices: List of (nnb_i,) tensors with neighbor indices
-            neighbor_vectors: List of (nnb_i, 3) tensors with displacement vectors
+            neighbor_vectors: List of (nnb_i, 3) tensors with
+                displacement vectors
 
         Returns
         -------
@@ -1005,10 +1289,12 @@ class ChebyshevDescriptor(nn.Module):
 
         # Compute radial and angular gradients using provided neighbor data
         rad_grads = self._compute_radial_gradients(
-            positions_device, species_indices, neighbor_indices, neighbor_vectors
+            positions_device, species_indices,
+            neighbor_indices, neighbor_vectors
         )
         ang_grads = self._compute_angular_gradients(
-            positions_device, species_indices, neighbor_indices, neighbor_vectors
+            positions_device, species_indices,
+            neighbor_indices, neighbor_vectors
         )
 
         # Combine in correct feature order
@@ -1025,7 +1311,8 @@ class ChebyshevDescriptor(nn.Module):
             # [rad_unweighted, ang_unweighted, rad_weighted, ang_weighted]
             gradients[:, :n_rad] = rad_grads[:, :n_rad]
             gradients[:, n_rad:n_rad + n_ang] = ang_grads[:, :n_ang]
-            gradients[:, n_rad + n_ang:2 * n_rad + n_ang] = rad_grads[:, n_rad:]
+            gradients[:, n_rad + n_ang:2 * n_rad + n_ang
+                      ] = rad_grads[:, n_rad:]
             gradients[:, 2 * n_rad + n_ang:] = ang_grads[:, n_ang:]
         else:
             gradients[:, :n_rad] = rad_grads
@@ -1121,7 +1408,8 @@ class ChebyshevDescriptor(nn.Module):
         pbc: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
         """
-        Featurize structure and extract neighbor information for force training.
+        Featurize structure and extract neighbor information for
+        force training.
 
         This method computes atomic features and extracts neighbor lists and
         displacement vectors needed for computing feature derivatives during
