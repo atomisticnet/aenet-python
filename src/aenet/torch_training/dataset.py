@@ -19,7 +19,23 @@ from aenet.torch_featurize.graph import (
     build_triplets_from_csr,
 )
 
-__all__ = ['StructureDataset', 'CachedStructureDataset']
+# Optional import: HDF5-backed dataset and generic splitter.
+# Wrapped in try/except to avoid import errors during partial installs.
+try:
+    from .hdf5_dataset import (
+        HDF5StructureDataset,
+        train_test_split_dataset,
+    )
+except Exception:  # pragma: no cover - fallback when optional file missing
+    HDF5StructureDataset = None  # type: ignore
+    train_test_split_dataset = None  # type: ignore
+
+__all__ = [
+    'StructureDataset',
+    'CachedStructureDataset',
+    'HDF5StructureDataset',
+    'train_test_split_dataset'
+    ]
 
 
 class StructureDataset(Dataset):

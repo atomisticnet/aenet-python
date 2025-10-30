@@ -215,27 +215,21 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
 
     # Restore normalization metadata if present
     norm_meta = payload.get("normalization", {}) or {}
-    try:
-        trainer._normalize_features = bool(
-            norm_meta.get("normalize_features", False))
-        trainer._normalize_energy = bool(
-            norm_meta.get("normalize_energy", False))
-        trainer._E_shift = float(norm_meta.get("E_shift", 0.0))
-        trainer._E_scaling = float(norm_meta.get("E_scaling", 1.0))
-        fm = norm_meta.get("feature_mean", None)
-        fs = norm_meta.get("feature_std", None)
-        if fm is not None:
-            trainer._feature_mean = torch.as_tensor(
-                fm, dtype=trainer.dtype, device=trainer.device
-            )
-        if fs is not None:
-            trainer._feature_std = torch.as_tensor(
-                fs, dtype=trainer.dtype, device=trainer.device
-            )
-    except Exception:
-        # Best-effort; prediction still works without
-        # normalization restoration
-        pass
+    if norm_meta:
+        try:
+            trainer._normalizer.set_state({
+                "normalize_features": norm_meta.get(
+                    "normalize_features", True),
+                "normalize_energy": norm_meta.get("normalize_energy", True),
+                "E_shift": norm_meta.get("E_shift", 0.0),
+                "E_scaling": norm_meta.get("E_scaling", 1.0),
+                "feature_mean": norm_meta.get("feature_mean"),
+                "feature_std": norm_meta.get("feature_std"),
+            })
+        except Exception:
+            # Best-effort; prediction still works without
+            # normalization restoration
+            pass
 
     # Restore energy target and atomic reference energies if present
     try:

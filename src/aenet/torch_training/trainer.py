@@ -21,7 +21,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, Subset
 
 # Progress bar (match aenet.mlip behavior)
 try:
@@ -30,7 +30,9 @@ except Exception:
     tqdm = None  # type: ignore
 
 from .config import TorchTrainingConfig, Structure
-from .dataset import StructureDataset, train_test_split
+from .dataset import (StructureDataset,
+                      train_test_split,
+                      train_test_split_dataset)
 from .model_adapter import EnergyModelAdapter
 
 # Refactored modules
@@ -325,8 +327,13 @@ class TorchANNPotential:
         self._metrics = MetricsTracker(track_detailed_timing=True)
         self.best_val: Optional[float] = None
 
-        # Normalization - will be initialized during training
-        self._normalizer: Optional[NormalizationManager] = None
+        # Normalization - initialize with defaults
+        self._normalizer = NormalizationManager(
+            normalize_features=True,
+            normalize_energy=True,
+            dtype=self.dtype,
+            device=self.device,
+        )
 
         # Atomic reference energies
         self._E_atomic: Optional[Dict[str, float]] = None
@@ -346,7 +353,10 @@ class TorchANNPotential:
 
     def train(
         self,
-        structures: List[Structure],
+        structures: Optional[List[Structure]] = None,
+        dataset: Optional[Dataset] = None,
+        train_dataset: Optional[Dataset] = None,
+        test_dataset: Optional[Dataset] = None,
         config: Optional[TorchTrainingConfig] = None,
         checkpoint_dir: Optional[str] = "checkpoints",
         checkpoint_interval: int = 1,
@@ -361,8 +371,29 @@ class TorchANNPotential:
         """
         Train the MLIP and return training history.
 
+        Parameters
+        ----------
+        structures : list[Structure], optional
+            Legacy input: list of in-memory Structures. If provided and
+            dataset/train_dataset are None, a StructureDataset is created.
+        dataset : torch.utils.data.Dataset, optional
+            Generic dataset providing samples compatible with the collate_fn.
+            If provided and train_dataset/test_dataset are None, a train/test
+            split will be created using config.testpercent.
+        train_dataset : torch.utils.data.Dataset, optional
+            Explicit training dataset. If provided, takes precedence over
+            'dataset' and 'structures'.
+        test_dataset : torch.utils.data.Dataset, optional
+            Explicit test dataset to use alongside train_dataset.
+
         Notes
         -----
+        Priority of data sources:
+          1) train_dataset/test_dataset (if provided)
+          2) dataset (auto-split using config.testpercent)
+          3) structures list (legacy path; may use CachedStructureDataset
+             when energy-only with cached_features=True)
+
         - Energy RMSE is computed per-atom (consistent with aenet-PyTorch)
         - Force RMSE is overall RMSE across all components in batch
         """
@@ -417,71 +448,110 @@ class TorchANNPotential:
                       "unchanged.")
 
         # Dataset and split
-        if bool(getattr(config, "cached_features", False)
-                ) and float(config.alpha) == 0.0:
-            # Energy-only cached-features path
-            structures_all = structures
-            if config.testpercent > 0:
+        # (priority: explicit train/test > dataset > structures)
+        train_ds = None
+        test_ds = None
+
+        if train_dataset is not None:
+            train_ds = train_dataset
+            test_ds = test_dataset
+        elif dataset is not None:
+            base_ds = dataset
+            if config.testpercent > 0 and test_dataset is None:
                 test_fraction = config.testpercent / 100.0
-                import random as _rand
-                idx = list(range(len(structures_all)))
-                _rand.shuffle(idx)
-                n_test = int(len(idx) * test_fraction)
-                test_idx = set(idx[:n_test])
-                train_idx = set(idx[n_test:])
-                train_structs = [structures_all[i] for i in sorted(train_idx)]
-                test_structs = [structures_all[i] for i in sorted(test_idx)]
+                if train_test_split_dataset is not None:
+                    train_ds, test_ds = train_test_split_dataset(
+                        base_ds, test_fraction=test_fraction
+                    )
+                else:
+                    # Generic fallback split using Subset
+                    import random as _rand
+                    n = len(base_ds)
+                    indices = list(range(n))
+                    _rand.shuffle(indices)
+                    n_test = int(n * test_fraction)
+                    test_idx = indices[:n_test]
+                    train_idx = indices[n_test:]
+                    train_ds = Subset(base_ds, train_idx)
+                    test_ds = Subset(base_ds, test_idx)
             else:
-                train_structs = structures_all
-                test_structs = []
-            from .dataset import CachedStructureDataset
-            train_ds = CachedStructureDataset(
-                structures=train_structs,
-                descriptor=self.descriptor,
-                max_energy=config.max_energy,
-                max_forces=config.max_forces,
-                seed=None,
-            )
-            test_ds = (
-                CachedStructureDataset(
-                    structures=test_structs,
+                train_ds = base_ds
+                test_ds = test_dataset
+        else:
+            # Legacy path from list[Structure]
+            if structures is None:
+                raise ValueError(
+                    "Provide either 'structures' or 'dataset'/'train_dataset'"
+                )
+            if bool(getattr(config, "cached_features", False)
+                    ) and float(config.alpha) == 0.0:
+                # Energy-only cached-features path
+                structures_all = structures
+                if config.testpercent > 0:
+                    test_fraction = config.testpercent / 100.0
+                    import random as _rand
+                    idx = list(range(len(structures_all)))
+                    _rand.shuffle(idx)
+                    n_test = int(len(idx) * test_fraction)
+                    test_idx = set(idx[:n_test])
+                    train_idx = set(idx[n_test:])
+                    train_structs = [structures_all[i]
+                                     for i in sorted(train_idx)]
+                    test_structs = [structures_all[i]
+                                    for i in sorted(test_idx)]
+                else:
+                    train_structs = structures_all
+                    test_structs = []
+                from .dataset import CachedStructureDataset
+                train_ds = CachedStructureDataset(
+                    structures=train_structs,
                     descriptor=self.descriptor,
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
                     seed=None,
                 )
-                if (config.testpercent > 0 and len(test_structs) > 0)
-                else None
-            )
-        else:
-            full_ds = StructureDataset(
-                structures=structures,
-                descriptor=self.descriptor,
-                force_fraction=config.force_fraction,
-                force_sampling=config.force_sampling,
-                max_energy=config.max_energy,
-                max_forces=config.max_forces,
-                min_force_structures_per_epoch=getattr(
-                    config, "force_min_structures_per_epoch", None
-                ),
-                cached_features_for_force=bool(
-                    getattr(config, "cached_features_for_force", False)
-                ),
-                cache_neighbors=bool(
-                    getattr(config, "cache_neighbors", False)
-                ),
-                cache_triplets=bool(
-                    getattr(config, "cache_triplets", False)
-                ),
-                cache_persist_dir=getattr(config, "cache_persist_dir", None),
-                seed=None,
-            )
-            if config.testpercent > 0:
-                test_fraction = config.testpercent / 100.0
-                train_ds, test_ds = train_test_split(
-                    full_ds, test_fraction=test_fraction)
+                test_ds = (
+                    CachedStructureDataset(
+                        structures=test_structs,
+                        descriptor=self.descriptor,
+                        max_energy=config.max_energy,
+                        max_forces=config.max_forces,
+                        seed=None,
+                    )
+                    if (config.testpercent > 0 and len(test_structs) > 0)
+                    else None
+                )
             else:
-                train_ds, test_ds = full_ds, None
+                full_ds = StructureDataset(
+                    structures=structures,
+                    descriptor=self.descriptor,
+                    force_fraction=config.force_fraction,
+                    force_sampling=config.force_sampling,
+                    max_energy=config.max_energy,
+                    max_forces=config.max_forces,
+                    min_force_structures_per_epoch=getattr(
+                        config, "force_min_structures_per_epoch", None
+                    ),
+                    cached_features_for_force=bool(
+                        getattr(config, "cached_features_for_force", False)
+                    ),
+                    cache_neighbors=bool(
+                        getattr(config, "cache_neighbors", False)
+                    ),
+                    cache_triplets=bool(
+                        getattr(config, "cache_triplets", False)
+                    ),
+                    cache_persist_dir=getattr(
+                        config, "cache_persist_dir", None),
+                    seed=None,
+                )
+                if config.testpercent > 0:
+                    test_fraction = config.testpercent / 100.0
+                    train_ds, test_ds = train_test_split(
+                        full_ds, test_fraction=test_fraction
+                    )
+                else:
+                    train_ds, test_ds = full_ds, None
 
         # DataLoaders
         batch_size = OptimizerBuilder.get_batch_size(config.method)

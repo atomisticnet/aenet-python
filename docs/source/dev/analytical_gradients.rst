@@ -77,7 +77,7 @@ For each neighbor triplet ``(i, j, k)`` with displacements ``r_ij, r_ik``:
 - Basis partial derivatives from ``AngularBasis``:
   - ``dG/dcos``, ``dG/dr_ij``, ``dG/dr_ik``
 
-Geometric derivatives (see detailed derivation):
+Geometric derivatives (see detailed derivation)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. math::
@@ -98,7 +98,7 @@ Geometric derivatives (see detailed derivation):
    = -\left(\frac{\partial \cos\theta}{\partial \mathbf{r}_j}
      + \frac{\partial \cos\theta}{\partial \mathbf{r}_k}\right)
 
-Final chain rule to coordinates:
+Final chain rule to coordinates
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. math::
@@ -132,11 +132,8 @@ Implementation Notes
 
 - Code: ``ChebyshevDescriptor._compute_angular_gradients``
   - Vectorized derivation for all triplets in a structure.
-  - Avoids ``torch.autograd.grad`` on geometric terms; only uses analytical
-    expressions and partials provided by ``AngularBasis.forward_with_derivatives``.
-  - Accumulation for unweighted and typespin-weighted angular features is done
-    via flattened ``index_add_`` into an ``(n_atoms * n_atoms, 3)`` workspace
-    per feature index, reshaped back to ``(n_atoms, n_atoms, 3)``.
+  - Avoids ``torch.autograd.grad`` on geometric terms; only uses analytical expressions and partials provided by ``AngularBasis.forward_with_derivatives``.
+  - Accumulation for unweighted and typespin-weighted angular features is done via flattened ``index_add_`` into an ``(n_atoms * n_atoms, 3)`` workspace per feature index, reshaped back to ``(n_atoms, n_atoms, 3)``.
 
 - Feature ordering (consistent with Fortran):
   - Single species: ``[radial, angular]``

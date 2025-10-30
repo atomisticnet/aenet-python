@@ -34,23 +34,60 @@ used for :doc:`configuration </usage/installation>`.
 See :doc:`/usage/commandline` for an overview of the
 command-line capabilities.
 
-Contents
---------------
+Getting Started
+---------------
 
 .. toctree::
    :maxdepth: 2
-   :glob:
 
    usage/installation
+   usage/choosing_implementation
+
+PyTorch Training (Recommended)
+-------------------------------
+
+Pure Python implementation with GPU support, easy installation, and flexible
+configuration. Ideal for new users and modern workflows.
+
+.. toctree::
+   :maxdepth: 2
+
+   usage/torch_featurization
+   usage/torch_training_tutorial
+   usage/torch_training_config_reference
+   usage/torch_training_performance
+
+Fortran Training (Production)
+------------------------------
+
+Battle-tested implementation with maximum CPU efficiency. Requires compiled
+Fortran binaries but provides excellent performance for production HPC workflows.
+
+.. toctree::
+   :maxdepth: 2
+
+   usage/featurization
+   usage/training
+   usage/trainset
+
+Migration & Utilities
+---------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   usage/migration_torch
    usage/structure_manipulation
    usage/data_acquisition
-   usage/featurization
-   usage/torch_featurization
    usage/neighbor_lists
-   usage/migration_torch
    usage/commandline
-   usage/trainset
-   usage/training
+
+Developer Documentation
+-----------------------
+
+.. toctree::
+   :maxdepth: 2
+
    dev/commandline
    dev/analytical_gradients
    dev/angular_gradient_math

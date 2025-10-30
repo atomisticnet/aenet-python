@@ -7,6 +7,7 @@ A type to represent the most important atomic structure data.
 
 import numpy as np
 import sys
+import warnings
 
 from .exceptions import ArgumentError, IncompatibleStructureError
 from . import util
@@ -171,6 +172,84 @@ class AtomicStructure(object):
                 structure.add_frame(coords, avec=avec, fractional=False,
                                     energy=energy, forces=forces)
         return structure
+
+    @classmethod
+    def from_TorchStructure(cls, s):
+        """
+        Create an AtomicStructure from a aenet.torch_training.config.Structure.
+
+        Parameters
+        ----------
+        s : aenet.torch_training.config.Structure
+            Source structure (single configuration)
+        """
+        coords = np.array(s.positions)
+        types = list(s.species)
+
+        # Periodicity and cell
+        avec = (np.array(s.cell)
+                if getattr(s, 'cell', None) is not None else None)
+
+        # Energies and forces
+        energy = getattr(s, 'energy', None)
+        forces = getattr(s, 'forces', None)
+        if isinstance(forces, list) and len(forces) == 0:
+            forces = None
+
+        return cls(coords=coords, types=types, avec=avec,
+                   fractional=False, energy=energy, forces=forces)
+
+    def to_TorchStructure(self, frame=None):
+        """
+        Convert AtomicStructure to torch-training Structure(s).
+
+        Parameters
+        ----------
+        frame : int or None, optional
+            If None (default), convert all frames and return a list.
+            If int, convert only that frame and return a single Structure.
+
+        Returns
+        -------
+        Structure or list[Structure]
+        """
+        from .torch_training.config import Structure as TorchStructure
+
+        def _convert_one(fidx: int):
+            positions = np.array(self.coords[fidx])
+            species = list(self.types)
+            # Energy
+            try:
+                energy = self.energy[fidx]
+            except Exception:
+                energy = None
+            # Forces
+            forces = None
+            try:
+                f = self.forces[fidx]
+                if f is not None and len(f) != 0:
+                    forces = np.array(f)
+            except Exception:
+                forces = None
+            # Cell / PBC
+            cell = np.array(self.avec[fidx]) if self.pbc else None
+            pbc = np.array([True, True, True]) if self.pbc else None
+            # Optional name if present
+            name = getattr(self, 'name', None)
+            return TorchStructure(
+                positions=positions,
+                species=species,
+                energy=energy,
+                forces=forces,
+                cell=cell,
+                pbc=pbc,
+                name=name,
+            )
+
+        if frame is None:
+            return [_convert_one(i) for i in range(self.nframes)]
+        else:
+            return _convert_one(frame)
 
     def __str__(self):
         """
@@ -933,45 +1012,75 @@ class AtomicStructure(object):
           an atomic structure object
 
         """
-        # Lazy import to avoid circular dependency
-        from .torch_featurize.neighborlist import TorchNeighborList
+        # Prefer Torch-based neighbor list if available;
+        # fall back to NumPy version
+        try:
+            from .torch_featurize.neighborlist \
+                import TorchNeighborList  # type: ignore
+            nbl = TorchNeighborList(cutoff=cutoff, device="cpu")
+            positions = self.coords[frame]
+            cell = self.avec[frame] if self.pbc else None
 
-        # Create neighbor list (accepts numpy arrays)
-        nbl = TorchNeighborList(cutoff=cutoff, device='cpu')
+            result = nbl.get_neighbors_of_atom(
+                i, positions, cell=cell, return_coordinates=True
+            )
 
-        # Get neighbors with coordinates computed automatically
-        positions = self.coords[frame]
-        cell = self.avec[frame] if self.pbc else None
-
-        result = nbl.get_neighbors_of_atom(
-            i, positions, cell=cell, return_coordinates=True
-        )
-
-        # Extract data (convert back to numpy)
-        neighbor_idx = result['indices'].cpu().numpy()
-
-        # Handle empty neighbor list
-        if len(neighbor_idx) == 0:
-            if return_self:
-                # Only return the central atom
-                coords = np.array([self.coords[frame][i]])
-                types = np.array([self.types[i]])
+            neighbor_idx = result["indices"].cpu().numpy()
+            if len(neighbor_idx) == 0:
+                if return_self:
+                    coords = np.array([self.coords[frame][i]])
+                    types = np.array([self.types[i]])
+                    return AtomicStructure(coords=coords, types=types)
+                else:
+                    return None
+            else:
+                neighbor_coords = result["coordinates"].cpu().numpy()
+                if return_self:
+                    coords = np.vstack(
+                        [self.coords[frame][i], neighbor_coords])
+                    types = np.hstack(
+                        [self.types[i], self.types[neighbor_idx]])
+                else:
+                    coords = neighbor_coords
+                    types = self.types[neighbor_idx]
                 return AtomicStructure(coords=coords, types=types)
-            else:
-                # No neighbors found and not returning self
+        except Exception as e:
+            # Fallback: pure NumPy neighbor list
+            warnings.warn(
+                "Falling back to NumPy neighbor list because PyTorch "
+                "extras are unavailable or failed at runtime "
+                f"({e}). Install with: pip install 'aenet[torch]'",
+                RuntimeWarning,
+            )
+            from .nblist.neighborlist import NeighborList  # type: ignore
+
+            nbl = NeighborList.from_AtomicStructure(
+                self, frame=frame, interaction_range=cutoff
+            )
+            # Get neighbors and coordinates
+            nbl_idx, coords, _dist, _T = nbl.get_neighbors_and_distances(
+                i, r=cutoff, return_coords=True, return_self=return_self
+            )
+
+            if len(nbl_idx) == 0 and not return_self:
                 return None
-        else:
-            neighbor_coords = result['coordinates'].cpu().numpy()
 
-            # Build result structure
+            # If return_self, coords may already include the central atom
             if return_self:
-                coords = np.vstack([self.coords[frame][i], neighbor_coords])
-                types = np.hstack([self.types[i], self.types[neighbor_idx]])
+                if len(coords) == 0:
+                    coords = np.array([self.coords[frame][i]])
+                    types = np.array([self.types[i]])
+                else:
+                    if len(nbl_idx) == 0:
+                        types = np.array([self.types[i]])
+                    else:
+                        types = np.hstack([self.types[i], self.types[nbl_idx]])
+                return AtomicStructure(
+                    coords=np.array(coords), types=np.array(types))
             else:
-                coords = neighbor_coords
-                types = self.types[neighbor_idx]
-
-            return AtomicStructure(coords=coords, types=types)
+                coords_arr = np.array(coords)
+                types_arr = self.types[np.array(nbl_idx, dtype=int)]
+                return AtomicStructure(coords=coords_arr, types=types_arr)
 
     def frac2cart(self, fraccoo, avec=None, frame=-1):
         if (avec is None or len(avec) == 0):

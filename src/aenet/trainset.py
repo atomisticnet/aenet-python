@@ -29,35 +29,34 @@ class FeaturizedAtomicStructure(Serializable):
     """
     Class to hold all information of an atomic structure.
 
-    Attributes:
+    Attributes
+    ----------
+    path : str
+        Path to the original structure file.
+    energy : float
+        Total energy of the structure.
+    atom_types : list[str]
+        List of atom types (chemical symbols).
+    atoms : list[dict]
+        Atomic information per atom with keys:
+        {'type': atom_type, 'fingerprint': fingerprint,
+         'coords': coords, 'forces': forces}.
+    neighbor_info : dict or None
+        Optional neighbor information for force training. If present, contains:
+        - 'neighbor_counts': (n_atoms,) array of neighbor counts
+        - 'neighbor_lists': list of (nnb,) arrays with neighbor indices
+        - 'neighbor_vectors': list of (nnb, 3) arrays with displacement vectors
+    cell : numpy.ndarray or None
+        Unit cell lattice vectors as (3, 3) array where rows are
+        lattice vectors.
+    pbc : bool
+        True for 3D-periodic structures; False for isolated structures.
 
-    path (str): Path to the original structure file
-    energy (float): Total energy of the structure
-    atom_types (List[str]): List of atom types (chemical symbols)
-    atoms (List[dict]): Atomic information as dictionary with the keys
-         {"type": atom_type,
-          "fingerprint": fingerprint,
-          "coords": coords,
-          "forces": forces}
-    neighbor_info (dict, optional): Neighbor information for force training.
-        If present, contains:
-            - 'neighbor_counts': (n_atoms,) array of neighbor counts
-            - 'neighbor_lists': List of (nnb,) arrays with neighbor indices
-            - 'neighbor_vectors': List of (nnb, 3) arrays with
-                 displacement vectors
-    cell (np.ndarray, optional): Unit cell lattice vectors as (3, 3) array
-        where rows are lattice vectors. None for non-periodic structures.
-    pbc (bool, optional): True for 3D-periodic structures, False/None for
-        isolated structures.
-
-    Properties:
-
-    max_descriptor_length (int): Dimension of longest fingerprint among
-      all atoms of the atomic structure
-    has_neighbor_info (bool): True if neighbor information is available
-    has_cell (bool): True if cell information is available
-    is_periodic (bool): True if structure is periodic
-
+    Notes
+    -----
+    Properties like has_neighbor_info, has_cell, is_periodic, num_atoms,
+    max_descriptor_length, composition, atom_weights, and atom_features
+    are documented on their respective properties.
     """
 
     def __init__(self, path: str, energy: float, atom_types: List[str],
@@ -211,56 +210,61 @@ class FeaturizedAtomicStructure(Serializable):
                                   exclude_zero_atoms: bool = False,
                                   atom_types: List[str] = None):
         """
-        Calculate the global fingerprint from local atomic fingerprints
-        using a moment expansion.
+        Calculate a global fingerprint from local atomic fingerprints using a
+        moment expansion.
 
-        Note: this implementation assumes that the atomic descriptors
-        for each species have the same length.
+        This implementation assumes that atomic descriptors for each species
+        have the same length.
 
-        Arguments:
-          outer_moment (int): up to which outer moment to compute
-            for the inner moments of atomic fingerprints (should be an
-            integer >= 1). Note: The outer moment is not used when
-            stack_type_features is True.
-          inner_moment (int): up to which inner moment to compute for
-            atomic fingerprints (should be an integer >= 0, i.e. 0 is no
-            moment, and 1 is the mean)
-          weighted (bool): whether atom weighting is used (this is
-            different from weighted moments; atomic fingerprint is
-            simply multiplied by its weight) (default is False)
-            Attention: species weighting is not useful when
-                       stack_type_features is True.
-          weights (dict): weights of atoms ({atom_symbol: weight})
-            (default is self.atom_weights)
-          append_weighted (bool): If True, and weighted is True, append
-            the weighted features to the list of unweighted features.
-            Otherwise, only return the weighted features. (default is False)
-          stack_type_features (bool): If True, do not perform an outer
-            moment expansion to combine the feature vectors for individual
-            atom types.  Instead, only concatenate the atom-type feature
-            vectors. (default is False)
-          exclude_zero_atoms (bool): whether to exclude or include species
-            that are not part of the structure
-          atom_types (list): provide a list of chemical symbols to be
-            considered for the global moment fingerprint. Per default,
-            all of the structure's atom types are considered.
+        Parameters
+        ----------
+        outer_moment : int, default=1
+            Up to which outer moment to compute. Must be >= 1.
+            Not used when ``stack_type_features`` is True.
+        inner_moment : int, default=1
+            Up to which inner moment to compute. Must be >= 0
+            (0 = no moment, 1 = mean).
+        weighted : bool, default=False
+            Whether to apply species weights to the type fingerprints.
+        weights : dict[str, float] or None, default=None
+            Mapping of atom symbol to weight. Defaults to ``self.atom_weights``
+            when ``weighted`` is True.
+        append_weighted : bool, default=False
+            If True and ``weighted`` is True, append the weighted features to
+            the unweighted features; otherwise only return weighted features.
+        stack_type_features : bool, default=False
+            If True, concatenate per-type feature vectors instead of performing
+            the outer moment expansion.
+        exclude_zero_atoms : bool, default=False
+            If True, skip species with zero count in the structure.
+        atom_types : list[str] or None, default=None
+            Subset of chemical symbols to consider. Defaults to all
+            ``self.atom_types``.
 
-        Returns:
-          global_fingerprint (array)    global moment fingerprint
+        Returns
+        -------
+        numpy.ndarray
+            Global fingerprint vector.
 
-        F_global = outer_moments(w_A*inner_moments(F_A)
-                                 U w_B*inner_moments(F_B) U ...),
+        Notes
+        -----
+        The global fingerprint can be conceived as::
+
+            F_global = outer_moments(w_A * inner_moments(F_A)
+                                     U w_B * inner_moments(F_B) U ...)
+
         where
-            F_global is the global fingerprint,
-            F_s is the union of atomic fingerprints for species s
-                (F_s = F_s(1) U F_s(2) U ...),
-            F_s(i) is atomic fingerprint for species s at site i,
-            w_s is the weight for species s
 
-        Dimension of the global fingerprint is equal to
-        length(type_fingerprint)*inner_moment*outer_moment
-        or length(type_fingerprint)*outer_moment if inner_moment is 0
+            - ``F_global`` is the global fingerprint
+            - ``F_s`` is the union of atomic fingerprints for species ``s``
+              (``F_s = F_s(1) U F_s(2) U ...``)
+            - ``F_s(i)`` is the atomic fingerprint for
+              species ``s`` at site ``i``
+            - ``w_s`` is the weight for species ``s``
 
+        The dimension is
+        ``len(type_fingerprint) * inner_moment * outer_moment``
+        (or ``len(type_fingerprint) * outer_moment`` if ``inner_moment`` is 0).
         """
         if not isinstance(outer_moment, int) or outer_moment < 1:
             raise ValueError(

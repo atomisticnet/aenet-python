@@ -103,6 +103,57 @@ class Structure:
         """Check if structure is periodic."""
         return self.cell is not None
 
+    @classmethod
+    def from_AtomicStructure(cls, s, frame: int = -1):
+        """
+        Create a torch-training Structure from an
+        aenet.geometry.AtomicStructure.
+
+        Parameters
+        ----------
+        s : aenet.geometry.AtomicStructure
+            Source structure (possibly multi-frame)
+        frame : int, optional
+            Frame index to extract (default: -1 = last frame)
+
+        Returns
+        -------
+        Structure
+        """
+        # positions
+        positions = np.array(s.coords[frame])
+        # species
+        species = list(s.types)
+        # energy
+        try:
+            energy = s.energy[frame]
+        except Exception:
+            energy = None
+        # forces
+        forces = None
+        try:
+            f = s.forces[frame]
+            if f is not None and len(f) != 0:
+                forces = np.array(f)
+        except Exception:
+            forces = None
+        # cell and pbc
+        cell = np.array(s.avec[frame]) if getattr(s, 'pbc', False) else None
+        pbc = (np.array([True, True, True])
+               if getattr(s, 'pbc', False) else None)
+        # name (if available)
+        name = getattr(s, 'name', None)
+
+        return cls(
+            positions=positions,
+            species=species,
+            energy=energy,
+            forces=forces,
+            cell=cell,
+            pbc=pbc,
+            name=name,
+        )
+
 
 @dataclass
 class TrainingMethod:

@@ -201,6 +201,15 @@ The PyTorch implementation is validated to match Fortran output:
        structure.positions, structure.species
    )
 
+Next Steps
+----------
+
+After featurizing your structures, you can:
+
+* **Train a model**: See :doc:`torch_training_tutorial` for PyTorch-based training
+* **Optimize performance**: See :doc:`torch_training_performance` for training speedups
+* **Use cached features**: Enable ``cached_features=True`` in training config for 100× speedup on energy-only training
+
 API Reference
 -------------
 

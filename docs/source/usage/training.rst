@@ -1,7 +1,16 @@
 .. _usage-training:
 
-Training ANN Potentials
-=======================
+Training ANN Potentials (Fortran)
+==================================
+
+.. note::
+
+   This page documents the **Fortran-based** training implementation, which
+   wraps the compiled ænet executables. For the **PyTorch-based** implementation
+   (recommended for new users), see :doc:`torch_training_tutorial`.
+
+   Both implementations are fully supported. See :doc:`choosing_implementation`
+   for guidance on choosing between them.
 
 ``aenet-python`` provides tools to facilitate the training of `aenet`_
 Artificial Neural Network (ANN) potentials directly from Python scripts.

@@ -22,6 +22,28 @@ For development, install in editable mode:
 
     $ pip install -e .
 
+Optional: enable PyTorch-based features (featurization and training)
+
+- From a source checkout:
+
+        $ pip install '.[torch]'
+
+  or for development:
+
+        $ pip install -e '.[dev,torch]'
+
+If pip reports build/version conflicts for torch-scatter/torch-cluster:
+- Ensure your installed torch version matches available wheels (CPU/CUDA).
+- You can install prebuilt wheels from the PyG index, for example:
+
+        $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
+
+  Replace ${TORCH} (e.g., 2.3.1) and ${CUDA} (e.g., cu121 or cpu) with your environment.
+
+Behavior without PyTorch extras:
+- aenet.torch_featurize and aenet.torch_training can be imported, but accessing symbols raises a clear ImportError suggesting: pip install 'aenet[torch]'.
+- AtomicStructure.get_neighbors() automatically falls back to a NumPy neighbor list with a RuntimeWarning.
+
 To use the featurization capabilities, the main ænet package needs to be installed separately as described [elsewhere](http://ann.atomistic.net/documentation/).  And `aenet-python` needs to be made aware of the ænet installation path, for example, using its interactive configuration tool
 
     $ aenet config --set-aenet-path [path-to-aenet]

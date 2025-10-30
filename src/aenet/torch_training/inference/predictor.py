@@ -66,7 +66,6 @@ class Predictor:
 
         self._warn_missing_E_atomic_once: bool = False
 
-    @torch.no_grad()
     def predict(
         self, structures: List[Structure], predict_forces: bool = False
     ) -> Tuple[List[float], Optional[List[torch.Tensor]]]:
@@ -166,29 +165,31 @@ class Predictor:
                 }
                 # Dummy zeros for forces_ref; we only want predictions
                 forces_ref = torch.zeros_like(positions)
-                _, forces_pred = compute_force_loss(
-                    positions=positions.clone(),
-                    species=st.species,
-                    forces_ref=forces_ref,
-                    descriptor=self.descriptor,
-                    network=self.model,
-                    species_indices=species_indices,
-                    cell=None,
-                    pbc=None,
-                    E_scaling=float(self.normalizer.E_scaling),
-                    neighbor_info=neighbor_info,
-                    chunk_size=None,
-                    feature_mean=(
-                        self.normalizer.feature_mean
-                        if self.normalizer.normalize_features
-                        else None
-                    ),
-                    feature_std=(
-                        self.normalizer.feature_std
-                        if self.normalizer.normalize_features
-                        else None
-                    ),
-                )
+                # Enable gradients for force prediction (autograd for dE/dR)
+                with torch.enable_grad():
+                    _, forces_pred = compute_force_loss(
+                        positions=positions.clone(),
+                        species=st.species,
+                        forces_ref=forces_ref,
+                        descriptor=self.descriptor,
+                        network=self.model,
+                        species_indices=species_indices,
+                        cell=None,
+                        pbc=None,
+                        E_scaling=float(self.normalizer.E_scaling),
+                        neighbor_info=neighbor_info,
+                        chunk_size=None,
+                        feature_mean=(
+                            self.normalizer.feature_mean
+                            if self.normalizer.normalize_features
+                            else None
+                        ),
+                        feature_std=(
+                            self.normalizer.feature_std
+                            if self.normalizer.normalize_features
+                            else None
+                        ),
+                    )
                 forces_out.append(forces_pred.detach().cpu())
 
         return energies, (forces_out if predict_forces else None)

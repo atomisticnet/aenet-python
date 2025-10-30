@@ -2,9 +2,6 @@ Training Set Management
 =======================
 
 .. automodule:: aenet.trainset
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 Classes
 -------
@@ -18,6 +15,7 @@ FeaturizedAtomicStructure
    :show-inheritance:
 
    .. attribute:: neighbor_info
+      :noindex:
 
       Optional dictionary containing neighbor information for force training.
       If present, contains:
@@ -31,6 +29,7 @@ FeaturizedAtomicStructure
       :type: dict or None
 
    .. autoproperty:: has_neighbor_info
+      :noindex:
 
       Returns True if neighbor information is available for force training.
 
@@ -46,6 +45,7 @@ TrnSet
    :show-inheritance:
 
    .. automethod:: has_neighbor_info
+      :noindex:
 
       Check if the training set file contains neighbor information.
 
