@@ -3,10 +3,13 @@ Unit tests for aenet.mlip module.
 
 """
 
+import glob
 import os
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
+
+import numpy as np
 
 from aenet.mlip import (ANNPotential, TrainingConfig, Adam, BFGS,
                         EKF, LM, OnlineSD)
@@ -509,6 +512,342 @@ class TestTrainingConfig(unittest.TestCase):
         for sampling in valid_sampling:
             config = TrainingConfig(sampling=sampling)
             self.assertEqual(config.sampling, sampling)
+
+
+class TestPredictionConfig(unittest.TestCase):
+    """Test cases for PredictionConfig validation."""
+
+    def test_prediction_config_defaults(self):
+        """Test PredictionConfig with default values."""
+        from aenet.mlip import PredictionConfig
+        config = PredictionConfig()
+        self.assertIsNone(config.potential_paths)
+        self.assertIsNone(config.potential_format)
+        self.assertFalse(config.timing)
+        self.assertFalse(config.print_atomic_energies)
+        self.assertFalse(config.debug)
+        self.assertEqual(config.verbosity, 1)
+
+    def test_prediction_config_custom(self):
+        """Test PredictionConfig with custom values."""
+        from aenet.mlip import PredictionConfig
+        config = PredictionConfig(
+            potential_paths={'Ti': 'Ti.nn', 'O': 'O.nn'},
+            potential_format='ascii',
+            timing=True,
+            print_atomic_energies=True,
+            debug=True,
+            verbosity=2
+        )
+        self.assertEqual(config.potential_paths, {'Ti': 'Ti.nn', 'O': 'O.nn'})
+        self.assertEqual(config.potential_format, 'ascii')
+        self.assertTrue(config.timing)
+        self.assertTrue(config.print_atomic_energies)
+        self.assertTrue(config.debug)
+        self.assertEqual(config.verbosity, 2)
+
+    def test_prediction_config_invalid_verbosity(self):
+        """Test PredictionConfig rejects invalid verbosity."""
+        from aenet.mlip import PredictionConfig
+        with self.assertRaises(ValueError) as context:
+            PredictionConfig(verbosity=3)
+        self.assertIn('verbosity must be 0, 1, or 2', str(context.exception))
+
+        with self.assertRaises(ValueError) as context:
+            PredictionConfig(verbosity=-1)
+        self.assertIn('verbosity must be 0, 1, or 2', str(context.exception))
+
+    def test_prediction_config_invalid_format(self):
+        """Test PredictionConfig rejects invalid potential format."""
+        from aenet.mlip import PredictionConfig
+        with self.assertRaises(ValueError) as context:
+            PredictionConfig(potential_format='invalid')
+        self.assertIn("potential_format must be 'ascii', 'ASCII', or None",
+                      str(context.exception))
+
+
+class TestANNPotentialPrediction(unittest.TestCase):
+    """Test cases for ANNPotential prediction functionality."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.simple_arch = {
+            'Ti': [(10, 'tanh'), (10, 'tanh')],
+            'O': [(10, 'tanh'), (10, 'tanh')]
+        }
+
+    def test_from_files_factory(self):
+        """Test ANNPotential.from_files() factory method."""
+        test_dir = os.path.dirname(__file__)
+        data_dir = os.path.join(test_dir, 'data')
+
+        potential_paths = {
+            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),
+            'O': os.path.join(data_dir, 'O.nn.ascii')
+        }
+        potential = ANNPotential.from_files(
+            potential_paths,
+            potential_format='ascii'
+        )
+
+        self.assertEqual(potential._potential_paths, potential_paths)
+        self.assertEqual(potential._potential_format, 'ascii')
+        self.assertTrue(potential._from_files)
+        self.assertCountEqual(potential.atom_types, ['Ti', 'O'])
+
+    def test_from_files_missing_file_error(self):
+        """Test from_files() raises error for missing files."""
+        potential_paths = {
+            'Ti': 'nonexistent_Ti.nn',
+            'O': 'nonexistent_O.nn'
+        }
+
+        with self.assertRaises(FileNotFoundError) as context:
+            ANNPotential.from_files(potential_paths)
+
+        # Check that the error message lists missing files
+        error_msg = str(context.exception)
+        self.assertIn('Potential file(s) not found', error_msg)
+        self.assertIn('Ti: nonexistent_Ti.nn', error_msg)
+        self.assertIn('O: nonexistent_O.nn', error_msg)
+
+    def test_from_files_partial_missing_files(self):
+        """Test from_files() with some files missing."""
+        test_dir = os.path.dirname(__file__)
+        data_dir = os.path.join(test_dir, 'data')
+
+        potential_paths = {
+            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),  # exists
+            'O': 'nonexistent_O.nn'  # doesn't exist
+        }
+
+        with self.assertRaises(FileNotFoundError) as context:
+            ANNPotential.from_files(potential_paths)
+
+        error_msg = str(context.exception)
+        self.assertIn('O: nonexistent_O.nn', error_msg)
+        # Ti file exists, so it shouldn't be in the error
+        self.assertNotIn('Ti:', error_msg)
+
+    def test_predict_input_string_basic(self):
+        """Test predict_input_string with basic parameters."""
+        from aenet.mlip import PredictionConfig
+
+        potential = ANNPotential(self.simple_arch)
+        potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
+
+        xsf_files = ['structure1.xsf', 'structure2.xsf']
+        config = PredictionConfig(verbosity=1)
+
+        input_str = potential.predict_input_string(
+            xsf_files=xsf_files,
+            eval_forces=False,
+            config=config
+        )
+
+        # Check required sections
+        self.assertIn('TYPES', input_str)
+        self.assertIn('2', input_str)  # 2 types
+        self.assertIn('Ti', input_str)
+        self.assertIn('O', input_str)
+        self.assertIn('NETWORKS', input_str)
+        self.assertIn('VERBOSITY 1', input_str)
+        self.assertIn('FILES', input_str)
+        self.assertIn('2', input_str)  # 2 files
+        self.assertIn('structure1.xsf', input_str)
+        self.assertIn('structure2.xsf', input_str)
+
+    def test_predict_input_string_with_forces(self):
+        """Test predict_input_string with forces enabled."""
+        from aenet.mlip import PredictionConfig
+
+        potential = ANNPotential(self.simple_arch)
+        potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
+
+        input_str = potential.predict_input_string(
+            xsf_files=['structure.xsf'],
+            eval_forces=True,
+            config=PredictionConfig()
+        )
+
+        self.assertIn('FORCES', input_str)
+
+    def test_predict_input_string_with_options(self):
+        """Test predict_input_string with optional parameters."""
+        from aenet.mlip import PredictionConfig
+
+        potential = ANNPotential(self.simple_arch)
+        potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
+
+        config = PredictionConfig(
+            potential_format='ascii',
+            timing=True,
+            print_atomic_energies=True,
+            debug=True,
+            verbosity=2
+        )
+
+        input_str = potential.predict_input_string(
+            xsf_files=['structure.xsf'],
+            eval_forces=False,
+            config=config
+        )
+
+        self.assertIn('format=ascii', input_str)
+        self.assertIn('TIMING', input_str)
+        self.assertIn('PRINT_ATOMIC_ENERGIES', input_str)
+        self.assertIn('DEBUG', input_str)
+        self.assertIn('VERBOSITY 2', input_str)
+
+    def test_write_predict_input_file(self):
+        """Test writing predict.in file to disk."""
+        from aenet.mlip import PredictionConfig
+
+        potential = ANNPotential(self.simple_arch)
+        potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = PredictionConfig(verbosity=1)
+            potential.write_predict_input_file(
+                xsf_files=['structure.xsf'],
+                eval_forces=True,
+                config=config,
+                workdir=tmpdir,
+                filename='predict.in'
+            )
+
+            output_file = os.path.join(tmpdir, 'predict.in')
+            self.assertTrue(os.path.exists(output_file))
+
+            # Read and verify content
+            with open(output_file, 'r') as f:
+                content = f.read()
+            self.assertIn('TYPES', content)
+            self.assertIn('FORCES', content)
+            self.assertIn('NETWORKS', content)
+
+    @patch('os.path.exists')
+    def test_predict_missing_potentials_error(self, mock_exists):
+        """Test predict raises error when no potentials available."""
+        mock_exists.return_value = True
+
+        potential = ANNPotential(self.simple_arch)
+        # Don't set _potential_paths
+
+        with self.assertRaises(ValueError) as context:
+            potential.predict(['structure.xsf'])
+
+        self.assertIn('No potential paths available', str(context.exception))
+
+    @patch('aenet.mlip.cfg')
+    @patch('os.path.exists')
+    def test_predict_missing_executable_error(self, mock_exists, mock_cfg):
+        """Test predict raises error when predict.x not found."""
+        mock_exists.return_value = False
+        mock_cfg.read.return_value = {'predict_x_path': '/path/to/predict.x'}
+
+        potential = ANNPotential(self.simple_arch)
+        potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
+
+        with self.assertRaises(FileNotFoundError) as context:
+            potential.predict(['structure.xsf'])
+
+        self.assertIn('Cannot find `predict.x`', str(context.exception))
+
+    @unittest.skipUnless(
+        os.path.exists(os.path.join(os.path.dirname(__file__),
+                                    'data', 'Ti.nn.ascii')),
+        "Test data not available"
+    )
+    def test_predict_output_parsing(self):
+        """Test PredictOut parsing with real output file."""
+
+        # This test uses real test data to verify output parsing
+        test_dir = os.path.dirname(__file__)
+        data_dir = os.path.join(test_dir, 'data')
+
+        # Check if we have required test files
+        ti_potential = os.path.join(data_dir, 'Ti.nn.ascii')
+        o_potential = os.path.join(data_dir, 'O.nn.ascii')
+        xsf_dir = os.path.join(data_dir, 'xsf-TiO2')
+
+        self.assertTrue(os.path.exists(ti_potential))
+        self.assertTrue(os.path.exists(o_potential))
+        self.assertTrue(os.path.exists(xsf_dir))
+
+
+class TestPredictIntegration(unittest.TestCase):
+    """Integration tests for full prediction workflow."""
+
+    @unittest.skipUnless(
+        os.path.exists(os.path.join(os.path.dirname(__file__),
+                                    'data', 'Ti.nn.ascii')),
+        "Test data not available"
+    )
+    def test_predict_integration(self):
+        """Integration test: full prediction workflow with real data."""
+        from aenet import config as cfg
+        from aenet.mlip import PredictionConfig
+
+        # Check if predict.x is configured
+        try:
+            aenet_paths = cfg.read('aenet')
+            predict_x_path = aenet_paths.get('predict_x_path', '')
+            if not predict_x_path or not os.path.exists(predict_x_path):
+                self.skipTest("predict.x not configured or not found")
+        except Exception:
+            self.skipTest("aenet configuration not available")
+
+        # Setup paths
+        test_dir = os.path.dirname(__file__)
+        data_dir = os.path.join(test_dir, 'data')
+        xsf_dir = os.path.join(data_dir, 'xsf-TiO2')
+
+        # Get first 3 structures for testing
+        xsf_files = sorted(glob.glob(os.path.join(xsf_dir, '*.xsf')))[:3]
+
+        if len(xsf_files) < 3:
+            self.skipTest("Not enough XSF test files")
+
+        # Create potential from files
+        potential_paths = {
+            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),
+            'O': os.path.join(data_dir, 'O.nn.ascii')
+        }
+        potential = ANNPotential.from_files(potential_paths)
+
+        # Run prediction with forces
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = PredictionConfig(
+                potential_format='ascii',
+                verbosity=1
+            )
+
+            results = potential.predict(
+                xsf_files,
+                eval_forces=True,
+                config=config,
+                workdir=tmpdir
+            )
+
+            # Verify results
+            self.assertEqual(results.num_structures, 3)
+            self.assertEqual(len(results.cohesive_energy), 3)
+            self.assertEqual(len(results.total_energy), 3)
+            self.assertEqual(len(results.forces), 3)
+
+            # Check that energies are reasonable (not NaN or inf)
+            for energy in results.cohesive_energy:
+                self.assertFalse(np.isnan(energy))
+                self.assertFalse(np.isinf(energy))
+
+            # Check forces shape matches structures
+            for i in range(3):
+                self.assertEqual(len(results.forces[i]), results.num_atoms(i))
+                self.assertEqual(results.forces[i].shape[1], 3)  # 3D forces
+
+            print("\nIntegration test passed!")
+            print(f"Predicted energies: {results.cohesive_energy}")
 
 
 if __name__ == '__main__':

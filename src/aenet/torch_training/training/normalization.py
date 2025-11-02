@@ -47,6 +47,9 @@ class NormalizationManager:
         # Feature normalization statistics
         self.feature_mean: Optional[torch.Tensor] = None
         self.feature_std: Optional[torch.Tensor] = None
+        # Track exact feature range observed during stats computation
+        self.feature_min: Optional[torch.Tensor] = None
+        self.feature_max: Optional[torch.Tensor] = None
 
         # Energy normalization statistics
         self.E_shift: float = 0.0
@@ -139,6 +142,19 @@ class NormalizationManager:
         # Compute from training data
         sum_f = torch.zeros(n_features, dtype=self.dtype, device="cpu")
         sumsq_f = torch.zeros(n_features, dtype=self.dtype, device="cpu")
+        # Track exact min/max across the dataset
+        min_f = torch.full(
+            (n_features,),
+            float("inf"),
+            dtype=self.dtype,
+            device="cpu",
+        )
+        max_f = torch.full(
+            (n_features,),
+            float("-inf"),
+            dtype=self.dtype,
+            device="cpu",
+        )
         total_atoms = 0
 
         with torch.no_grad():
@@ -147,6 +163,14 @@ class NormalizationManager:
                 feats = feats.to(dtype=self.dtype, device="cpu")
                 sum_f += feats.sum(dim=0).cpu()
                 sumsq_f += (feats * feats).sum(dim=0).cpu()
+                # Update min/max across atoms in this batch
+                try:
+                    bmin = feats.min(dim=0).values.cpu()
+                    bmax = feats.max(dim=0).values.cpu()
+                    min_f = torch.minimum(min_f, bmin)
+                    max_f = torch.maximum(max_f, bmax)
+                except Exception:
+                    pass
                 total_atoms += int(feats.shape[0])
 
         if total_atoms > 0:
@@ -157,6 +181,13 @@ class NormalizationManager:
             std = torch.sqrt(var + torch.as_tensor(1e-12, dtype=var.dtype))
             self.feature_mean = mean.to(device=self.device)
             self.feature_std = std.to(device=self.device)
+            # Persist exact min/max if computed
+            try:
+                self.feature_min = min_f.to(device=self.device)
+                self.feature_max = max_f.to(device=self.device)
+            except Exception:
+                self.feature_min = None
+                self.feature_max = None
 
     def compute_energy_stats(
         self,
@@ -353,6 +384,11 @@ class NormalizationManager:
             state["feature_mean"] = self.feature_mean.cpu().numpy()
         if self.feature_std is not None:
             state["feature_std"] = self.feature_std.cpu().numpy()
+        # Include exact feature range if available
+        if self.feature_min is not None:
+            state["feature_min"] = self.feature_min.cpu().numpy()
+        if self.feature_max is not None:
+            state["feature_max"] = self.feature_max.cpu().numpy()
 
         return state
 
@@ -377,4 +413,12 @@ class NormalizationManager:
         if "feature_std" in state:
             self.feature_std = torch.as_tensor(
                 state["feature_std"], dtype=self.dtype, device=self.device
+            )
+        if "feature_min" in state:
+            self.feature_min = torch.as_tensor(
+                state["feature_min"], dtype=self.dtype, device=self.device
+            )
+        if "feature_max" in state:
+            self.feature_max = torch.as_tensor(
+                state["feature_max"], dtype=self.dtype, device=self.device
             )

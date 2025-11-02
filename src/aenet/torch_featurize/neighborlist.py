@@ -53,6 +53,9 @@ class TorchNeighborList:
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
         max_num_neighbors: int = 256,
+        truncation_handling: str = "auto",
+        auto_multiplier: int = 2,
+        auto_max_neighbors: int = 65536,
     ):
         """
         Initialize neighbor list.
@@ -85,6 +88,9 @@ class TorchNeighborList:
         self.device = device
         self.dtype = dtype
         self.max_num_neighbors = max_num_neighbors
+        self.truncation_handling = truncation_handling
+        self.auto_multiplier = int(auto_multiplier)
+        self.auto_max_neighbors = int(auto_max_neighbors)
 
         # Validate cutoff_dict if both types and dict are provided
         if cutoff_dict is not None and atom_types is not None:
@@ -93,6 +99,16 @@ class TorchNeighborList:
         # Cache for efficiency
         self._cached_result = None
         self._cache_key = None
+
+    def _radius_with_inclusive(self) -> float:
+        """
+        Return radius slightly larger than cutoff to include pairs at exactly
+        the cutoff distance (matching legacy <= cutoff behavior).
+        Use a conservative epsilon to account for accumulated FP error from
+        replication, transforms, and torch_cluster distance computation.
+        """
+        eps = 1e-6 if self.dtype == torch.float64 else 1e-5
+        return float(self.cutoff + eps)
 
     def _to_tensor(
         self,
@@ -247,24 +263,63 @@ class TorchNeighborList:
             distances = torch.empty(0, dtype=self.dtype, device=self.device)
             return edge_index, distances
 
-        # Use radius_graph from torch_cluster
-        edge_index = radius_graph(
-            positions,
-            r=self.cutoff,
-            max_num_neighbors=self.max_num_neighbors,
-            flow="source_to_target",
-            loop=False,  # Don't include self-loops
-        )
+        # Use radius_graph from torch_cluster with truncation handling
+        # Start with a higher baseline in isolated mode to reduce retries
+        cur_max_nn = int(max(self.max_num_neighbors, 2048))
+        while True:
+            edge_index = radius_graph(
+                positions,
+                r=self._radius_with_inclusive(),
+                max_num_neighbors=cur_max_nn,
+                flow="source_to_target",
+                loop=False,  # Don't include self-loops
+            )
 
-        # Compute distances
-        if edge_index.shape[1] > 0:
-            row, col = edge_index
-            diff = positions[row] - positions[col]
-            distances = torch.norm(diff, dim=1)
-        else:
-            distances = torch.empty(0, dtype=self.dtype, device=self.device)
+            # Compute distances
+            if edge_index.shape[1] > 0:
+                row, col = edge_index
+                diff = positions[row] - positions[col]
+                distances = torch.norm(diff, dim=1)
+            else:
+                distances = torch.empty(
+                    0, dtype=self.dtype, device=self.device)
 
-        return edge_index, distances
+            # Check truncation: any source node with degree == cur_max_nn
+            num_neighbors = self._count_neighbors(
+                edge_index, positions.shape[0])
+            truncated = (num_neighbors.numel() > 0
+                         and num_neighbors.max().item() >= cur_max_nn)
+
+            if truncated:
+                if (self.truncation_handling == "auto"
+                        and cur_max_nn < self.auto_max_neighbors):
+                    new_max = min(cur_max_nn * self.auto_multiplier,
+                                  self.auto_max_neighbors)
+                    warnings.warn(
+                        f"TorchNeighborList: max_num_neighbors={cur_max_nn} "
+                        "hit in isolated mode; "
+                        f"retrying with max_num_neighbors={new_max}.",
+                        RuntimeWarning,
+                    )
+                    cur_max_nn = int(new_max)
+                    continue
+                elif self.truncation_handling == "error":
+                    raise RuntimeError(
+                        "TorchNeighborList: neighbor list truncated at "
+                        f"max_num_neighbors={cur_max_nn} "
+                        f"(isolated). Increase max_num_neighbors or "
+                        "reduce cutoff."
+                    )
+                elif self.truncation_handling == "warn":
+                    warnings.warn(
+                        f"TorchNeighborList: neighbor list may be "
+                        "truncated at "
+                        f"max_num_neighbors={cur_max_nn} (isolated).",
+                        RuntimeWarning
+                    )
+            # Update stored value if auto grew
+            self.max_num_neighbors = max(self.max_num_neighbors, cur_max_nn)
+            return edge_index, distances
 
     def get_neighbors_pbc(
         self,
@@ -304,6 +359,8 @@ class TorchNeighborList:
         if fractional:
             cart_positions = positions @ cell
         else:
+            # Use original Cartesian positions without wrapping to keep
+            # offsets consistent with the absolute coordinates returned.
             cart_positions = positions
 
         # Determine search range in each direction
@@ -314,21 +371,74 @@ class TorchNeighborList:
             cart_positions, cell, search_cells, pbc
         )
 
-        # Find neighbors using radius_graph
-        edge_index = radius_graph(
-            all_positions,
-            r=self.cutoff,
-            max_num_neighbors=self.max_num_neighbors,
-            flow="source_to_target",
-            loop=False,
-        )
+        # Find neighbors using radius_graph with truncation handling
+        # Start with a higher baseline under PBC to avoid premature truncation
+        cur_max_nn = int(max(self.max_num_neighbors, 4096))
+        while True:
+            edge_index_all = radius_graph(
+                all_positions,
+                r=self._radius_with_inclusive(),
+                max_num_neighbors=cur_max_nn,
+                flow="source_to_target",
+                loop=False,
+            )
 
-        # Filter and compute distances
-        edge_index, distances, cell_offsets = self._process_pbc_edges(
-            edge_index, all_positions, all_offsets, positions.shape[0]
-        )
+            # Filter and compute distances for central cell sources
+            edge_index, distances, cell_offsets = self._process_pbc_edges(
+                edge_index_all, all_positions, all_offsets, positions.shape[0]
+            )
 
-        return edge_index, distances, cell_offsets
+            # Check truncation on central unit cell sources.
+            # We must detect truncation against the degrees computed on the
+            # full replicated graph (edge_index_all), not the filtered graph.
+            # Build per-source degree for all_positions nodes:
+            degrees_all = torch.zeros(
+                all_positions.shape[0], dtype=torch.long, device=self.device
+            )
+            if edge_index_all.shape[1] > 0:
+                src_nodes = edge_index_all[0]
+                unique_src, counts_src = torch.unique(
+                    src_nodes, return_counts=True)
+                degrees_all[unique_src] = counts_src
+            # Identify the replicated source nodes that are in the central cell
+            central_source_mask = torch.all(all_offsets == 0, dim=1)
+            if torch.any(central_source_mask):
+                degrees_central = degrees_all[central_source_mask]
+                truncated = (degrees_central.numel() > 0
+                             and degrees_central.max().item() >= cur_max_nn)
+            else:
+                truncated = False
+
+            if truncated:
+                if (self.truncation_handling == "auto"
+                        and cur_max_nn < self.auto_max_neighbors):
+                    new_max = min(cur_max_nn * self.auto_multiplier,
+                                  self.auto_max_neighbors)
+                    warnings.warn(
+                        f"TorchNeighborList: max_num_neighbors={cur_max_nn} "
+                        "hit under PBC; "
+                        f"retrying with max_num_neighbors={new_max}.",
+                        RuntimeWarning,
+                    )
+                    cur_max_nn = int(new_max)
+                    continue
+                elif self.truncation_handling == "error":
+                    raise RuntimeError(
+                        "TorchNeighborList: neighbor list truncated at "
+                        f"max_num_neighbors={cur_max_nn} "
+                        f"(PBC). Increase max_num_neighbors or reduce cutoff."
+                    )
+                elif self.truncation_handling == "warn":
+                    warnings.warn(
+                        f"TorchNeighborList: neighbor list may be "
+                        "truncated at "
+                        f"max_num_neighbors={cur_max_nn} (PBC).",
+                        RuntimeWarning
+                    )
+
+            # Update stored value if auto grew
+            self.max_num_neighbors = max(self.max_num_neighbors, cur_max_nn)
+            return edge_index, distances, cell_offsets
 
     def _determine_search_cells(
         self, cell: torch.Tensor, pbc: torch.Tensor
@@ -345,15 +455,29 @@ class TorchNeighborList:
             search_cells: (3,) integer number of cells to search in each
                           direction
         """
-        # Compute reciprocal lattice vectors
-        volume = torch.abs(torch.det(cell))
-        reciprocal = torch.linalg.inv(cell.T)
+        # Distances between opposite faces of the unit cell:
+        # d_i = Volume / Area(face_i), where face_i is
+        # opposite lattice vector i.
+        # This works for arbitrary (skewed) cells.
+        volume = torch.abs(torch.det(cell)).clamp_min(1e-12)
 
-        # Distance from origin to cell face (perpendicular distance)
-        face_distances = volume / torch.norm(reciprocal, dim=1)
+        a = cell[0]
+        b = cell[1]
+        c = cell[2]
 
-        # Number of cells needed to cover cutoff
-        search_cells = torch.ceil(self.cutoff / face_distances).long()
+        area0 = torch.norm(torch.linalg.cross(b, c))  # face normal to a
+        area1 = torch.norm(torch.linalg.cross(c, a))  # face normal to b
+        area2 = torch.norm(torch.linalg.cross(a, b))  # face normal to c
+
+        areas = torch.stack([area0, area1, area2]).clamp_min(1e-12)
+        face_distances = volume / areas  # perpendicular distance between faces
+
+        # Number of cells needed to cover the cutoff along each direction
+        # Add +1 safety margin to ensure full coverage (corner/cross effects)
+        search_cells = torch.ceil(self.cutoff / face_distances
+                                  ).to(torch.long) + 1
+
+        # Zero out non-periodic directions
         search_cells = torch.where(
             pbc, search_cells, torch.zeros_like(search_cells)
         )
@@ -555,9 +679,11 @@ class TorchNeighborList:
         positions: Union[np.ndarray, torch.Tensor],
         cell: Optional[Union[np.ndarray, torch.Tensor]] = None,
         pbc: Optional[torch.Tensor] = None,
+        fractional: bool = True,
         atom_types: Optional[torch.Tensor] = None,
         cutoff_dict: Optional[Dict[Tuple[int, int], float]] = None,
         return_coordinates: bool = False,
+        full_star: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Get neighbors of a specific atom.
@@ -568,10 +694,18 @@ class TorchNeighborList:
             cell: (3, 3) lattice vectors (None for isolated systems,
                   numpy array or torch tensor)
             pbc: (3,) PBC flags
+            fractional: For periodic systems only. If True, positions
+                are fractional coordinates [0, 1). If False, positions are
+                Cartesian (Angstroms).
+                Default: True for backward compatibility.
             atom_types: Override stored atom_types (optional)
             cutoff_dict: Override stored cutoff_dict (optional)
             return_coordinates: If True, also return actual neighbor
                 coordinates with PBC offsets applied (default: False)
+            full_star: If True, return all neighbors in both directions
+                (where atom_idx is source and target). This is useful for
+                extracting complete neighbor clusters for periodic systems.
+                Default: False (returns half-star for efficiency).
 
         Returns
         -------
@@ -600,17 +734,70 @@ class TorchNeighborList:
             self._validate_cutoff_dict(cutoffs, types)
 
         # Get or compute full neighbor list (with caching)
-        result = self._get_or_compute_neighbors(positions, cell, pbc)
+        result = self._get_or_compute_neighbors(
+            positions, cell, pbc, fractional)
 
         # Extract neighbors of specific atom
         edge_index = result["edge_index"]
-        mask = edge_index[0] == atom_idx
 
-        neighbor_indices = edge_index[1][mask]
-        distances = result["distances"][mask]
-        offsets = (
-            result["offsets"][mask] if result["offsets"] is not None else None
-        )
+        if full_star:
+            # Include both directions: where atom_idx is source AND target
+            # Source edges (atom_idx -> neighbors)
+            mask_source = edge_index[0] == atom_idx
+            neighbor_indices_source = edge_index[1][mask_source]
+            distances_source = result["distances"][mask_source]
+            offsets_source = (
+                result["offsets"][mask_source]
+                if result["offsets"] is not None else None
+            )
+
+            # Target edges (neighbors -> atom_idx)
+            # For these, we need to flip the direction
+            mask_target = edge_index[1] == atom_idx
+            neighbor_indices_target = edge_index[0][mask_target]
+            distances_target = result["distances"][mask_target]
+            offsets_target = (
+                -result["offsets"][mask_target]  # Flip offset direction
+                if result["offsets"] is not None else None
+            )
+
+            # Combine both sets of neighbors
+            neighbor_indices = torch.cat(
+                [neighbor_indices_source, neighbor_indices_target])
+            distances = torch.cat([distances_source, distances_target])
+            if offsets_source is not None and offsets_target is not None:
+                offsets = torch.cat([offsets_source, offsets_target])
+
+                # Remove duplicates based on (neighbor_index, offset) pairs
+                # Create unique keys by combining index and offset
+                unique_mask = []
+                seen = set()
+
+                for i in range(len(neighbor_indices)):
+                    idx = neighbor_indices[i].item()
+                    off = tuple(offsets[i].cpu().numpy())
+                    key = (idx, off)
+                    if key not in seen:
+                        seen.add(key)
+                        unique_mask.append(True)
+                    else:
+                        unique_mask.append(False)
+
+                unique_mask = torch.tensor(unique_mask, device=self.device)
+                neighbor_indices = neighbor_indices[unique_mask]
+                distances = distances[unique_mask]
+                offsets = offsets[unique_mask]
+            else:
+                offsets = None
+        else:
+            # Half-star: only edges where atom_idx is the source
+            mask = edge_index[0] == atom_idx
+            neighbor_indices = edge_index[1][mask]
+            distances = result["distances"][mask]
+            offsets = (
+                result["offsets"][mask]
+                if result["offsets"] is not None else None
+            )
 
         # Apply type-specific cutoff filtering if applicable
         if types is not None and cutoffs is not None:
@@ -720,6 +907,7 @@ class TorchNeighborList:
         positions: torch.Tensor,
         cell: Optional[torch.Tensor],
         pbc: Optional[torch.Tensor],
+        fractional: bool = True,
     ) -> Dict[str, Optional[torch.Tensor]]:
         """
         Get cached neighbor list or compute new one.
@@ -728,20 +916,21 @@ class TorchNeighborList:
             positions: Atom positions
             cell: Lattice vectors
             pbc: PBC flags
+            fractional: Whether positions are fractional or Cartesian
 
         Returns
         -------
             Neighbor list result dictionary
         """
         # Compute cache key
-        cache_key = self._compute_cache_key(positions, cell, pbc)
+        cache_key = self._compute_cache_key(positions, cell, pbc, fractional)
 
         # Return cached result if available
         if cache_key == self._cache_key and self._cached_result is not None:
             return self._cached_result
 
         # Compute new result
-        result = self.get_neighbors(positions, cell, pbc)
+        result = self.get_neighbors(positions, cell, pbc, fractional)
 
         # Update cache
         self._cache_key = cache_key
@@ -754,6 +943,7 @@ class TorchNeighborList:
         positions: torch.Tensor,
         cell: Optional[torch.Tensor],
         pbc: Optional[torch.Tensor],
+        fractional: bool = True,
     ) -> Tuple:
         """
         Compute cache key for positions/cell/pbc combination.
@@ -762,6 +952,7 @@ class TorchNeighborList:
             positions: Atom positions
             cell: Lattice vectors
             pbc: PBC flags
+            fractional: Whether positions are fractional or Cartesian
 
         Returns
         -------
@@ -776,7 +967,7 @@ class TorchNeighborList:
             hash(pbc.cpu().numpy().tobytes()) if pbc is not None else None
         )
 
-        return (pos_hash, cell_hash, pbc_hash)
+        return (pos_hash, cell_hash, pbc_hash, fractional)
 
     def __repr__(self) -> str:
         return (

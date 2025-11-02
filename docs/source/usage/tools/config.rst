@@ -3,6 +3,34 @@
 
 Alter and store settings.
 
+.. note::
+
+    See also the command-line help for all available
+    flags and options with: ``aenet config --help``.
+
+
+Inspecting the Configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When `aenet config` is called without any arguments, it will print the
+current configuration settings.
+
+
+Configure ænet Fortran Binaries
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To make ``aenet-python`` aware of the ænet binaries, the paths need to
+be configured.  The following command runs an interactive dialog that
+works for standard installations
+
+.. sourcecode:: console
+
+   $ aenet config --set-aenet-path [path-to-aenet]
+
+where ``[path-to-aenet]`` is the path pointing to the aenet root
+directory.
+
+
 MPI Configuration
 """""""""""""""""
 

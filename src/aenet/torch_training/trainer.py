@@ -302,6 +302,14 @@ class TorchANNPotential:
         Descriptor instance used for featurization
     """
 
+    # Supported PredictionConfig options for PyTorch API
+    _supported_config_options = {
+        'timing', 'print_atomic_energies', 'debug',
+        'verbosity', 'batch_size',
+        # DataLoader knobs for inference
+        'num_workers', 'prefetch_factor', 'persistent_workers'
+    }
+
     def __init__(self, arch: Dict[str, List[Tuple[int, str]]], descriptor):
         self.arch = arch
         self.descriptor = descriptor
@@ -842,22 +850,86 @@ class TorchANNPotential:
     @torch.no_grad()
     def predict(
         self,
-        structures: List[Structure],
-        predict_forces: bool = False,
-    ) -> Tuple[List[float], Optional[List[torch.Tensor]]]:
+        structures,
+        eval_forces: bool = False,
+        config: Optional[Any] = None,
+    ):
         """
-        Predict energies (and optionally forces) for a list of structures.
+        Predict energies (and optionally forces) for structures.
+
+        Parameters
+        ----------
+        structures : List[os.PathLike] or List[AtomicStructure] or
+            List[Structure]
+            Either file paths to structure files, AtomicStructure objects,
+            or torch Structure objects.
+        eval_forces : bool, optional
+            If True, compute and return atomic forces. Default: False
+        config : PredictionConfig, optional
+            Prediction configuration. If None, uses defaults. Default: None
 
         Returns
         -------
-        energies : List[float]
-        forces : Optional[List[Tensor]]  # (N_i, 3) per-structure if requested
-        """
-        # Create predictor instance
-        energy_target = getattr(self, "_energy_target", "cohesive")
-        if not hasattr(self, "_energy_target"):
-            energy_target = "cohesive"  # default for backward compatibility
+        PredictOut
+            Prediction results containing energies, forces, coordinates,
+            and optional timing information.
 
+        Examples
+        --------
+        >>> # Load from files
+        >>> results = pot.predict(['struct1.xsf', 'struct2.xsf'],
+        ...                       eval_forces=True)
+        >>> print(results.total_energy)
+
+        >>> # Use AtomicStructure objects
+        >>> from aenet.io.structure import read
+        >>> strucs = [read('file.xsf')]
+        >>> results = pot.predict(strucs, eval_forces=True,
+        ...                       config=PredictionConfig(timing=True))
+        """
+        from aenet.mlip import PredictionConfig as PC
+        from aenet.io.predict import PredictOut
+        from aenet.geometry import AtomicStructure
+        import os
+        import warnings
+
+        # Use default config if not provided
+        if config is None:
+            config = PC()
+
+        # Warn about unsupported config options
+        changed_options = config.user_changed()
+        unsupported = (set(changed_options.keys()) -
+                       self._supported_config_options)
+        if unsupported:
+            unsupported_list = ', '.join(sorted(unsupported))
+            warnings.warn(
+                f"The following PredictionConfig parameters are not "
+                f"supported by the PyTorch API and will be ignored: "
+                f"{unsupported_list}",
+                UserWarning
+            )
+
+        # Convert structures to torch Structure objects
+        torch_structures: List[Structure] = []
+        input_paths: Optional[List[str]] = None
+
+        if isinstance(structures[0], (str, os.PathLike)):
+            # File paths - load and convert
+            from aenet.io.structure import read
+            input_paths = [str(p) for p in structures]
+            for p in structures:
+                atomic_struc = read(p)
+                torch_structures.append(atomic_struc.to_TorchStructure()[0])
+        elif isinstance(structures[0], AtomicStructure):
+            # AtomicStructure objects - convert
+            torch_structures = [s.to_TorchStructure()[0] for s in structures]
+        else:
+            # Already torch Structure objects
+            torch_structures = structures
+
+        # Create Predictor and call with options
+        energy_target = getattr(self, "_energy_target", "cohesive")
         predictor = Predictor(
             model=self.model,
             descriptor=self.descriptor,
@@ -868,7 +940,52 @@ class TorchANNPotential:
             dtype=self.dtype,
         )
 
-        return predictor.predict(structures, predict_forces=predict_forces)
+        energies, forces, atom_energies, timing = predictor.predict(
+            structures=torch_structures,
+            eval_forces=eval_forces,
+            return_atom_energies=config.print_atomic_energies,
+            track_timing=config.timing,
+            batch_size=getattr(config, "batch_size", None),
+            num_workers=getattr(config, "num_workers", None),
+            prefetch_factor=getattr(config, "prefetch_factor", None),
+            persistent_workers=getattr(config, "persistent_workers", None),
+        )
+
+        # Compute cohesive energies
+        cohesive_energies: List[float] = []
+        for i, s in enumerate(torch_structures):
+            total_e = energies[i]
+            if self._E_atomic:
+                atomic_sum = sum(self._E_atomic.get(sp, 0.0)
+                                 for sp in s.species)
+                cohesive_energies.append(total_e - atomic_sum)
+            else:
+                cohesive_energies.append(total_e)
+
+        # Build PredictOut object
+        coords = [s.positions for s in torch_structures]
+        atom_types = [s.species for s in torch_structures]
+
+        # Convert forces to numpy if present
+        forces_np = None
+        if forces:
+            forces_np = [f.numpy() for f in forces]
+
+        # Convert atom_energies to numpy if present
+        atom_energies_np = None
+        if atom_energies:
+            atom_energies_np = [ae.numpy() for ae in atom_energies]
+
+        return PredictOut(
+            coords=coords,
+            forces=forces_np,
+            atom_types=atom_types,
+            atom_energies=atom_energies_np,
+            cohesive_energy=cohesive_energies,
+            total_energy=energies,
+            structure_paths=input_paths,
+            timing=timing,
+        )
 
     def cohesive_energy(
         self,
@@ -909,3 +1026,112 @@ class TorchANNPotential:
         )
 
         return predictor.cohesive_energy(structure)
+
+    @classmethod
+    def from_file(
+        cls,
+        path,
+        device: Optional[str] = None,
+    ) -> "TorchANNPotential":
+        """
+        Load a trained model from file and return a TorchANNPotential.
+
+        Parameters
+        ----------
+        path : str | Path
+            Path to saved model file produced by save_model().
+        device : str, optional
+            Device to move the model to ('cpu', 'cuda', etc.). By default
+            leaves the model on CPU.
+
+        Returns
+        -------
+        TorchANNPotential
+            Loaded trainer instance.
+        """
+        from .model_export import load_model
+
+        trainer, _metadata = load_model(path)
+        if device is not None:
+            trainer.device = torch.device(device)
+            trainer.model.to(trainer.device)
+            try:
+                # Keep descriptor in sync for subsequent featurization
+                trainer.descriptor.device = str(trainer.device)
+            except Exception:
+                pass
+        return trainer
+
+    def save(
+        self,
+        path,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        training_config: Optional["TorchTrainingConfig"] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Save this trained model and metadata to a file.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination file (.pt/.pth).
+        optimizer : torch.optim.Optimizer, optional
+            Include optimizer state dict if provided.
+        training_config : TorchTrainingConfig, optional
+            Persisted training configuration.
+        extra_metadata : dict, optional
+            Any additional JSON-serializable metadata to include.
+        """
+        from .model_export import save_model
+
+        save_model(
+            trainer=self,
+            path=path,
+            optimizer=optimizer,
+            training_config=training_config,
+            extra_metadata=extra_metadata,
+        )
+
+    def to_aenet_ascii(
+        self,
+        output_dir,
+        prefix: str = "potential",
+        descriptor_stats: Optional[Dict[str, Any]] = None,
+        structures: Optional[List[Structure]] = None,
+        compute_stats: bool = True,
+    ):
+        """
+        Export model to aenet .nn.ascii format (one file per species).
+
+        Parameters
+        ----------
+        output_dir : str | Path
+            Output directory to write files into.
+        prefix : str, optional
+            Filename prefix. Files are named '{prefix}.{SPECIES}.nn.ascii'.
+        descriptor_stats : dict, optional
+            Pre-computed stats with keys 'min','max','avg','cov'.
+            If provided, avoids computing from structures/normalizer.
+        structures : list[Structure], optional
+            Structures used to compute exact descriptor statistics and
+            training set metadata. Recommended for accurate min/max.
+        compute_stats : bool, optional
+            If True and descriptor_stats is not provided, compute stats
+            from structures. If False, derive from normalizer.
+
+        Returns
+        -------
+        list[pathlib.Path]
+            Paths to written files.
+        """
+        from .ascii_export import export_to_ascii_impl
+
+        return export_to_ascii_impl(
+            trainer=self,
+            output_dir=output_dir,
+            prefix=prefix,
+            descriptor_stats=descriptor_stats,
+            structures=structures,
+            compute_stats=compute_stats,
+        )

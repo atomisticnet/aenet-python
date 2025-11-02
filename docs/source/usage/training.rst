@@ -5,19 +5,28 @@ Training ANN Potentials (Fortran)
 
 .. note::
 
-   This page documents the **Fortran-based** training implementation, which
-   wraps the compiled ænet executables. For the **PyTorch-based** implementation
-   (recommended for new users), see :doc:`torch_training_tutorial`.
+   Training as described here makes use of ænet's compiled ``train.x`` tool.
+   Make sure to install ænet and configure the paths as described
+   in :doc:`installation`.
 
-   Both implementations are fully supported. See :doc:`choosing_implementation`
-   for guidance on choosing between them.
+.. note::
 
-``aenet-python`` provides tools to facilitate the training of `aenet`_
-Artificial Neural Network (ANN) potentials directly from Python scripts.
-This workflow is managed primarily by the :class:`~aenet.mlip.ANNPotential`
-class.
+   **Alternative**: For a pure Python/PyTorch implementation that does not
+   require Fortran, see :doc:`torch_training`.
 
-.. _aenet: https://ann.atomistic.net
+``aenet-python`` provides tools to facilitate the training of ænet
+potentials directly from Python scripts.  This workflow is managed
+primarily by the :class:`~aenet.mlip.ANNPotential` class.
+
+
+Example notebooks
+-----------------
+
+Jupyter notebooks with examples how to train potentials can
+be found in the `notebooks
+<https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_
+directory within the repository.
+
 
 Defining the Network Architecture
 ---------------------------------
@@ -29,7 +38,7 @@ tuples. Each tuple represents a layer in the network, specifying the
 number of nodes and the activation function for that layer.
 
 Supported activation functions are:
-``'tanh'``, ``'linear'``, ``'relu'``, ``'gelu'``, ``'twist'``.
+``'tanh'``, ``'linear'``, and ``'signmoid'``.
 
 The final ANN layer is always a linear layer with one node, which
 outputs the energy for the corresponding atomic species.  This layer
@@ -49,6 +58,7 @@ Example architecture for a silicon potential:
 
     # Create the potential object
     potential = ANNPotential(arch)
+
 
 Training Configuration
 ----------------------
@@ -70,6 +80,7 @@ The ``TrainingConfig`` class includes:
 The configuration validates parameters at creation time, raising ``ValueError``
 for invalid inputs (e.g., testpercent outside 0-100 range, invalid sampling method).
 
+
 Training Methods
 ----------------
 
@@ -85,6 +96,7 @@ The available training methods are provided as typed classes:
 
 Each training method class encodes both the algorithm name and its parameters
 with appropriate defaults based on the `aenet` Fortran implementation.
+
 
 Training the Potential
 ----------------------
@@ -286,3 +298,11 @@ command would be:
 .. code-block:: bash
 
     mpirun -np 8 /path/to/train.x train.in
+
+Inference with Trained Potentials
+
+Once you have trained ANN potentials, you can use them to make predictions
+(inference) on new atomic structures. The prediction functionality is
+integrated into the :class:`~aenet.mlip.ANNPotential` class, providing a
+unified interface for both training and inference.
+

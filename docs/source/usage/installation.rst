@@ -1,16 +1,6 @@
 Installation & Set-up
 =====================
 
-Prerequisites
---------------
-* ænet library >= 2.0.3 (separate installation required)
-* ænet binaries `generate.x` and `trnset2ASCII.x`
-* python >= 3.6
-* numpy >= 1.20.1
-* scipy >= 1.6.2
-* pandas >=1.2.4
-* tables >=3.6.1
-
 Installation
 ------------
 
@@ -20,9 +10,14 @@ Installation
    the `ænet website <http://ann.atomistic.net>`_ and the
    `GitHub repository <https://github.com/atomisticnet/aenet>`_.
 
+.. note::
 
-1. Install ``aenet-python``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   PyTorch is only installed when requested explicitly, since it is a
+   large dependency that can sometimes be difficult to install.
+
+
+1. Package Install
+^^^^^^^^^^^^^^^^^^
 
 Download the source code repository from GitHub `aenet-python
 <https://github.com/atomisticnet/aenet-python>`_.
@@ -31,13 +26,21 @@ Install as usual.  For example with
 
 .. sourcecode:: console
 
-   $ pip install . --user
+   $ pip install .
 
 from the repository's root directory.
 
+Per default, PyTorch and other requirements of the PyTorch-based features
+are not installed.  To request those requirements as well, select them
+explicitly with
 
-2. Configure ænet
-^^^^^^^^^^^^^^^^^
+.. sourcecode:: console
+
+   $ pip install ".[torch]"
+
+
+2. Configure ænet Fortran Binaries
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To make ``aenet-python`` aware of the ænet binaries, the paths need to
 be configured.  The following command runs an interactive dialog that

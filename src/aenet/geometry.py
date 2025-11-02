@@ -1017,12 +1017,17 @@ class AtomicStructure(object):
         try:
             from .torch_featurize.neighborlist \
                 import TorchNeighborList  # type: ignore
-            nbl = TorchNeighborList(cutoff=cutoff, device="cpu")
+
+            # Use TorchNeighborList with automatic truncation handling
+            nbl = TorchNeighborList(
+                cutoff=cutoff, device="cpu", truncation_handling="auto"
+            )
             positions = self.coords[frame]
             cell = self.avec[frame] if self.pbc else None
 
             result = nbl.get_neighbors_of_atom(
-                i, positions, cell=cell, return_coordinates=True
+                i, positions, cell=cell, fractional=False,
+                return_coordinates=True
             )
 
             neighbor_idx = result["indices"].cpu().numpy()

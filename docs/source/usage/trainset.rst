@@ -1,8 +1,8 @@
 ænet training set files
 =======================
 
-The Python class ``TrnSet`` in ``aenet.trainset`` module, can be used to interact
-with data set files produced by ænet's ``generate.x`` tool.
+The Python class ``TrnSet`` in ``aenet.trainset`` module, can be used to
+interact with data set files produced by ænet's ``generate.x`` tool.
 
 .. note::
    The ænet executable ``trnset2ASCII.x`` needs to be configured to read

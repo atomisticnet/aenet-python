@@ -4,8 +4,20 @@ Neighbor Lists
 Overview
 --------
 
-The ``aenet-python`` package provides neighbor list functionality through the ``TorchNeighborList`` class in ``aenet.torch_featurize.neighborlist``.
-The neighbor list is fully integrated with ``AtomicStructure`` objects and can be used both through high-level convenience methods and low-level direct access.
+The ``aenet-python`` package provides neighbor list functionality through
+the ``TorchNeighborList`` class in ``aenet.torch_featurize.neighborlist``.
+The neighbor list is fully integrated with ``AtomicStructure`` objects
+and can be used both through high-level convenience methods and low-level
+direct access.
+
+.. note::
+
+   The features described here make use of PyTorch.  Make sure to
+   install ænet with the ``[torch]`` extra as described in
+   :doc:`/usage/installation`.  For use without PyTorch, ``aenet-python`` Also
+   provides a (less efficient) pure-Python neighbor list implementation in
+   ``aenet.geometry.nblist``, which can be used with ``AtomicStructure``
+   objects.
 
 Quick Start
 -----------
@@ -13,7 +25,8 @@ Quick Start
 Using with AtomicStructure
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The simplest way to use the neighbor list is through ``AtomicStructure.get_neighbors()``:
+The simplest way to use the neighbor list is through
+``AtomicStructure.get_neighbors()``:
 
 .. code-block:: python
 
@@ -79,7 +92,8 @@ The primary parameter controlling neighbor search:
 Maximum Number of Neighbors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default, the neighbor list can handle up to 256 neighbors per atom. For dense systems, increase this limit:
+By default, the neighbor list can handle up to 256 neighbors per atom.
+For dense systems, increase this limit:
 
 .. code-block:: python
 
@@ -92,7 +106,9 @@ By default, the neighbor list can handle up to 256 neighbors per atom. For dense
    # Very dense systems
    nbl = TorchNeighborList(cutoff=4.0, max_num_neighbors=1024)
 
-If you encounter errors about exceeding neighbors, increase this parameter.
+If the number of neighbors exceeds this limit during a call, the limit
+is automatically increased and a warning is issued.  However, this
+should be avoided for performance reasons.
 
 Periodic Boundary Conditions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,7 +141,8 @@ Advanced Features
 Getting Neighbor Coordinates Directly
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Instead of manually computing neighbor positions from indices and offsets, use ``return_coordinates=True``:
+Instead of manually computing neighbor positions from indices
+and offsets, use ``return_coordinates=True``:
 
 .. code-block:: python
 
@@ -143,7 +160,8 @@ Instead of manually computing neighbor positions from indices and offsets, use `
    )
    neighbor_coords = result['coordinates']  # PBC offsets already applied
 
-This is especially convenient for periodic systems, where the neighbor list automatically applies cell offsets to compute actual Cartesian coordinates.
+This is especially convenient for periodic systems, where the neighbor
+list automatically applies cell offsets to compute actual Cartesian coordinates.
 
 Type-Dependent Cutoffs
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -242,102 +260,6 @@ The neighbor list automatically caches results:
    new_positions = positions + 0.1
    result4 = nbl.get_neighbors_of_atom(0, new_positions)  # Recomputes
 
-GPU vs CPU
-~~~~~~~~~~
-
-- **CPU**: Best for small to medium systems (< 1000 atoms)
-- **GPU**: Beneficial for large systems (> 1000 atoms) or when called frequently
-- Data transfer overhead can make GPU slower for small systems
-
-System Size Recommendations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-+----------------+--------------------+------------------------+
-| Atoms          | Device             | max_num_neighbors      |
-+================+====================+========================+
-| < 100          | CPU                | 256 (default)          |
-+----------------+--------------------+------------------------+
-| 100-1000       | CPU                | 256-512                |
-+----------------+--------------------+------------------------+
-| 1000-10000     | GPU recommended    | 512-1024               |
-+----------------+--------------------+------------------------+
-| > 10000        | GPU                | 1024+                  |
-+----------------+--------------------+------------------------+
-
-Migration from Legacy Neighbor List
-------------------------------------
-
-The PyTorch-based neighbor list is a drop-in replacement for the legacy implementation:
-
-.. code-block:: python
-
-   # Old (legacy) approach - NO LONGER USED
-   # from aenet.nblist import NeighborList
-   # nbl = NeighborList(coords, lattice_vectors=avec, ...)
-
-   # New (PyTorch) approach - CURRENT
-   from aenet.torch_featurize.neighborlist import TorchNeighborList
-   nbl = TorchNeighborList(cutoff=4.0)
-   result = nbl.get_neighbors_of_atom(i, coords, cell=avec)
-
-The ``AtomicStructure.get_neighbors()`` method automatically uses the new implementation, so existing code using this high-level interface works without changes.
-
-API Reference
--------------
-
-For detailed API documentation, see:
-
-* :py:class:`aenet.torch_featurize.neighborlist.TorchNeighborList` - Main neighbor list class
-* :py:meth:`aenet.geometry.AtomicStructure.get_neighbors` - High-level interface
-
-Key Methods
-~~~~~~~~~~~
-
-**TorchNeighborList**
-
-* ``__init__(cutoff, atom_types=None, cutoff_dict=None, device='cpu', dtype=torch.float64, max_num_neighbors=256)``
-* ``get_neighbors_of_atom(atom_idx, positions, cell=None, pbc=None, return_coordinates=False)``
-* ``get_neighbors_by_atom(positions, cell=None, pbc=None)``
-* ``get_neighbors(positions, cell=None, pbc=None, fractional=True)``
-* ``from_AtomicStructure(structure, cutoff, frame=-1, device='cpu', max_num_neighbors=256)`` (classmethod)
-
-**AtomicStructure**
-
-* ``get_neighbors(i, cutoff, return_self=True, frame=-1)``
-
-Troubleshooting
----------------
-
-Error: "Number of neighbors exceeds max_num_neighbors"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Increase the ``max_num_neighbors`` parameter:
-
-.. code-block:: python
-
-   nbl = TorchNeighborList(cutoff=4.0, max_num_neighbors=512)
-
-Slow performance for small systems on GPU
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use CPU instead - data transfer overhead dominates for small systems:
-
-.. code-block:: python
-
-   nbl = TorchNeighborList(cutoff=4.0, device='cpu')
-
-Incorrect neighbor distances in periodic systems
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Ensure you're providing the cell matrix:
-
-.. code-block:: python
-
-   # Correct
-   result = nbl.get_neighbors_of_atom(0, positions, cell=cell)
-
-   # Wrong (treats as isolated system)
-   result = nbl.get_neighbors_of_atom(0, positions)
 
 See Also
 --------

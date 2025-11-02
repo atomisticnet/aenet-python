@@ -1215,7 +1215,5 @@ This table summarizes the most important parameters and when to use them:
 See Also
 --------
 
-* :doc:`torch_training_tutorial` - Tutorial with practical examples
-* :doc:`torch_training_performance` - Performance optimization guide
 * :doc:`torch_featurization` - Featurization parameters and settings
 * :doc:`choosing_implementation` - Fortran vs PyTorch comparison

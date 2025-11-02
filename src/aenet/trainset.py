@@ -40,12 +40,12 @@ class FeaturizedAtomicStructure(Serializable):
     atoms : list[dict]
         Atomic information per atom with keys:
         {'type': atom_type, 'fingerprint': fingerprint,
-         'coords': coords, 'forces': forces}.
+        'coords': coords, 'forces': forces}.
     neighbor_info : dict or None
-        Optional neighbor information for force training. If present, contains:
-        - 'neighbor_counts': (n_atoms,) array of neighbor counts
-        - 'neighbor_lists': list of (nnb,) arrays with neighbor indices
-        - 'neighbor_vectors': list of (nnb, 3) arrays with displacement vectors
+        Optional neighbor information for force training. If present, contains
+        the keys 'neighbor_counts' (n_atoms,) array of neighbor counts,
+        'neighbor_lists' list of (nnb,) arrays with neighbor indices, and
+        'neighbor_vectors' list of (nnb, 3) arrays with displacement vectors.
     cell : numpy.ndarray or None
         Unit cell lattice vectors as (3, 3) array where rows are
         lattice vectors.

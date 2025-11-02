@@ -121,22 +121,59 @@ def save_model(
     optimizer_state = optimizer.state_dict() if optimizer is not None else None
 
     # Normalization metadata (serialize tensors to lists)
+    # Prefer NormalizationManager state; fall back to legacy attrs if present.
+    norm = getattr(trainer, "_normalizer", None)
+    normalize_features = bool(
+        getattr(norm, "normalize_features",
+                getattr(trainer, "_normalize_features", False)))
+    normalize_energy = bool(
+        getattr(norm, "normalize_energy",
+                getattr(trainer, "_normalize_energy", False)))
+    E_shift = float(getattr(norm, "E_shift",
+                            getattr(trainer, "_E_shift", 0.0)))
+    E_scaling = float(getattr(norm, "E_scaling",
+                              getattr(trainer, "_E_scaling", 1.0)))
+    fm = None
+    fs = None
+    try:
+        if (norm is not None
+                and getattr(norm, "feature_mean", None) is not None):
+            fm = norm.feature_mean.detach().cpu().tolist()
+        elif getattr(trainer, "_feature_mean", None) is not None:
+            fm = getattr(trainer, "_feature_mean").detach().cpu().tolist()
+    except Exception:
+        fm = None
+    try:
+        if norm is not None and getattr(norm, "feature_std", None) is not None:
+            fs = norm.feature_std.detach().cpu().tolist()
+        elif getattr(trainer, "_feature_std", None) is not None:
+            fs = getattr(trainer, "_feature_std").detach().cpu().tolist()
+    except Exception:
+        fs = None
+
+    # Include feature min/max if available
+    fmin = None
+    fmax = None
+    try:
+        if norm is not None and getattr(norm, "feature_min", None) is not None:
+            fmin = norm.feature_min.detach().cpu().tolist()
+    except Exception:
+        fmin = None
+    try:
+        if norm is not None and getattr(norm, "feature_max", None) is not None:
+            fmax = norm.feature_max.detach().cpu().tolist()
+    except Exception:
+        fmax = None
+
     norm_meta: Dict[str, Any] = {
-        "normalize_features": bool(
-            getattr(trainer, "_normalize_features", False)),
-        "normalize_energy": bool(getattr(trainer, "_normalize_energy", False)),
-        "E_shift": float(getattr(trainer, "_E_shift", 0.0)),
-        "E_scaling": float(getattr(trainer, "_E_scaling", 1.0)),
-        "feature_mean": (
-            getattr(trainer, "_feature_mean").detach().cpu().tolist()
-            if getattr(trainer, "_feature_mean", None) is not None
-            else None
-        ),
-        "feature_std": (
-            getattr(trainer, "_feature_std").detach().cpu().tolist()
-            if getattr(trainer, "_feature_std", None) is not None
-            else None
-        ),
+        "normalize_features": normalize_features,
+        "normalize_energy": normalize_energy,
+        "E_shift": E_shift,
+        "E_scaling": E_scaling,
+        "feature_mean": fm,
+        "feature_std": fs,
+        "feature_min": fmin,
+        "feature_max": fmax,
     }
 
     payload: Payload = {
@@ -225,6 +262,8 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
                 "E_scaling": norm_meta.get("E_scaling", 1.0),
                 "feature_mean": norm_meta.get("feature_mean"),
                 "feature_std": norm_meta.get("feature_std"),
+                "feature_min": norm_meta.get("feature_min"),
+                "feature_max": norm_meta.get("feature_max"),
             })
         except Exception:
             # Best-effort; prediction still works without

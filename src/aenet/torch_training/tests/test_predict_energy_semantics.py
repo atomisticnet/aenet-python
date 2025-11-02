@@ -88,10 +88,11 @@ def test_predict_returns_total_energy_when_trained_on_cohesive():
     _zero_out_model_weights(pot)
 
     # Predict should return TOTAL energy = cohesive(=0) + sum(E_atomic)
-    energies, _ = pot.predict([s], predict_forces=False)
-    assert len(energies) == 1
+    results = pot.predict([s], eval_forces=False)
+    assert len(results.total_energy) == 1
     expected_total = 3 * E_H  # 3 H atoms
-    assert pytest.approx(energies[0], rel=0, abs=1e-9) == expected_total
+    assert pytest.approx(
+        results.total_energy[0], rel=0, abs=1e-9) == expected_total
 
 
 @pytest.mark.cpu

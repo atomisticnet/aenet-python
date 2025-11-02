@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
 from aenet.torch_training.config import Structure
 from aenet.torch_training.model_export import load_model
@@ -91,64 +90,66 @@ class TestModelLoadingInference:
         """Test that energy prediction works after loading a model."""
         trainer, _ = load_model(TRAINED_MODEL_PATH)
 
-        # Predict energies
-        energies, forces = trainer.predict(
-            test_structures, predict_forces=False
+        # Predict energies using new unified API
+        results = trainer.predict(
+            test_structures, eval_forces=False
         )
 
-        # Verify predictions
-        assert energies is not None
-        assert len(energies) == len(test_structures)
-        assert all(isinstance(e, float) for e in energies)
-        assert all(not np.isnan(e) for e in energies)
+        # Verify predictions - results is now a PredictOut object
+        assert results is not None
+        assert results.total_energy is not None
+        assert len(results.total_energy) == len(test_structures)
+        assert all(isinstance(e, float) for e in results.total_energy)
+        assert all(not np.isnan(e) for e in results.total_energy)
 
         # Forces should be None since we didn't request them
-        assert forces is None
+        assert results.forces is None
 
     def test_force_prediction_works(self, test_structures):
         """Test that force prediction works after loading a model."""
         trainer, _ = load_model(TRAINED_MODEL_PATH)
 
-        # Predict both energies and forces
-        energies, forces = trainer.predict(
-            test_structures, predict_forces=True
+        # Predict both energies and forces using new unified API
+        results = trainer.predict(
+            test_structures, eval_forces=True
         )
 
         # Verify energy predictions
-        assert energies is not None
-        assert len(energies) == len(test_structures)
+        assert results.total_energy is not None
+        assert len(results.total_energy) == len(test_structures)
 
         # Verify force predictions
-        assert forces is not None
-        assert len(forces) == len(test_structures)
+        assert results.forces is not None
+        assert len(results.forces) == len(test_structures)
 
-        for i, (struct, force_tensor) in enumerate(
-            zip(test_structures, forces)
+        for i, (struct, force_array) in enumerate(
+            zip(test_structures, results.forces)
         ):
-            assert force_tensor.shape == (len(struct.species), 3)
-            assert torch.is_tensor(force_tensor)
+            assert force_array.shape == (len(struct.species), 3)
+            # Forces are now numpy arrays after conversion
+            assert isinstance(force_array, np.ndarray)
             # Check that forces are not all zeros or NaN
-            assert not torch.isnan(force_tensor).any()
+            assert not np.isnan(force_array).any()
 
     def test_consistent_predictions(self, test_structures):
         """Test that repeated predictions give consistent results."""
         trainer, _ = load_model(TRAINED_MODEL_PATH)
 
-        # Make predictions twice
-        energies1, forces1 = trainer.predict(
-            test_structures, predict_forces=True
+        # Make predictions twice using new unified API
+        results1 = trainer.predict(
+            test_structures, eval_forces=True
         )
-        energies2, forces2 = trainer.predict(
-            test_structures, predict_forces=True
+        results2 = trainer.predict(
+            test_structures, eval_forces=True
         )
 
         # Verify energies are consistent
-        for e1, e2 in zip(energies1, energies2):
+        for e1, e2 in zip(results1.total_energy, results2.total_energy):
             assert abs(e1 - e2) < 1e-10, "Energies should be deterministic"
 
         # Verify forces are consistent
-        for f1, f2 in zip(forces1, forces2):
-            assert torch.allclose(
+        for f1, f2 in zip(results1.forces, results2.forces):
+            assert np.allclose(
                 f1, f2, atol=1e-10
             ), "Forces should be deterministic"
 
@@ -160,8 +161,8 @@ class TestModelLoadingInference:
         assert trainer.device.type == "cpu"
 
         # Predictions should work
-        energies, _ = trainer.predict(test_structures, predict_forces=False)
-        assert len(energies) == len(test_structures)
+        results = trainer.predict(test_structures, eval_forces=False)
+        assert len(results.total_energy) == len(test_structures)
 
     def test_descriptor_config_restored(self):
         """Test that descriptor configuration is properly restored."""
@@ -201,21 +202,21 @@ def test_load_and_predict_integration(test_structures):
     assert "architecture" in metadata
     print(f"Loaded model with architecture: {metadata['architecture']}")
 
-    # Make predictions
-    energies, forces = trainer.predict(test_structures, predict_forces=True)
+    # Make predictions using new unified API
+    results = trainer.predict(test_structures, eval_forces=True)
 
     # Verify results
-    assert len(energies) == len(test_structures)
-    assert len(forces) == len(test_structures)
+    assert len(results.total_energy) == len(test_structures)
+    assert len(results.forces) == len(test_structures)
 
     # Print summary for manual verification
     for i, (struct, energy, force) in enumerate(
-        zip(test_structures, energies, forces)
+        zip(test_structures, results.total_energy, results.forces)
     ):
         print(f"Structure {i}: {len(struct.species)} atoms")
         print(f"  Energy: {energy:.6f}")
         print(f"  Force shape: {force.shape}")
-        print(f"  Force magnitude: {torch.norm(force).item():.6f}")
+        print(f"  Force magnitude: {np.linalg.norm(force):.6f}")
 
 
 @pytest.mark.skipif(
