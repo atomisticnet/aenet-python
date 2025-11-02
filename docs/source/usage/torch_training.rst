@@ -242,6 +242,160 @@ Force Training with Optimizations
        device='cuda'
    )
 
+
+Advanced Configuration Reference
+---------------------------------
+
+This section documents all configuration parameters available in
+:class:`~aenet.torch_training.TorchTrainingConfig`.
+
+Force Training Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**force_fraction** : float (default: 1.0)
+   Fraction of structures (0.0-1.0) to use for force training. Using a subset
+   can significantly speed up training while maintaining accuracy.
+   Example: ``force_fraction=0.3`` uses 30% of force-labeled structures.
+
+**force_sampling** : str (default: 'random')
+   Sampling strategy for force subset: ``'random'`` (resample each epoch) or
+   ``'fixed'`` (static subset). Random sampling provides better generalization.
+
+**force_resample_each_epoch** : bool (default: True)
+   When ``force_sampling='random'``, resample the subset at each epoch start.
+
+**force_min_structures_per_epoch** : int (default: 1)
+   Minimum number of force-labeled structures per epoch, regardless of
+   ``force_fraction``. Ensures force gradient signal is not lost.
+
+**force_scale_unbiased** : bool (default: False)
+   Apply sqrt(1/f) scaling to force RMSE where f is the supervised fraction,
+   approximating constant scale under sub-sampling.
+
+**epochs_per_force_window** : int (default: 1)
+   Resample random force subset every N epochs. Values >1 amortize cached
+   features across multiple epochs.
+
+
+Performance & Caching
+~~~~~~~~~~~~~~~~~~~~~~
+
+**cached_features** : bool (default: False)
+   For energy-only training (``force_weight=0``), cache pre-computed features
+   to avoid repeated featurization. Provides ~100× speedup. Not compatible with
+   force training.
+
+**cached_features_for_force** : bool (default: False)
+   When ``force_weight > 0``, cache features for structures not selected for
+   force supervision in current epoch. Requires neighbor info for force path.
+
+**cache_neighbors** : bool (default: False)
+   Cache per-structure neighbor graphs (indices, displacement vectors) across
+   epochs. Avoids repeated neighbor searches for fixed geometries.
+
+**cache_triplets** : bool (default: False)
+   Build CSR neighbor graphs and precompute angular triplet indices for
+   vectorized featurization. Removes Python enumeration loops.
+
+**cache_persist_dir** : str (default: None)
+   Directory for persisting graph/triplet caches to disk for reuse across runs.
+
+**cache_scope** : str (default: 'all')
+   Which dataset splits to cache: ``'train'``, ``'val'``, or ``'all'``.
+
+**num_workers** : int (default: 0)
+   Number of parallel DataLoader workers for on-the-fly featurization.
+   0 = main process only. Values >0 enable parallel data loading.
+
+**prefetch_factor** : int (default: 2)
+   Number of batches to prefetch per worker when ``num_workers > 0``.
+
+**persistent_workers** : bool (default: True)
+   Keep DataLoader workers alive between epochs for faster iteration.
+
+
+Data Filtering & Quality Control
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**max_energy** : float (default: None)
+   Exclude structures with total energy above this threshold. Useful for
+   removing outliers or high-energy configurations.
+
+**max_forces** : float (default: None)
+   Exclude structures with maximum atomic force magnitude above this threshold.
+   Units: eV/Å.
+
+
+Energy Configuration
+~~~~~~~~~~~~~~~~~~~~
+
+**energy_target** : str (default: 'cohesive')
+   Energy reference space: ``'cohesive'`` (relative to atomic references) or
+   ``'total'`` (absolute energies). Cohesive energies improve training
+   stability by removing large atomic contributions.
+
+**E_atomic** : dict (default: None)
+   Atomic reference energies for cohesive energy calculation.
+   Format: ``{'H': -13.6, 'O': -432.0, ...}`` in eV.
+   Required when ``energy_target='cohesive'``.
+
+**normalize_features** : bool (default: True)
+   Normalize features to zero mean and unit variance. Improves training
+   stability and convergence.
+
+**normalize_energy** : bool (default: True)
+   Normalize energies by shifting and scaling. Applied after cohesive energy
+   conversion if enabled.
+
+**E_shift** : float (default: None)
+   Override per-atom energy shift for normalization. Auto-computed from
+   training set if None.
+
+**E_scaling** : float (default: None)
+   Override energy scaling factor. Auto-computed from training set if None.
+
+**feature_stats** : dict (default: None)
+   Override feature normalization statistics.
+   Format: ``{'mean': np.ndarray, 'std': np.ndarray}``.
+   Auto-computed from training set if None.
+
+
+Output & Diagnostics
+~~~~~~~~~~~~~~~~~~~~
+
+**save_energies** : bool (default: False)
+   Save predicted energies for train/test sets to disk.
+
+**save_forces** : bool (default: False)
+   Save predicted forces for train/test sets to disk.
+
+**timing** : bool (default: False)
+   Enable detailed timing output for performance profiling.
+
+**show_progress** : bool (default: True)
+   Display epoch-level progress bar.
+
+**show_batch_progress** : bool (default: False)
+   Display batch-level progress bar within each epoch. Verbose for large
+   datasets.
+
+
+Advanced Options
+~~~~~~~~~~~~~~~~
+
+**precision** : str (default: 'auto')
+   Numeric precision: ``'auto'`` (match descriptor dtype), ``'float32'``, or
+   ``'float64'``. Higher precision improves accuracy but increases memory usage.
+
+**memory_mode** : str (default: 'gpu')
+   Memory management strategy: ``'cpu'``, ``'gpu'``, or ``'mixed'``.
+   Controls where data and intermediate results are stored.
+
+**device** : str (default: None)
+   PyTorch device: ``'cpu'``, ``'cuda'``, or ``'cuda:0'``. Auto-detected if
+   None.
+
+
 Monitoring Training Progress
 -----------------------------
 

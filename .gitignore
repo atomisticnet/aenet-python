@@ -14,9 +14,13 @@ profiling/
 outputs/
 .virtual_documents
 
+debug/
+profiling/
 fortran/
+.vscode/
 
 # Sphinx build and generated files
 docs/_build/
 docs/api/generated/
 docs/source/api/generated/
+
