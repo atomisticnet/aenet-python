@@ -109,6 +109,7 @@ Pure Python/PyTorch implementation with GPU support.
 
    usage/torch_featurization
    usage/torch_training
+   usage/torch_datasets
    usage/torch_inference
 
 

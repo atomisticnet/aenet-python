@@ -17,8 +17,9 @@ Notes
 
 from __future__ import annotations
 
+import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional, Union
 
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -343,11 +344,15 @@ class TorchANNPotential:
             device=self.device,
         )
 
-        # Atomic reference energies
-        self._E_atomic: Optional[Dict[str, float]] = None
+        # Atomic reference energies (defaults to zeros if not provided)
+        self._atomic_energies: Optional[Dict[str, float]] = None
 
-        # Energy target (cohesive vs total) - set during training
-        self._energy_target: str = "cohesive"
+        # Training state for checkpointing/saving
+        self._optimizer: Optional[torch.optim.Optimizer] = None
+        self._training_config: Optional[TorchTrainingConfig] = None
+
+        # Metadata from loaded model files
+        self._metadata: Optional[Dict[str, Any]] = None
 
     @property
     def history(self) -> Dict[str, List[float]]:
@@ -359,31 +364,59 @@ class TorchANNPotential:
         """Set training history (for loading from checkpoint)."""
         self._metrics.set_history(value)
 
+    @property
+    def metadata(self) -> Optional[Dict[str, Any]]:
+        """
+        Access model metadata from loaded files.
+
+        Returns None if the model was not loaded from a file using
+        `from_file()`. Provides access to rich metadata including:
+        - schema_version: Format version
+        - timestamp: When the model was saved
+        - training_config: Training configuration used
+        - descriptor_config: Descriptor configuration
+        - normalization: Normalization parameters
+        - atomic_energies: Reference atomic energies
+        - training_history: Full training history
+        - architecture: Network architecture
+        - extra_metadata: Any user-provided metadata
+
+        Returns
+        -------
+        dict or None
+            Metadata dictionary if model was loaded from file, None otherwise.
+
+        Examples
+        --------
+        >>> pot = TorchANNPotential.from_file('model.pt')
+        >>> print(pot.metadata['timestamp'])
+        >>> print(pot.metadata['training_config'])
+        """
+        return self._metadata
+
     def train(
         self,
-        structures: Optional[List[Structure]] = None,
+        structures: Optional[Union[List[Structure],
+                                   List, List[os.PathLike]]] = None,
         dataset: Optional[Dataset] = None,
         train_dataset: Optional[Dataset] = None,
         test_dataset: Optional[Dataset] = None,
         config: Optional[TorchTrainingConfig] = None,
-        checkpoint_dir: Optional[str] = "checkpoints",
-        checkpoint_interval: int = 1,
-        max_checkpoints: Optional[int] = None,
         resume_from: Optional[str] = None,
-        save_best: bool = True,
-        use_scheduler: bool = False,
-        scheduler_patience: int = 10,
-        scheduler_factor: float = 0.5,
-        scheduler_min_lr: float = 1e-6,
-    ) -> Dict[str, List[float]]:
+    ):
         """
-        Train the MLIP and return training history.
+        Train the MLIP and return training results.
 
         Parameters
         ----------
-        structures : list[Structure], optional
-            Legacy input: list of in-memory Structures. If provided and
-            dataset/train_dataset are None, a StructureDataset is created.
+        structures : List[Structure] or List[AtomicStructure]
+                         or List[os.PathLike], optional
+            Training structures in one of three formats:
+            - List of torch Structure objects (direct use)
+            - List of AtomicStructure objects (automatically converted)
+            - List of file paths to structure files (loaded and converted)
+            If provided and dataset/train_dataset are None, a StructureDataset
+            is created.
         dataset : torch.utils.data.Dataset, optional
             Generic dataset providing samples compatible with the collate_fn.
             If provided and train_dataset/test_dataset are None, a train/test
@@ -424,36 +457,44 @@ class TorchANNPotential:
         # Ensure final placement on resolved device
         self.model.to(device)
 
-        # Cohesive energy configuration
-        energy_target = getattr(config, "energy_target", "cohesive")
-        self._energy_target = energy_target  # Store for later use in predict
-        E_atomic_by_index = None
-        if energy_target == "cohesive":
-            E_atomic_cfg = getattr(config, "E_atomic", None)
-            if E_atomic_cfg:
-                e_list: List[float] = []
-                missing: List[str] = []
-                for s in self.descriptor.species:
-                    if s in E_atomic_cfg:
-                        e_list.append(float(E_atomic_cfg[s]))
-                    else:
-                        e_list.append(0.0)
-                        missing.append(s)
-                if missing:
-                    print(f"[WARN] E_atomic missing for species {missing}; "
-                          + "treating as 0.0 for cohesive conversion.")
-                E_atomic_by_index = torch.tensor(
-                    e_list, dtype=self.dtype, device=device)
-                # Persist dictionary form for later prediction/export
-                try:
-                    self._E_atomic = {str(k): float(v)
-                                      for k, v in E_atomic_cfg.items()}
-                except Exception:
-                    self._E_atomic = dict(E_atomic_cfg)
-            else:
-                print("[WARN] energy_target='cohesive' but config.E_atomic "
-                      "not provided; training will use provided energies "
-                      "unchanged.")
+        # Atomic reference energy configuration
+        # Default all species to 0.0, then update with user-provided values
+        import warnings
+        atomic_energies_dict: Dict[str, float] = {
+            s: 0.0 for s in self.descriptor.species
+        }
+
+        atomic_energies_cfg = getattr(config, "atomic_energies", None)
+        if atomic_energies_cfg:
+            atomic_energies_dict.update(atomic_energies_cfg)
+            # Store for later prediction/export
+            try:
+                self._atomic_energies = {
+                    str(k): float(v) for k, v in atomic_energies_dict.items()
+                }
+            except Exception:
+                self._atomic_energies = dict(atomic_energies_dict)
+        else:
+            warnings.warn(
+                "No atomic_energies provided. Training on total energies "
+                "(all atomic reference energies set to 0.0). For cohesive "
+                "energy training, provide atomic reference energies in "
+                "config.atomic_energies.",
+                UserWarning
+            )
+            self._atomic_energies = atomic_energies_dict
+
+        # Convert to tensor indexed by species for efficient lookup
+        e_list: List[float] = [atomic_energies_dict[s]
+                               for s in self.descriptor.species]
+        atomic_energies_by_index = torch.tensor(
+            e_list, dtype=self.dtype, device=device
+        )
+
+        # Convert various input types to List[Structure] (torch Structure)
+        if structures is not None and len(structures) > 0:
+            from .dataset import convert_to_structures
+            structures = convert_to_structures(structures)
 
         # Dataset and split
         # (priority: explicit train/test > dataset > structures)
@@ -491,7 +532,7 @@ class TorchANNPotential:
                 raise ValueError(
                     "Provide either 'structures' or 'dataset'/'train_dataset'"
                 )
-            if bool(getattr(config, "cached_features", False)
+            if bool(getattr(config, "cache_features", False)
                     ) and float(config.alpha) == 0.0:
                 # Energy-only cached-features path
                 structures_all = structures
@@ -540,14 +581,14 @@ class TorchANNPotential:
                     min_force_structures_per_epoch=getattr(
                         config, "force_min_structures_per_epoch", None
                     ),
-                    cached_features_for_force=bool(
-                        getattr(config, "cached_features_for_force", False)
+                    cache_features=bool(
+                        getattr(config, "cache_features", False)
                     ),
-                    cache_neighbors=bool(
-                        getattr(config, "cache_neighbors", False)
+                    cache_force_neighbors=bool(
+                        getattr(config, "cache_force_neighbors", False)
                     ),
-                    cache_triplets=bool(
-                        getattr(config, "cache_triplets", False)
+                    cache_force_triplets=bool(
+                        getattr(config, "cache_force_triplets", False)
                     ),
                     cache_persist_dir=getattr(
                         config, "cache_persist_dir", None),
@@ -648,7 +689,7 @@ class TorchANNPotential:
             else:
                 # Compute from data
                 self._normalizer.compute_energy_stats(
-                    stats_loader, E_atomic_by_index
+                    stats_loader, atomic_energies_by_index
                 )
 
         # Optimizer and scheduler using OptimizerBuilder
@@ -656,19 +697,20 @@ class TorchANNPotential:
         optimizer = opt_builder.build_optimizer(config.method)
         scheduler = opt_builder.build_scheduler(
             optimizer,
-            use_scheduler=bool(use_scheduler) and (test_loader is not None),
-            scheduler_patience=int(scheduler_patience),
-            scheduler_factor=float(scheduler_factor),
-            scheduler_min_lr=float(scheduler_min_lr),
+            use_scheduler=bool(config.use_scheduler
+                               ) and (test_loader is not None),
+            scheduler_patience=int(config.scheduler_patience),
+            scheduler_factor=float(config.scheduler_factor),
+            scheduler_min_lr=float(config.scheduler_min_lr),
         )
 
         # Checkpoint manager
         ckpt_manager = None
-        if checkpoint_dir is not None:
+        if config.checkpoint_dir is not None:
             ckpt_manager = CheckpointManager(
-                checkpoint_dir=checkpoint_dir,
-                max_to_keep=max_checkpoints,
-                save_best=save_best,
+                checkpoint_dir=config.checkpoint_dir,
+                max_to_keep=config.max_checkpoints,
+                save_best=config.save_best,
             )
 
         start_epoch = 0
@@ -735,13 +777,13 @@ class TorchANNPotential:
                     train_ds.resample_force_structures()
 
             # Train one epoch
-            (train_energy_rmse, train_force_rmse, train_timing
+            (train_energy_rmse, train_energy_mae,
+             train_force_rmse, train_timing
              ) = training_loop.run_epoch(
                 loader=train_loader,
                 optimizer=optimizer,
                 alpha=alpha,
-                energy_target=energy_target,
-                E_atomic_by_index=E_atomic_by_index,
+                atomic_energies_by_index=atomic_energies_by_index,
                 train=True,
                 show_batch_progress=show_batch,
                 force_scale_unbiased=bool(
@@ -750,16 +792,16 @@ class TorchANNPotential:
 
             # Validation
             val_energy_rmse = float("nan")
+            val_energy_mae = float("nan")
             val_force_rmse = float("nan")
             val_timing = {}
             if test_loader is not None:
-                (val_energy_rmse, val_force_rmse, val_timing
+                (val_energy_rmse, val_energy_mae, val_force_rmse, val_timing
                  ) = training_loop.run_epoch(
                     loader=test_loader,
                     optimizer=None,
                     alpha=alpha,
-                    energy_target=energy_target,
-                    E_atomic_by_index=E_atomic_by_index,
+                    atomic_energies_by_index=atomic_energies_by_index,
                     train=False,
                     show_batch_progress=False,
                     force_scale_unbiased=bool(
@@ -775,7 +817,7 @@ class TorchANNPotential:
                 )
 
                 # Best model tracking
-                if save_best and ckpt_manager is not None:
+                if config.save_best and ckpt_manager is not None:
                     if ckpt_manager.should_save_best(val_loss_monitor):
                         self.best_val = (
                             float(ckpt_manager.best_val_loss)
@@ -783,13 +825,10 @@ class TorchANNPotential:
                             else float(val_loss_monitor)
                             )
                         ckpt_manager.save_best_model(
-                            model=self.model,
+                            trainer=self,
                             optimizer=optimizer,
                             epoch=epoch,
-                            history=self._metrics.get_history(),
-                            architecture=self.arch,
-                            descriptor_config=_descriptor_config(
-                                self.descriptor),
+                            training_config=config,
                         )
 
                 # Scheduler
@@ -800,8 +839,10 @@ class TorchANNPotential:
             epoch_time = time.time() - t0
             self._metrics.update(
                 train_energy_rmse=float(train_energy_rmse),
+                train_energy_mae=float(train_energy_mae),
                 train_force_rmse=float(train_force_rmse),
                 test_energy_rmse=float(val_energy_rmse),
+                test_energy_mae=float(val_energy_mae),
                 test_force_rmse=float(val_force_rmse),
                 learning_rate=float(optimizer.param_groups[0]["lr"]),
                 epoch_time=epoch_time,
@@ -831,21 +872,28 @@ class TorchANNPotential:
                 pbar.update(1)
 
             # Checkpointing
-            if ckpt_manager is not None and checkpoint_interval > 0:
-                if ((epoch + 1) % int(checkpoint_interval)) == 0:
+            if ckpt_manager is not None and config.checkpoint_interval > 0:
+                if ((epoch + 1) % int(config.checkpoint_interval)) == 0:
                     ckpt_manager.save_checkpoint(
-                        model=self.model,
+                        trainer=self,
                         optimizer=optimizer,
                         epoch=epoch,
-                        history=self._metrics.get_history(),
-                        architecture=self.arch,
-                        descriptor_config=_descriptor_config(self.descriptor),
+                        training_config=config,
                     )
 
         if pbar is not None:
             pbar.close()
 
-        return self._metrics.get_history()
+        # Store optimizer and config for later saving
+        self._optimizer = optimizer
+        self._training_config = config
+
+        # Import TrainOut and return structured results
+        from aenet.io.train import TrainOut
+        return TrainOut.from_torch_history(
+            history=self._metrics.get_history(),
+            config=config
+        )
 
     @torch.no_grad()
     def predict(
@@ -889,7 +937,6 @@ class TorchANNPotential:
         """
         from aenet.mlip import PredictionConfig as PC
         from aenet.io.predict import PredictOut
-        from aenet.geometry import AtomicStructure
         import os
         import warnings
 
@@ -911,31 +958,21 @@ class TorchANNPotential:
             )
 
         # Convert structures to torch Structure objects
-        torch_structures: List[Structure] = []
-        input_paths: Optional[List[str]] = None
+        from .dataset import convert_to_structures
 
+        # Track if input was file paths for returning structure_paths
+        input_paths: Optional[List[str]] = None
         if isinstance(structures[0], (str, os.PathLike)):
-            # File paths - load and convert
-            from aenet.io.structure import read
             input_paths = [str(p) for p in structures]
-            for p in structures:
-                atomic_struc = read(p)
-                torch_structures.append(atomic_struc.to_TorchStructure()[0])
-        elif isinstance(structures[0], AtomicStructure):
-            # AtomicStructure objects - convert
-            torch_structures = [s.to_TorchStructure()[0] for s in structures]
-        else:
-            # Already torch Structure objects
-            torch_structures = structures
+
+        torch_structures = convert_to_structures(structures)
 
         # Create Predictor and call with options
-        energy_target = getattr(self, "_energy_target", "cohesive")
         predictor = Predictor(
             model=self.model,
             descriptor=self.descriptor,
             normalizer=self._normalizer,
-            energy_target=energy_target,
-            E_atomic=self._E_atomic,
+            atomic_energies=self._atomic_energies,
             device=self.device,
             dtype=self.dtype,
         )
@@ -955,8 +992,8 @@ class TorchANNPotential:
         cohesive_energies: List[float] = []
         for i, s in enumerate(torch_structures):
             total_e = energies[i]
-            if self._E_atomic:
-                atomic_sum = sum(self._E_atomic.get(sp, 0.0)
+            if self._atomic_energies:
+                atomic_sum = sum(self._atomic_energies.get(sp, 0.0)
                                  for sp in s.species)
                 cohesive_energies.append(total_e - atomic_sum)
             else:
@@ -1017,10 +1054,9 @@ class TorchANNPotential:
             model=self.model,
             descriptor=self.descriptor,
             normalizer=self._normalizer,
-            energy_target="total",
-            E_atomic=(atomic_energies
-                      if atomic_energies is not None
-                      else self._E_atomic),
+            atomic_energies=(atomic_energies
+                             if atomic_energies is not None
+                             else self._atomic_energies),
             device=self.device,
             dtype=self.dtype,
         )
@@ -1047,11 +1083,15 @@ class TorchANNPotential:
         Returns
         -------
         TorchANNPotential
-            Loaded trainer instance.
+            Loaded trainer instance with metadata accessible via the
+            `metadata` property.
         """
         from .model_export import load_model
 
-        trainer, _metadata = load_model(path)
+        trainer, metadata = load_model(path)
+        # Store metadata for user access
+        trainer._metadata = metadata
+
         if device is not None:
             trainer.device = torch.device(device)
             trainer.model.to(trainer.device)
@@ -1065,21 +1105,19 @@ class TorchANNPotential:
     def save(
         self,
         path,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        training_config: Optional["TorchTrainingConfig"] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Save this trained model and metadata to a file.
 
+        The optimizer state and training configuration are automatically
+        included if the model has been trained. These are stored during
+        training and ensure the model can be resumed.
+
         Parameters
         ----------
         path : str | Path
             Destination file (.pt/.pth).
-        optimizer : torch.optim.Optimizer, optional
-            Include optimizer state dict if provided.
-        training_config : TorchTrainingConfig, optional
-            Persisted training configuration.
         extra_metadata : dict, optional
             Any additional JSON-serializable metadata to include.
         """
@@ -1088,8 +1126,8 @@ class TorchANNPotential:
         save_model(
             trainer=self,
             path=path,
-            optimizer=optimizer,
-            training_config=training_config,
+            optimizer=self._optimizer,
+            training_config=self._training_config,
             extra_metadata=extra_metadata,
         )
 

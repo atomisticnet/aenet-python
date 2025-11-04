@@ -1,0 +1,288 @@
+ ======================================================================
+                  Atomic Energy Network Interpolation                  
+ ======================================================================
+                                                                       
+                          2025-11-02  20:22:15                         
+                                                                       
+
+ Copyright (C) 2015-2018 Nongnuch Artrith and Alexander Urban
+
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ Mozilla Public License, v. 2.0, for more details.
+
+ Atomic species : Ti
+ File name      : Ti.nn
+
+ ----------------------------------------------------------------------
+                           Training set info.                          
+ ----------------------------------------------------------------------
+
+ Training set file                   : TiO.train.ascii
+ Number of structures in the data set: 1000
+
+ Atomic species in training set      : 2
+   Species : Ti O
+
+ Average energy (eV/atom) : -8.230179
+ Minimum energy (eV/atom) : -8.571271
+ Maximum energy (eV/atom) : -7.001225
+
+ The input and output values have been normalized to [-1.0, 1.0].
+ Structures outside of this interval will not be used for training.
+   Energy scaling factor: 1.273848
+   Atomic energy shift  : -7.786248
+
+ Number of layers :   4
+
+ Number of nodes (without bias) 
+ and activation type per layer :
+
+       1 :    56
+       2 :     5  hyperbolic tangent (tanh)
+       3 :     5  hyperbolic tangent (tanh)
+       4 :     1  linear function (linear)
+
+ Required memory (words) :     385075 (   3008.40 KB)
+
+ Total number of weights (incl. bias) :      321
+
+ Structural fingerprint (SF) set-up for Ti
+
+ Descriptor
+
+ environment types: Ti O  
+ minimal distance : 0.35 Angstrom
+ maximal cut-off  : 6.50 Angstrom
+ size of basis    : 56
+ evaluations      : 7308
+
+ Basis function type Chebyshev
+ [N. Artrith and A. Urban (2016)]
+
+ Radial Rc     : 6.50
+ Angular Rc    : 5.00
+ Radial order  : 20
+ Angular order : 6
+
+ Atomic species : O
+ File name      : O.nn
+
+ ----------------------------------------------------------------------
+                           Training set info.                          
+ ----------------------------------------------------------------------
+
+ Training set file                   : TiO.train.ascii
+ Number of structures in the data set: 1000
+
+ Atomic species in training set      : 2
+   Species : Ti O
+
+ Average energy (eV/atom) : -8.230179
+ Minimum energy (eV/atom) : -8.571271
+ Maximum energy (eV/atom) : -7.001225
+
+ The input and output values have been normalized to [-1.0, 1.0].
+ Structures outside of this interval will not be used for training.
+   Energy scaling factor: 1.273848
+   Atomic energy shift  : -7.786248
+
+ Number of layers :   4
+
+ Number of nodes (without bias) 
+ and activation type per layer :
+
+       1 :    56
+       2 :     5  hyperbolic tangent (tanh)
+       3 :     5  hyperbolic tangent (tanh)
+       4 :     1  linear function (linear)
+
+ Required memory (words) :     385075 (   3008.40 KB)
+
+ Total number of weights (incl. bias) :      321
+
+ Structural fingerprint (SF) set-up for O
+
+ Descriptor
+
+ environment types: Ti O  
+ minimal distance : 0.35 Angstrom
+ maximal cut-off  : 6.50 Angstrom
+ size of basis    : 56
+ evaluations      : 13977
+
+ Basis function type Chebyshev
+ [N. Artrith and A. Urban (2016)]
+
+ Radial Rc     : 6.50
+ Angular Rc    : 5.00
+ Radial order  : 20
+ Angular order : 6
+
+ ----------------------------------------------------------------------
+                           Energy evaluation                           
+ ----------------------------------------------------------------------
+
+ Structure number  : 1
+ File name         : ../xsf-TiO2/structure-001.xsf
+ Number of atoms   : 23
+ Number of species : 2
+
+ Lattice vectors (Angstrom):
+
+   a = (        5.17600016       0.00000000       0.00000000 )
+   b = (        0.00000000       5.50899976       0.00000000 )
+   c = (        0.00000000       0.00000000       9.26300011 )
+
+ Cartesian atomic coordinates (input):
+
+          x             y             z      
+         (Ang)         (Ang)         (Ang)   
+ --------------------------------------------
+ Ti      1.917829      3.210923      3.457605
+ Ti      3.391635      2.308728      5.857709
+ Ti      4.251057      2.036991      1.570596
+ Ti      0.732743      3.382458      7.851422
+ Ti      1.939797      0.107981      1.369794
+ Ti      3.165604      5.297071      7.870968
+ Ti      0.831603      0.596468      5.891206
+ Ti      4.633678      4.845708      3.257206
+ O       1.824294      1.810986      4.848251
+ O       3.574763      3.611441      4.495252
+ O       4.954388      2.674834      9.157064
+ O       3.530433      0.656763      0.262949
+ O       1.564710      4.748784      9.054732
+ O       4.239556      0.815935      4.834275
+ O       1.005575      4.707414      4.466791
+ O       0.321777      3.378553      2.469674
+ O       0.063211      2.313787      6.398876
+ O       2.668138      1.721984      2.389485
+ O       2.507024      3.795966      6.889016
+ O       0.294585      0.565418      2.057742
+ O       4.876518      4.884471      7.323592
+ O       2.311207      1.194274      7.080243
+ O       2.962609      4.361083      2.257227
+
+ Cohesive energy            :         -192.78242329 eV
+ Total energy               :       -19517.16578343 eV
+
+ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+ Structure number  : 2
+ File name         : ../xsf-TiO2/structure-002.xsf
+ Number of atoms   : 46
+ Number of species : 2
+
+ Lattice vectors (Angstrom):
+
+   a = (        5.93188753       0.00000000       0.00000000 )
+   b = (        0.00000000       9.29428401       0.00000000 )
+   c = (        0.00000000      -0.00005292       9.29428401 )
+
+ Cartesian atomic coordinates (input):
+
+          x             y             z      
+         (Ang)         (Ang)         (Ang)   
+ --------------------------------------------
+ Ti      4.448916      6.970673      6.970713
+ Ti      4.448916      6.970700      2.323571
+ Ti      4.448916      2.323531      6.970713
+ Ti      4.448916      2.323558      2.323571
+ Ti      1.482972      6.970673      6.970713
+ Ti      1.482972      6.970700      2.323571
+ Ti      1.482972      2.323531      6.970713
+ Ti      1.482972      2.323558      2.323571
+ Ti      2.965944      4.649141      4.643274
+ Ti      2.965944      4.761926      9.179448
+ Ti      2.965944      0.041138      4.605978
+ Ti      2.965944      0.003815      9.292259
+ Ti      0.000000      4.643248      4.649167
+ Ti      0.000000      4.605978      0.041164
+ Ti      0.000000      9.179421      4.761978
+ Ti      0.000000      9.292259      0.003868
+ O       4.448916      5.557324      5.557356
+ O       4.415441      5.480565      0.963927
+ O       4.482390      0.963895      5.480571
+ O       4.448916      0.938955      0.938960
+ O       1.482972      5.557324      5.557356
+ O       1.516446      5.480565      0.963927
+ O       1.449498      0.963895      5.480571
+ O       1.482972      0.938955      0.938960
+ O       4.448916      8.384022      8.384070
+ O       4.482390      8.460834      3.683215
+ O       4.415441      3.683167      8.460855
+ O       4.448916      3.708161      3.708182
+ O       1.482972      8.384022      8.384070
+ O       1.449498      8.460834      3.683215
+ O       1.516446      3.683167      8.460855
+ O       1.482972      3.708161      3.708182
+ O       2.965944      6.060956      7.880425
+ O       2.965944      6.094646      3.266258
+ O       2.965944      1.380839      7.846761
+ O       2.965944      1.456862      3.190261
+ O       0.000000      6.034598      7.906783
+ O       0.000000      6.074304      3.248540
+ O       0.000000      1.398557      7.867103
+ O       2.965944      7.906749      6.034643
+ O       2.965944      7.867096      1.398602
+ O       2.965944      3.248505      6.074322
+ O       0.000000      7.880391      6.061000
+ O       0.000000      7.846753      1.380883
+ O       0.000000      3.266224      6.094665
+ O       0.000000      3.190253      1.456881
+
+ Cohesive energy            :         -389.72446909 eV
+ Total energy               :       -39038.49118938 eV
+
+ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+ Structure number  : 3
+ File name         : ../xsf-TiO2/structure-003.xsf
+ Number of atoms   : 23
+ Number of species : 2
+
+ Lattice vectors (Angstrom):
+
+   a = (        5.17600016       0.00000000       0.00000000 )
+   b = (        0.00000000       5.50899976       0.00000000 )
+   c = (        0.00000000       0.00000000       9.26300011 )
+
+ Cartesian atomic coordinates (input):
+
+          x             y             z      
+         (Ang)         (Ang)         (Ang)   
+ --------------------------------------------
+ Ti      1.857553      3.226145      3.406071
+ Ti      3.431207      2.226213      5.833281
+ Ti      4.227542      2.190118      1.486352
+ Ti      0.873767      3.403401      7.790778
+ Ti      1.901607      0.183897      1.407675
+ Ti      3.289169      5.118405      7.932541
+ Ti      0.833051      0.583641      5.859913
+ Ti      4.479414      4.894178      3.415352
+ O       1.799917      1.953715      4.858541
+ O       3.606729      3.572480      4.531296
+ O       4.903532      3.088502      0.028583
+ O       3.669267      0.696259      0.238354
+ O       1.657124      4.786789      9.101955
+ O       4.285957      0.831572      4.795126
+ O       0.954758      4.902489      4.370492
+ O       0.146240      3.408996      2.579939
+ O       5.158832      1.991873      6.773624
+ O       2.493830      1.876345      2.203231
+ O       2.583501      3.447841      7.104069
+ O       0.182699      0.632171      2.105949
+ O       4.952494      4.750311      6.981986
+ O       2.488449      0.800242      6.824070
+ O       2.903609      4.383419      2.208625
+
+ Cohesive energy            :         -193.42936699 eV
+ Total energy               :       -19517.81272714 eV
+
+                                                                       
+                          2025-11-02  20:22:15                         
+                                                                       
+ ======================================================================
+                      Atomic Energy Network done.                      
+ ======================================================================

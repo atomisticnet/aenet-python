@@ -82,12 +82,11 @@ class TrainingLoop:
         loader: DataLoader,
         optimizer: Optional[torch.optim.Optimizer],
         alpha: float,
-        energy_target: str = "cohesive",
-        E_atomic_by_index: Optional[torch.Tensor] = None,
+        atomic_energies_by_index: Optional[torch.Tensor] = None,
         train: bool = True,
         show_batch_progress: bool = False,
         force_scale_unbiased: bool = False,
-    ) -> Tuple[float, float, Dict[str, float]]:
+    ) -> Tuple[float, float, float, Dict[str, float]]:
         """
         Run one epoch over loader.
 
@@ -99,10 +98,10 @@ class TrainingLoop:
             Optimizer for training (None for validation).
         alpha : float
             Force loss weight (0.0 = energy only, 1.0 = forces only).
-        energy_target : str
-            Either 'cohesive' or 'total'.
-        E_atomic_by_index : torch.Tensor, optional
-            Atomic energies indexed by species, for cohesive conversion.
+        atomic_energies_by_index : torch.Tensor, optional
+            Atomic energies indexed by species. Always applied to convert
+            total energies to cohesive. If not provided or all zeros,
+            training targets remain as total energies.
         train : bool
             Whether this is training (True) or validation (False).
         show_batch_progress : bool
@@ -117,6 +116,8 @@ class TrainingLoop:
         -------
         energy_rmse : float
             Energy RMSE for epoch.
+        energy_mae : float
+            Energy MAE for epoch.
         force_rmse : float
             Force RMSE for epoch (NaN if no forces).
         timing : dict
@@ -124,6 +125,7 @@ class TrainingLoop:
             'optimizer', 'total'.
         """
         energy_losses: List[float] = []
+        energy_maes: List[float] = []
         force_losses: List[float] = []
 
         forward_time_total: float = 0.0
@@ -160,9 +162,10 @@ class TrainingLoop:
                 features = features.float()
                 energy_ref = energy_ref.float()
 
-            # Convert targets to cohesive energies if configured
-            if energy_target == "cohesive" and E_atomic_by_index is not None:
-                per_atom_Ea = E_atomic_by_index[species_indices]
+            # Subtract atomic reference energies (always performed if provided)
+            # When atomic_energies are all zeros, this becomes a no-op
+            if atomic_energies_by_index is not None:
+                per_atom_Ea = atomic_energies_by_index[species_indices]
                 batch_idx = torch.repeat_interleave(
                     torch.arange(len(n_atoms), device=self.device),
                     n_atoms.long(),
@@ -184,7 +187,7 @@ class TrainingLoop:
             E_shift = self.normalizer.E_shift
             E_scaling = self.normalizer.E_scaling
 
-            energy_loss_t, _ = compute_energy_loss(
+            energy_loss_t, energy_pred = compute_energy_loss(
                 features=features,
                 energy_ref=energy_ref,
                 n_atoms=n_atoms,
@@ -193,6 +196,10 @@ class TrainingLoop:
                 E_shift=float(E_shift),
                 E_scaling=float(E_scaling),
             )
+
+            # Compute MAE (per atom)
+            energy_mae_t = torch.mean(
+                torch.abs((energy_pred - energy_ref) / n_atoms))
 
             # Optional force loss
             force_loss_t: Optional[torch.Tensor] = None
@@ -284,8 +291,9 @@ class TrainingLoop:
                 t_optimizer_end = time.perf_counter()
                 optimizer_time_total += t_optimizer_end - t_optimizer_start
 
-            # Collect losses
+            # Collect losses and MAE
             energy_losses.append(float(energy_loss_t.detach().cpu()))
+            energy_maes.append(float(energy_mae_t.detach().cpu()))
             if force_loss_t is not None:
                 force_losses.append(float(force_loss_t.detach().cpu()))
 
@@ -294,9 +302,12 @@ class TrainingLoop:
 
         t_epoch_end = time.perf_counter()
 
-        # Compute RMSEs
+        # Compute RMSE and MAE averages
         energy_rmse = float(
             sum(energy_losses) / max(1, len(energy_losses))
+        )
+        energy_mae = float(
+            sum(energy_maes) / max(1, len(energy_maes))
         )
         force_rmse = (
             float(sum(force_losses) / max(1, len(force_losses)))
@@ -318,4 +329,4 @@ class TrainingLoop:
             "total": t_epoch_end - t_epoch_start,
         }
 
-        return energy_rmse, force_rmse, timing
+        return energy_rmse, energy_mae, force_rmse, timing

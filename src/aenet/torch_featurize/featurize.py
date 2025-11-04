@@ -7,7 +7,6 @@ typespin architecture from aenet's Fortran code.
 
 from typing import List, Optional, Tuple
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch_scatter import scatter_add
@@ -1364,41 +1363,6 @@ class ChebyshevDescriptor(nn.Module):
         )[0]
 
         return energy, forces
-
-    def featurize_structure(
-        self,
-        positions: np.ndarray,
-        species: List[str],
-        cell: Optional[np.ndarray] = None,
-        pbc: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
-        """
-        Numpy interface for featurization.
-
-        Args:
-            positions: (N, 3) numpy array
-            species: List of species names
-            cell: (3, 3) numpy array (optional)
-            pbc: (3,) boolean numpy array (optional)
-
-        Returns
-        -------
-            features: (N, n_features) numpy array
-        """
-        # Convert to torch
-        pos_torch = torch.from_numpy(positions).to(self.dtype)
-        cell_torch = (
-            torch.from_numpy(cell).to(self.dtype) if cell is not None else None
-        )
-        pbc_torch = torch.from_numpy(pbc) if pbc is not None else None
-
-        # Featurize using convenience wrapper
-        with torch.no_grad():
-            features = self.forward_from_positions(
-                pos_torch, species, cell_torch, pbc_torch)
-
-        # Convert back to numpy
-        return features.cpu().numpy()
 
     def featurize_with_neighbor_info(
         self,

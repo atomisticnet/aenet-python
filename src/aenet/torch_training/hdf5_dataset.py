@@ -117,12 +117,14 @@ class HDF5StructureDataset(Dataset):
     min_force_structures_per_epoch : int, optional
         Minimum count of force-labeled structures to select regardless of
         force_fraction. Default: None (no minimum).
-    cached_features_for_force : bool, optional
+    cache_features : bool, optional
         Cache features for structures not selected for forces. Default: False
-    cache_neighbors : bool, optional
-        Cache per-structure neighbor_info for reuse. Default: False
-    cache_triplets : bool, optional
+    cache_force_neighbors : bool, optional
+        Cache per-structure neighbor_info for reuse. Only relevant for force
+        training. Default: False
+    cache_force_triplets : bool, optional
         Cache per-structure CSR graphs + triplets for vectorized paths.
+        Only relevant for force training.
         Default: False
     cache_persist_dir : str, optional
         Placeholder for future on-disk persistence of caches. Default: None
@@ -168,9 +170,9 @@ class HDF5StructureDataset(Dataset):
         force_fraction: float = 1.0,
         force_sampling: str = "random",
         min_force_structures_per_epoch: Optional[int] = None,
-        cached_features_for_force: bool = False,
-        cache_neighbors: bool = False,
-        cache_triplets: bool = False,
+        cache_features: bool = False,
+        cache_force_neighbors: bool = False,
+        cache_force_triplets: bool = False,
         cache_persist_dir: Optional[str] = None,
         seed: Optional[int] = None,
         in_memory_cache_size: int = 2048,
@@ -182,9 +184,9 @@ class HDF5StructureDataset(Dataset):
         self.force_fraction = float(force_fraction)
         self.force_sampling = str(force_sampling)
         self.min_force_structures_per_epoch = min_force_structures_per_epoch
-        self.cached_features_for_force = bool(cached_features_for_force)
-        self.cache_neighbors = bool(cache_neighbors)
-        self.cache_triplets = bool(cache_triplets)
+        self.cache_features = bool(cache_features)
+        self.cache_force_neighbors = bool(cache_force_neighbors)
+        self.cache_force_triplets = bool(cache_force_triplets)
         self.cache_persist_dir = cache_persist_dir
 
         # Random init
@@ -210,8 +212,7 @@ class HDF5StructureDataset(Dataset):
 
         # Simple per-process LRU cache for unpickled Structures
         self._cache_capacity = max(0, int(in_memory_cache_size))
-        self._cache: "OrderedDict[int, Structure]" \
-            = _LRU(maxlen=self._cache_capacity)
+        self._cache: dict = _LRU(maxlen=self._cache_capacity)
 
         # Feature cache for energy-only path (mirrors StructureDataset)
         self._feature_cache: dict[int, torch.Tensor] = {}
@@ -430,7 +431,7 @@ class HDF5StructureDataset(Dataset):
         # (mirror StructureDataset)
         if use_forces:
             # Force-supervised path requires neighbor info
-            if self.cache_neighbors and (idx in self._neighbor_cache):
+            if self.cache_force_neighbors and (idx in self._neighbor_cache):
                 neighbor_info = self._neighbor_cache[idx]
                 nb_idx_list_t = [
                     torch.as_tensor(arr, dtype=torch.long)
@@ -447,13 +448,13 @@ class HDF5StructureDataset(Dataset):
                  ) = self.descriptor.featurize_with_neighbor_info(
                     positions, struct.species, cell, pbc
                 )
-                if self.cache_neighbors:
+                if self.cache_force_neighbors:
                     self._neighbor_cache[idx] = neighbor_info
 
             # Optional CSR/Triplet vectorization cache
             graph = None
             triplets = None
-            if self.cache_triplets:
+            if self.cache_force_triplets:
                 if idx in self._graph_cache:
                     g_trip = self._graph_cache[idx]
                 else:
@@ -481,10 +482,11 @@ class HDF5StructureDataset(Dataset):
         else:
             # Energy-only forward path
             neighbor_info = None
-            if self.cached_features_for_force and (idx in self._feature_cache):
+            if self.cache_features and (idx in self._feature_cache):
                 features = self._feature_cache[idx]
             else:
-                if self.cache_neighbors and (idx in self._neighbor_cache):
+                if (self.cache_force_neighbors
+                        and (idx in self._neighbor_cache)):
                     neighbor_info_cached = self._neighbor_cache[idx]
                     nb_idx_list_t = [
                         torch.as_tensor(arr, dtype=torch.long)
@@ -500,7 +502,7 @@ class HDF5StructureDataset(Dataset):
                 else:
                     features = self.descriptor.forward_from_positions(
                         positions, struct.species, cell, pbc)
-                    if self.cache_neighbors:
+                    if self.cache_force_neighbors:
                         # Build once for reuse later
                         (feats, neighbor_info_cached
                          ) = self.descriptor.featurize_with_neighbor_info(
@@ -508,7 +510,7 @@ class HDF5StructureDataset(Dataset):
                         )
                         self._neighbor_cache[idx] = neighbor_info_cached
                         features = feats
-                if self.cached_features_for_force:
+                if self.cache_features:
                     self._feature_cache[idx] = features
             graph = None
             triplets = None

@@ -134,7 +134,7 @@ class TestChebyshevDescriptor:
         )
 
     def test_numpy_interface(self):
-        """Test numpy interface for featurization."""
+        """Test conversion from numpy to torch and back."""
         positions_np = np.array(
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
         )
@@ -148,7 +148,13 @@ class TestChebyshevDescriptor:
             ang_cutoff=1.5,
         )
 
-        features_np = featurizer.featurize_structure(positions_np, species)
+        # Convert numpy to torch, featurize, convert back to numpy
+        positions_torch = torch.from_numpy(positions_np)
+        with torch.no_grad():
+            features_torch = featurizer.forward_from_positions(
+                positions_torch, species
+            )
+        features_np = features_torch.cpu().numpy()
 
         assert isinstance(features_np, np.ndarray), (
             "Output should be numpy array"
@@ -449,15 +455,23 @@ class TestRotationalInvariance:
         )
         species = ["O", "H", "H"]
 
-        # Compute features
-        features1 = featurizer.featurize_structure(positions, species)
+        # Compute features using PyTorch API
+        positions_torch = torch.from_numpy(positions)
+        with torch.no_grad():
+            features1 = featurizer.forward_from_positions(
+                positions_torch, species
+            ).cpu().numpy()
 
         # Rotate 90 degrees around z-axis
         R = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
         positions_rot = positions @ R.T
 
         # Compute features for rotated structure
-        features2 = featurizer.featurize_structure(positions_rot, species)
+        positions_rot_torch = torch.from_numpy(positions_rot)
+        with torch.no_grad():
+            features2 = featurizer.forward_from_positions(
+                positions_rot_torch, species
+            ).cpu().numpy()
 
         # Features should be identical
         assert np.allclose(features1, features2, atol=1e-10), (

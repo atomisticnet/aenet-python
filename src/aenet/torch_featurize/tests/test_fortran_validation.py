@@ -9,6 +9,7 @@ import os
 
 import numpy as np
 import pytest
+import torch
 
 import aenet.io.structure
 from aenet.torch_featurize import ChebyshevDescriptor
@@ -54,10 +55,14 @@ class TestFortranValidation:
             ang_cutoff=1.5,
         )
 
-        # Featurize
-        positions = struc.coords[-1]  # Latest coordinates
+        # Featurize using PyTorch API
+        positions = torch.from_numpy(struc.coords[-1])
         species_list = struc.types
-        features = descriptor.featurize_structure(positions, species_list)
+
+        with torch.no_grad():
+            features = descriptor.forward_from_positions(
+                positions, species_list
+            ).cpu().numpy()
 
         # Validate shape
         assert features.shape == ref_features.shape, (
@@ -120,15 +125,16 @@ class TestFortranValidation:
             ang_cutoff=1.5,
         )
 
-        # Featurize with periodic boundary conditions
-        positions = struc.coords[-1]
+        # Featurize with periodic boundary conditions using PyTorch API
+        positions = torch.from_numpy(struc.coords[-1])
         species_list = struc.types
-        cell = struc.avec[-1] if struc.pbc else None
-        pbc = np.array([True, True, True]) if struc.pbc else None
+        cell = torch.from_numpy(struc.avec[-1]) if struc.pbc else None
+        pbc = torch.tensor([True, True, True]) if struc.pbc else None
 
-        features = descriptor.featurize_structure(
-            positions, species_list, cell, pbc
-        )
+        with torch.no_grad():
+            features = descriptor.forward_from_positions(
+                positions, species_list, cell, pbc
+            ).cpu().numpy()
 
         # Validate shape
         assert features.shape == ref_features.shape, (

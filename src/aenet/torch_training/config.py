@@ -280,20 +280,23 @@ class TorchTrainingConfig:
         If True, apply sqrt(1/f) scaling to the per-batch force RMSE, where
         f is the supervised fraction of atoms from force-labeled structures,
         to approximate a constant scale under sub-sampling. Default: False
-    cached_features_for_force : bool, optional
-        When alpha>0, cache features for structures that are not selected
-        for force supervision in the current epoch-window. For those
-        energy-only structures, reuse cached features and skip
-        neighbor_info computation.  Default: False
-    cache_neighbors : bool, optional
+    cache_features : bool, optional
+        Enable feature caching. For energy-only training (alpha=0), uses
+        CachedStructureDataset. For mixed energy/force training (alpha>0),
+        caches features for structures not selected for force supervision
+        in the current epoch-window, reusing cached features and skipping
+        neighbor_info computation. Default: False
+    cache_force_neighbors : bool, optional
         Cache per-structure neighbor graphs (indices and displacement vectors)
-        to avoid repeated neighbor searches across epochs when geometries are
-        fixed. When True, neighbor graphs are computed once per structure and
-        reused for both energy and force paths. Default: False
-    cache_triplets : bool, optional
+        for force training to avoid repeated neighbor searches across epochs
+        when geometries are fixed. When True, neighbor graphs are computed
+        once per structure and reused for both energy and force paths.
+        Only relevant for force training. Default: False
+    cache_force_triplets : bool, optional
         Build and cache CSR neighbor graphs and precomputed angular triplet
         indices per structure to enable vectorized featurization and gradient
-        paths (removes Python-level enumeration loops). Default: False
+        paths for force training (removes Python-level enumeration loops).
+        Only relevant for force training. Default: False
     cache_persist_dir : str, optional
         Optional root directory for persisted graph/triplet caches
         (planned follow-up). When provided, caches may be serialized to disk
@@ -341,12 +344,14 @@ class TorchTrainingConfig:
     force_scale_unbiased: bool = False
     # Mixed-run caching: cache features for non-force structures
     # in current window
-    cached_features_for_force: bool = False
+    cache_features: bool = False
     # Cache per-structure neighbor graphs to avoid repeated neighbor
     # searches across epochs (indices and displacement vectors)
-    cache_neighbors: bool = False
+    # Only relevant for force training
+    cache_force_neighbors: bool = False
     # CSR + Triplet caching/vectorization (Issue 5 Phase 2 / Issue 7)
-    cache_triplets: bool = False
+    # Only relevant for force training
+    cache_force_triplets: bool = False
     # Optional on-disk persistence root (Phase 4 follow-up may enable writing)
     cache_persist_dir: Optional[str] = None
     # Scope for caching/persistence
@@ -362,14 +367,14 @@ class TorchTrainingConfig:
     device: Optional[str] = None
     # Default numeric precision control for training/inference
     precision: Literal['auto', 'float32', 'float64'] = 'auto'
-    # Energy target space and atomic reference energies
-    energy_target: Literal['cohesive', 'total'] = 'cohesive'
-    E_atomic: Optional[Dict[str, float]] = None
+    # Atomic reference energies (default to 0.0 for all species)
+    # When provided, training targets are cohesive energies
+    # When not provided, training targets are effectively total energies
+    atomic_energies: Optional[Dict[str, float]] = None
     # Normalization controls (defaults match aenet-Fortran/PyTorch behavior)
     normalize_features: bool = True
     normalize_energy: bool = True
-    # Cached features path (energy-only optimization)
-    cached_features: bool = False
+    # (Note: cache_features is defined above with mixed-run caching)
     # DataLoader parallelism (on-the-fly featurization)
     num_workers: int = 0
     prefetch_factor: int = 2
@@ -383,6 +388,16 @@ class TorchTrainingConfig:
     # Progress display
     show_progress: bool = True
     show_batch_progress: bool = False
+    # Checkpointing
+    checkpoint_dir: Optional[str] = "checkpoints"
+    checkpoint_interval: int = 1
+    max_checkpoints: Optional[int] = None
+    save_best: bool = True
+    # Learning rate scheduler
+    use_scheduler: bool = False
+    scheduler_patience: int = 10
+    scheduler_factor: float = 0.5
+    scheduler_min_lr: float = 1e-6
 
     def __post_init__(self):
         """Validate parameters after initialization."""
@@ -438,13 +453,6 @@ class TorchTrainingConfig:
             raise ValueError(
                 f"epochs_per_force_window must be >= 1, "
                 f"got {self.epochs_per_force_window}"
-            )
-
-        # Validate energy_target
-        if self.energy_target not in ['cohesive', 'total']:
-            raise ValueError(
-                f"energy_target must be 'cohesive' or 'total', "
-                f"got '{self.energy_target}'"
             )
 
         # Validate precision

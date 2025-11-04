@@ -80,6 +80,7 @@ def test_energy_only_smoke(tmp_path: Path):
 
     pot = TorchANNPotential(arch=arch, descriptor=descriptor)
 
+    ckpt_dir = tmp_path / "ckpts"
     cfg = TorchTrainingConfig(
         iterations=1,
         testpercent=50,  # trigger validation + best model path
@@ -87,24 +88,22 @@ def test_energy_only_smoke(tmp_path: Path):
         memory_mode="cpu",
         device="cpu",
         save_energies=False,
-    )
-
-    ckpt_dir = tmp_path / "ckpts"
-    history = pot.train(
-        structures=structures,
-        config=cfg,
         checkpoint_dir=str(ckpt_dir),
         checkpoint_interval=1,
         max_checkpoints=None,
-        resume_from=None,
         save_best=True,
         use_scheduler=False,
     )
 
-    # History keys populated
-    assert "train_energy_rmse" in history
-    assert len(history["train_energy_rmse"]) == 1
-    assert not math.isnan(history["train_energy_rmse"][0])
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    # TrainOut object populated
+    assert "RMSE_train" in result.errors.columns
+    assert len(result.errors) == 1
+    assert not math.isnan(result.errors["RMSE_train"].iloc[0])
 
     # Checkpoint saved
     assert ckpt_dir.exists()
@@ -122,6 +121,7 @@ def test_force_training_smoke(tmp_path: Path):
 
     pot = TorchANNPotential(arch=arch, descriptor=descriptor)
 
+    ckpt_dir = tmp_path / "ckpts"
     cfg = TorchTrainingConfig(
         iterations=1,
         testpercent=0,   # no validation path here
@@ -132,25 +132,23 @@ def test_force_training_smoke(tmp_path: Path):
         device="cpu",
         save_energies=False,
         save_forces=False,
-    )
-
-    ckpt_dir = tmp_path / "ckpts"
-    history = pot.train(
-        structures=structures,
-        config=cfg,
         checkpoint_dir=str(ckpt_dir),
         checkpoint_interval=1,
         max_checkpoints=2,
-        resume_from=None,
         save_best=False,
         use_scheduler=False,
     )
 
-    # History populated
-    assert "train_force_rmse" in history
-    assert len(history["train_force_rmse"]) == 1
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    # TrainOut object populated
+    assert "RMSE_force_train" in result.errors.columns
+    assert len(result.errors) == 1
     # force rmse should be a number
-    assert not math.isnan(history["train_force_rmse"][0])
+    assert not math.isnan(result.errors["RMSE_force_train"].iloc[0])
 
     # Checkpoint saved and rotation does not error (single epoch anyway)
     assert ckpt_dir.exists()

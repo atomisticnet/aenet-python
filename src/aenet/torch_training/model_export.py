@@ -100,6 +100,10 @@ def save_model(
     """
     Save a trained TorchANNPotential and rich metadata to a file.
 
+    This is the unified format used for both regular saves and checkpoints.
+    Optimizer and training_config are typically provided (stored during
+    training), but are optional for backward compatibility.
+
     Parameters
     ----------
     trainer : TorchANNPotential
@@ -107,9 +111,10 @@ def save_model(
     path : str | Path
         Destination file (.pt / .pth).
     optimizer : torch.optim.Optimizer, optional
-        If provided, include optimizer state dict.
+        Optimizer state. Typically provided from trainer._optimizer.
     training_config : TorchTrainingConfig, optional
-        Persisted training configuration.
+        Training configuration. Typically provided from
+        trainer._training_config.
     extra_metadata : dict, optional
         Any additional JSON-serializable metadata to include.
     """
@@ -191,10 +196,8 @@ def save_model(
                           if trainer.best_val is not None else None),
         "training_config": _serialize_training_config(training_config),
         "normalization": norm_meta,
-        # Persist energy target and atomic reference
-        # energies for prediction semantics
-        "energy_target": getattr(trainer, "_energy_target", "cohesive"),
-        "E_atomic": getattr(trainer, "_E_atomic", None),
+        # Persist atomic reference energies for prediction semantics
+        "atomic_energies": getattr(trainer, "_atomic_energies", None),
         "extra_metadata": extra_metadata or {},
     }
 
@@ -270,13 +273,8 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
             # normalization restoration
             pass
 
-    # Restore energy target and atomic reference energies if present
-    try:
-        trainer._energy_target = payload.get("energy_target", "cohesive")
-    except Exception:
-        # Keep default if not present
-        pass
-    trainer._E_atomic = payload.get("E_atomic", None)
+    # Restore atomic reference energies if present
+    trainer._atomic_energies = payload.get("atomic_energies", None)
 
     # Compose metadata (excluding large tensors)
     meta_keys = [
@@ -292,8 +290,7 @@ def load_model(path: PathLike) -> Tuple[TorchANNPotential, Dict[str, Any]]:
         "training_config",
         "extra_metadata",
         "normalization",
-        "energy_target",
-        "E_atomic",
+        "atomic_energies",
     ]
     metadata = {k: payload.get(k) for k in meta_keys if k in payload}
 

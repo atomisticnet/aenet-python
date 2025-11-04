@@ -16,6 +16,7 @@ from tqdm import tqdm
 from . import config as cfg
 from .trainset import TrnSet
 from .util import cd
+from .io.train import TrainOut
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -461,7 +462,7 @@ class ANNPotential(object):
               config: Optional[TrainingConfig] = None,
               workdir: os.PathLike = None,
               output_file: os.PathLike = 'train.out',
-              num_processes: Optional[int] = None):
+              num_processes: Optional[int] = None) -> TrainOut:
         """
         Train the ANN potential using aenet's train.x executable.
 
@@ -489,6 +490,12 @@ class ANNPotential(object):
             Number of MPI processes to use for parallel training. Requires
             MPI support to be enabled in the configuration (mpi_enabled=True).
             If None, training runs without MPI. Default: None
+
+        Returns
+        -------
+        TrainOut
+            Parsed training results containing the RMSE history of the
+            training and test sets.
 
         Raises
         ------
@@ -601,8 +608,15 @@ class ANNPotential(object):
         for f in glob.glob(os.path.join(workdir, '*.nn')):
             shutil.move(f, os.curdir)
 
-        for f in glob.glob(os.path.join(workdir, 'energies.*')):
+        energies_train_files = []
+        for f in glob.glob(os.path.join(workdir, 'energies.train.*')):
             shutil.move(f, os.curdir)
+            energies_train_files.append(os.path.basename(f))
+
+        energies_test_files = []
+        for f in glob.glob(os.path.join(workdir, 'energies.test.*')):
+            shutil.move(f, os.curdir)
+            energies_test_files.append(os.path.basename(f))
 
         for f in glob.glob(os.path.join(workdir, 'train.time')):
             shutil.move(f, os.curdir)
@@ -612,6 +626,13 @@ class ANNPotential(object):
 
         if rm_tmp_files:
             shutil.rmtree(workdir)
+
+        results = TrainOut(
+            outfile,
+            energies_train_files=energies_train_files,
+            energies_test_files=energies_test_files)
+
+        return results
 
     def train_input_string(self,
                            trnset_file: os.PathLike = 'data.train',

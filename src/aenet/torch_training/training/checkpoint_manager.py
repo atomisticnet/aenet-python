@@ -69,31 +69,25 @@ class CheckpointManager:
 
     def save_checkpoint(
         self,
-        model: nn.Module,
+        trainer,
         optimizer: torch.optim.Optimizer,
         epoch: int,
-        history: Dict[str, Any],
-        architecture: Dict[str, Any],
-        descriptor_config: Dict[str, Any],
+        training_config: Optional[Any] = None,
         filename: Optional[str] = None,
     ):
         """
-        Save a training checkpoint.
+        Save a training checkpoint using the unified model format.
 
         Parameters
         ----------
-        model : nn.Module
-            Model to save.
+        trainer : TorchANNPotential
+            Trainer instance to save.
         optimizer : torch.optim.Optimizer
             Optimizer to save.
         epoch : int
             Current epoch number.
-        history : dict
-            Training history.
-        architecture : dict
-            Network architecture specification.
-        descriptor_config : dict
-            Descriptor configuration.
+        training_config : TorchTrainingConfig, optional
+            Training configuration.
         filename : str, optional
             Filename for checkpoint. If None, uses format
             "checkpoint_epoch_{epoch:04d}.pt"
@@ -106,13 +100,12 @@ class CheckpointManager:
 
         path = self.checkpoint_dir / filename
 
-        payload = {
+        # Import save_model here to avoid circular imports
+        from ..model_export import save_model
+
+        # Add epoch number to extra_metadata
+        extra_metadata = {
             "epoch": int(epoch),
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "history": history,
-            "architecture": architecture,
-            "descriptor_config": descriptor_config,
             "best_val_loss": (
                 float(self.best_val_loss)
                 if self.best_val_loss is not None
@@ -121,7 +114,15 @@ class CheckpointManager:
         }
 
         try:
-            torch.save(payload, str(path))
+            save_model(
+                trainer=trainer,
+                path=path,
+                optimizer=optimizer,
+                training_config=training_config,
+                extra_metadata=extra_metadata,
+            )
+            # Rotate old checkpoints after successful save
+            self._rotate_checkpoints()
         except Exception as e:
             print(f"[WARN] Failed to save checkpoint at {path}: {e}")
 
@@ -157,7 +158,7 @@ class CheckpointManager:
             If checkpoint loading fails.
         """
         try:
-            payload = torch.load(path, map_location=device)
+            payload = torch.load(path, map_location=device, weights_only=False)
             model.load_state_dict(payload["model_state_dict"])
             optimizer.load_state_dict(payload["optimizer_state_dict"])
 
@@ -194,24 +195,20 @@ class CheckpointManager:
 
     def save_best_model(
         self,
-        model: nn.Module,
+        trainer,
         optimizer: torch.optim.Optimizer,
         epoch: int,
-        history: Dict[str, Any],
-        architecture: Dict[str, Any],
-        descriptor_config: Dict[str, Any],
+        training_config: Optional[Any] = None,
     ):
-        """Save the best model checkpoint."""
+        """Save the best model checkpoint using the unified format."""
         if self.checkpoint_dir is None or not self.save_best:
             return
 
         self.save_checkpoint(
-            model=model,
+            trainer=trainer,
             optimizer=optimizer,
             epoch=epoch,
-            history=history,
-            architecture=architecture,
-            descriptor_config=descriptor_config,
+            training_config=training_config,
             filename="best_model.pt",
         )
 

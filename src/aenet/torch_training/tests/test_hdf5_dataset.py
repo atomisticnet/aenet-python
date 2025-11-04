@@ -143,6 +143,7 @@ def test_trainer_with_hdf5_dataset_smoke(tmp_path: Path):
     pot = TorchANNPotential(arch=arch, descriptor=desc)
 
     # Force-supervised single-epoch smoke test
+    ckpt_dir = tmp_path / "ckpts"
     cfg = TorchTrainingConfig(
         iterations=1,
         testpercent=0,
@@ -150,22 +151,20 @@ def test_trainer_with_hdf5_dataset_smoke(tmp_path: Path):
         memory_mode="cpu",
         device="cpu",
         num_workers=0,
-    )
-
-    ckpt_dir = tmp_path / "ckpts"
-    history = pot.train(
-        dataset=ds,
-        config=cfg,
         checkpoint_dir=str(ckpt_dir),
         checkpoint_interval=1,
         max_checkpoints=1,
-        resume_from=None,
         save_best=False,
         use_scheduler=False,
     )
 
-    # Verify history keys and checkpoint dir created
-    assert "train_force_rmse" in history
-    assert len(history["train_force_rmse"]) == 1
-    assert not math.isnan(history["train_force_rmse"][0])
+    history = pot.train(
+        dataset=ds,
+        config=cfg,
+    )
+
+    # Verify history attributes and checkpoint dir created
+    assert "RMSE_force_train" in history.errors.columns
+    assert len(history.errors["RMSE_force_train"]) == 1
+    assert not math.isnan(history.errors["RMSE_force_train"].iloc[0])
     assert ckpt_dir.exists()

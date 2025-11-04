@@ -122,21 +122,21 @@ def test_progress_bars_enabled(monkeypatch):
         save_energies=False,
         show_progress=True,
         show_batch_progress=True,  # exercise inner bar as well
-    )
-
-    # Act
-    history = pot.train(
-        structures=structures,
-        config=cfg,
         checkpoint_dir=None,
         checkpoint_interval=0,
         save_best=False,
         use_scheduler=False,
     )
 
+    # Act
+    history = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
     # Assert training completed
-    assert len(history["train_energy_rmse"]) == 3
-    assert not math.isnan(history["train_energy_rmse"][-1])
+    assert len(history.errors["RMSE_train"]) == 3
+    assert not math.isnan(history.errors["RMSE_train"].iloc[-1])
 
     # Assert outer progress bar updated once per epoch
     outers = [inst for inst in FakeTqdm.instances if inst.iterable is None]
@@ -178,18 +178,18 @@ def test_progress_bars_disabled(monkeypatch):
         save_energies=False,
         show_progress=False,
         show_batch_progress=True,  # should be ignored when show_progress=False
-    )
-
-    # Act - should not use tqdm at all
-    history = pot.train(
-        structures=structures,
-        config=cfg,
         checkpoint_dir=None,
         checkpoint_interval=0,
         save_best=False,
         use_scheduler=False,
     )
 
+    # Act - should not use tqdm at all
+    history = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
     # Assert training completed
-    assert len(history["train_energy_rmse"]) == 2
-    assert not math.isnan(history["train_energy_rmse"][-1])
+    assert len(history.errors["RMSE_train"]) == 2
+    assert not math.isnan(history.errors["RMSE_train"].iloc[-1])

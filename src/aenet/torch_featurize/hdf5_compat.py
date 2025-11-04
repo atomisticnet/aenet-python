@@ -14,6 +14,7 @@ import numpy as np
 import tables as tb
 import torch
 
+from ..featurize import AtomicFeaturizer
 from ..formats.xsf import XSFParser
 from ..geometry import AtomicStructure
 from ..trainset import FeaturizedAtomicStructure
@@ -23,12 +24,22 @@ __author__ = "The aenet developers"
 __date__ = "2025-01-22"
 
 
-class TorchAUCFeaturizer:
+class TorchAUCFeaturizer(AtomicFeaturizer):
     """
-    PyTorch-based AUC featurizer with HDF5 output compatibility.
+    PyTorch-based AUC featurizer with API compatibility to AenetAUCFeaturizer.
 
     This class provides the same API as AenetAUCFeaturizer but uses the
-    pure Python/PyTorch implementation instead of Fortran executables.
+    pure Python/PyTorch implementation instead of Fortran executables. It
+    inherits from AtomicFeaturizer to ensure API consistency.
+
+    This is a high-level wrapper around ChebyshevDescriptor that:
+    - Accepts AtomicStructure objects as input
+    - Returns FeaturizedAtomicStructure objects
+    - Provides batch processing via featurize_structures()
+    - Supports HDF5 output for training workflows
+
+    For direct PyTorch tensor operations and gradient computation, use
+    ChebyshevDescriptor directly.
 
     Attributes
     ----------
@@ -40,6 +51,21 @@ class TorchAUCFeaturizer:
         min_cutoff: Minimum distance cutoff (Angstroms)
         device: 'cpu' or 'cuda'
         dtype: torch.float64 for double precision
+
+    Example
+    -------
+        >>> import aenet.io.structure
+        >>> from aenet.torch_featurize import TorchAUCFeaturizer
+        >>> struc = aenet.io.structure.read('water.xyz')
+        >>> descriptor = TorchAUCFeaturizer(
+        ...     typenames=['O', 'H'],
+        ...     rad_order=10,
+        ...     rad_cutoff=4.0,
+        ...     ang_order=3,
+        ...     ang_cutoff=1.5
+        ... )
+        >>> featurized = descriptor.featurize_structure(struc)
+        >>> print(featurized.atom_features.shape)
     """
 
     def __init__(
@@ -66,8 +92,11 @@ class TorchAUCFeaturizer:
             min_cutoff: Minimum distance cutoff (Angstroms)
             device: 'cpu' or 'cuda'
             dtype: torch.float64 for double precision
+            **kwargs: Additional arguments (forwarded to base class)
         """
-        self.typenames = typenames
+        # Initialize base class
+        super().__init__(typenames, **kwargs)
+
         self.rad_order = rad_order
         self.rad_cutoff = rad_cutoff
         self.ang_order = ang_order

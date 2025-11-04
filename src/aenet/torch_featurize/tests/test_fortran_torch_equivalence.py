@@ -7,8 +7,6 @@ AenetAUCFeaturizer.
 """
 
 import os
-import shutil
-import tempfile
 
 import numpy as np
 import pytest
@@ -42,14 +40,6 @@ pytestmark = pytest.mark.skipif(
     not fortran_tools_available(),
     reason="Fortran executables (generate.x and trnset2ASCII.x) not available"
 )
-
-
-@pytest.fixture
-def temp_dir():
-    """Create temporary directory for test files."""
-    tmpdir = tempfile.mkdtemp()
-    yield tmpdir
-    shutil.rmtree(tmpdir)
 
 
 @pytest.fixture
@@ -126,8 +116,14 @@ def lmnto_structures():
 class TestFortranTorchEquivalence:
     """Test that Fortran and PyTorch produce equivalent HDF5 files."""
 
-    def test_water_molecule_equivalence(self, temp_dir, water_structure):
+    def test_water_molecule_equivalence(
+            self, tmp_path, water_structure, monkeypatch):
         """Test equivalence for simple water molecule."""
+        # Change to temp directory to contain any tmp* directories
+        # created by featurize
+        monkeypatch.chdir(tmp_path)
+        temp_dir = str(tmp_path)
+
         # Create XSF file
         xsf_file = os.path.join(temp_dir, 'water.xsf')
         xsf_parser = XSFParser()
@@ -174,8 +170,14 @@ class TestFortranTorchEquivalence:
         # Compare HDF5 files
         self._compare_hdf5_files(fortran_h5, torch_h5)
 
-    def test_lmnto_crystal_equivalence(self, temp_dir, lmnto_structures):
+    def test_lmnto_crystal_equivalence(
+            self, tmp_path, lmnto_structures, monkeypatch):
         """Test equivalence for multi-species LMNTO crystals."""
+        # Change to temp directory to contain any tmp* directories
+        # created by featurize
+        monkeypatch.chdir(tmp_path)
+        temp_dir = str(tmp_path)
+
         # Create XSF files
         xsf_files = []
         for i, struc in enumerate(lmnto_structures):

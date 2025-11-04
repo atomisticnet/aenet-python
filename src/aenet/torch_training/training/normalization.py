@@ -192,8 +192,7 @@ class NormalizationManager:
     def compute_energy_stats(
         self,
         dataloader: DataLoader,
-        E_atomic_by_index: Optional[torch.Tensor] = None,
-        energy_target: str = "cohesive",
+        atomic_energies_by_index: Optional[torch.Tensor] = None,
         provided_shift: Optional[float] = None,
         provided_scaling: Optional[float] = None,
     ):
@@ -207,12 +206,10 @@ class NormalizationManager:
         ----------
         dataloader : DataLoader
             DataLoader for training data.
-        E_atomic_by_index : torch.Tensor, optional
+        atomic_energies_by_index : torch.Tensor, optional
             Per-species atomic energies, indexed by species_indices.
-            Used to convert total energies to cohesive.
-        energy_target : str
-            Either 'cohesive' or 'total'. If 'cohesive', atomic energies
-            are subtracted.
+            Always applied to subtract from total energies. If all zeros,
+            statistics are computed on total energies.
         provided_shift : float, optional
             Override computed E_shift.
         provided_scaling : float, optional
@@ -245,13 +242,10 @@ class NormalizationManager:
                 )
                 species_indices_b = batch["species_indices"].to(self.device)
 
-                # Convert to target space (cohesive if requested)
+                # Subtract atomic reference energies (always if provided)
                 energy_target_b = energy_ref_b
-                if (
-                    energy_target == "cohesive"
-                    and E_atomic_by_index is not None
-                ):
-                    per_atom_Ea_b = E_atomic_by_index[species_indices_b]
+                if atomic_energies_by_index is not None:
+                    per_atom_Ea_b = atomic_energies_by_index[species_indices_b]
                     batch_idx_b = torch.repeat_interleave(
                         torch.arange(len(n_atoms_b), device=self.device),
                         n_atoms_b.long(),

@@ -417,38 +417,37 @@ def _compute_trainset_metadata(
         E_shift=float(getattr(trainer._normalizer, "E_shift", 0.0)),
         N_species=n_species,
         sys_species=species_all,
-        E_atomic=[0.0] * n_species,
+        atomic_energies=[0.0] * n_species,
         N_atom=0,
         N_struc=0,
         E_min=0.0,
         E_max=0.0,
         E_avg=0.0,
     )
-    # E_atomic by species if available
+    # atomic_energies by species if available
     try:
-        E_atomic_dict = getattr(trainer, "_E_atomic", None) or {}
-        meta["E_atomic"] = [float(E_atomic_dict.get(s, 0.0))
-                            for s in species_all]
+        atomic_energies_dict = getattr(trainer, "_atomic_energies", None) or {}
+        meta["atomic_energies"] = [float(atomic_energies_dict.get(s, 0.0))
+                                   for s in species_all]
     except Exception:
         pass
 
     if not structures or len(structures) == 0:
         return meta
 
-    # Aggregate energies
-    energy_target = getattr(trainer, "_energy_target", "cohesive")
+    # Aggregate energies (structures have total energies, convert to cohesive)
     n_atoms_total = 0
     e_pa_list: List[float] = []
     for s in structures:
         n = int(s.n_atoms)
         e_total = float(s.energy)
-        if energy_target == "cohesive" and meta["E_atomic"]:
-            # Sum E_atomic per atom in structure
+        # Subtract atomic reference energies to get cohesive energy
+        if meta["atomic_energies"]:
             e_atomic_sum = 0.0
             for sp in s.species:
                 try:
                     idx = species_all.index(sp)
-                    e_atomic_sum += float(meta["E_atomic"][idx])
+                    e_atomic_sum += float(meta["atomic_energies"][idx])
                 except Exception:
                     pass
             e_total = e_total - e_atomic_sum
@@ -492,7 +491,7 @@ def _write_trainset_section(
     fmt_sp = "{} " * N_species + "\n"
     f.write(fmt_sp.format(*list(meta.get("sys_species", []))))
     # atomic reference energies per species
-    e_at = [float(x) for x in list(meta.get("E_atomic", []))]
+    e_at = [float(x) for x in list(meta.get("atomic_energies", []))]
     fmt_ea = "{:24.17f} " * len(e_at) + "\n"
     f.write(fmt_ea.format(*e_at))
     f.write("{:}\n".format(int(meta.get("N_atom", 0))))

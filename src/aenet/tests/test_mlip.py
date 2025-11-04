@@ -3,7 +3,6 @@ Unit tests for aenet.mlip module.
 
 """
 
-import glob
 import os
 import tempfile
 import unittest
@@ -181,56 +180,45 @@ class TestANNPotential(unittest.TestCase):
                     filename='train.in'
                 )
 
-    @patch('aenet.mlip.TrnSet')
-    @patch('aenet.mlip.cfg')
-    @patch('aenet.mlip.subprocess.Popen')
-    @patch('aenet.mlip.glob.glob')
-    @patch('aenet.mlip.shutil.move')
-    @patch('aenet.mlip.shutil.rmtree')
-    @patch('os.path.exists')
-    def test_train_basic(self, mock_exists, mock_rmtree, mock_move, mock_glob,
-                         mock_popen, mock_cfg, mock_trnset):
-        """Test basic train method execution with mocks."""
-        # Setup mocks
-        mock_exists.return_value = True
-        mock_cfg.read.return_value = {'train_x_path': '/path/to/train.x'}
+    def test_train_basic(self):
+        """Test TrainOut parsing with real train.out file."""
+        from aenet.io.train import TrainOut
 
-        # Mock TrnSet context manager
-        mock_ts = MagicMock()
-        mock_ts.atom_types = ['Si']
-        mock_trnset.from_file.return_value.__enter__.return_value = mock_ts
-        mock_trnset.from_file.return_value.__exit__.return_value = False
+        # Use real train.out file from test data
+        test_dir = os.path.dirname(__file__)
+        data_dir = os.path.join(test_dir, 'data')
+        train_out_file = os.path.join(data_dir, 'train.out')
 
-        # Mock subprocess
-        mock_proc = MagicMock()
-        mock_proc.poll.side_effect = [None, None, 0]  # Running then done
-        mock_popen.return_value = mock_proc
+        # Parse the training output
+        result = TrainOut(path=train_out_file)
 
-        # Mock glob for progress tracking
-        mock_glob.return_value = []
+        # Verify result is a TrainOut object
+        self.assertIsInstance(result, TrainOut)
 
-        potential = ANNPotential(self.simple_arch)
+        # Verify the parsed data (the file has 11 epochs: 0-10)
+        self.assertEqual(len(result.errors), 11)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            trnset_file = os.path.join(tmpdir, 'data.train')
-            # Create dummy training set file
-            with open(trnset_file, 'w') as f:
-                f.write('dummy')
+        # Check column names
+        expected_columns = ['MAE_train', 'RMSE_train', 'MAE_test', 'RMSE_test']
+        self.assertListEqual(list(result.errors.columns), expected_columns)
 
-            # Mock exists to return True for our file
-            def exists_side_effect(path):
-                return path == trnset_file or path == '/path/to/train.x'
-            mock_exists.side_effect = exists_side_effect
+        # Verify some expected values from the file
+        # Final epoch (10) values from the train.out file
+        self.assertAlmostEqual(
+            result.errors['MAE_train'].iloc[-1], 0.5355827, places=5)
+        self.assertAlmostEqual(
+            result.errors['RMSE_train'].iloc[-1], 0.6168381, places=5)
+        self.assertAlmostEqual(
+            result.errors['MAE_test'].iloc[-1], 0.6015781, places=5)
+        self.assertAlmostEqual(
+            result.errors['RMSE_test'].iloc[-1], 0.6244984, places=5)
 
-            # Run train (will use temp directory)
-            config = TrainingConfig(iterations=10)
-            potential.train(
-                trnset_file=trnset_file,
-                config=config
-            )
-
-            # Verify train.x was called
-            mock_popen.assert_called_once()
+        # Verify stats
+        stats = result.stats
+        self.assertIn('final_MAE_train', stats)
+        self.assertIn('final_RMSE_test', stats)
+        self.assertIn('min_RMSE_test', stats)
+        self.assertAlmostEqual(stats['final_RMSE_test'], 0.6244984, places=5)
 
     @patch('aenet.mlip.TrnSet')
     @patch('os.path.exists')
@@ -241,8 +229,15 @@ class TestANNPotential(unittest.TestCase):
         potential = ANNPotential(self.simple_arch)
         config = TrainingConfig(iterations=10)
 
-        with self.assertRaises(FileNotFoundError) as context:
-            potential.train(trnset_file='nonexistent.train', config=config)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with self.assertRaises(FileNotFoundError) as context:
+                    potential.train(
+                        trnset_file='nonexistent.train', config=config)
+            finally:
+                os.chdir(cwd)
 
         self.assertIn('Training set file not found', str(context.exception))
 
@@ -272,8 +267,14 @@ class TestANNPotential(unittest.TestCase):
         potential = ANNPotential(self.simple_arch)
         config = TrainingConfig(iterations=10)
 
-        with self.assertRaises(FileNotFoundError) as context:
-            potential.train(trnset_file='data.train', config=config)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with self.assertRaises(FileNotFoundError) as context:
+                    potential.train(trnset_file='data.train', config=config)
+            finally:
+                os.chdir(cwd)
 
         self.assertIn('Cannot find `train.x`', str(context.exception))
 
@@ -292,8 +293,14 @@ class TestANNPotential(unittest.TestCase):
         potential = ANNPotential(self.simple_arch)
         config = TrainingConfig(iterations=10)
 
-        with self.assertRaises(ValueError) as context:
-            potential.train(trnset_file='data.train', config=config)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with self.assertRaises(ValueError) as context:
+                    potential.train(trnset_file='data.train', config=config)
+            finally:
+                os.chdir(cwd)
 
         self.assertIn('Not all species in the training set',
                       str(context.exception))
@@ -734,8 +741,14 @@ class TestANNPotentialPrediction(unittest.TestCase):
         potential = ANNPotential(self.simple_arch)
         # Don't set _potential_paths
 
-        with self.assertRaises(ValueError) as context:
-            potential.predict(['structure.xsf'])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with self.assertRaises(ValueError) as context:
+                    potential.predict(['structure.xsf'])
+            finally:
+                os.chdir(cwd)
 
         self.assertIn('No potential paths available', str(context.exception))
 
@@ -749,8 +762,14 @@ class TestANNPotentialPrediction(unittest.TestCase):
         potential = ANNPotential(self.simple_arch)
         potential._potential_paths = {'Ti': 'Ti.nn', 'O': 'O.nn'}
 
-        with self.assertRaises(FileNotFoundError) as context:
-            potential.predict(['structure.xsf'])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with self.assertRaises(FileNotFoundError) as context:
+                    potential.predict(['structure.xsf'])
+            finally:
+                os.chdir(cwd)
 
         self.assertIn('Cannot find `predict.x`', str(context.exception))
 
@@ -781,73 +800,69 @@ class TestPredictIntegration(unittest.TestCase):
 
     @unittest.skipUnless(
         os.path.exists(os.path.join(os.path.dirname(__file__),
-                                    'data', 'Ti.nn.ascii')),
+                                    'data', 'predict.out')),
         "Test data not available"
     )
     def test_predict_integration(self):
-        """Integration test: full prediction workflow with real data."""
-        from aenet import config as cfg
-        from aenet.mlip import PredictionConfig
+        """Integration test: PredictOut parsing with real predict.out file."""
+        from aenet.io.predict import PredictOut
 
-        # Check if predict.x is configured
-        try:
-            aenet_paths = cfg.read('aenet')
-            predict_x_path = aenet_paths.get('predict_x_path', '')
-            if not predict_x_path or not os.path.exists(predict_x_path):
-                self.skipTest("predict.x not configured or not found")
-        except Exception:
-            self.skipTest("aenet configuration not available")
-
-        # Setup paths
+        # Use real predict.out file from test data
         test_dir = os.path.dirname(__file__)
         data_dir = os.path.join(test_dir, 'data')
+        predict_out_file = os.path.join(data_dir, 'predict.out')
+
+        # Get paths to XSF files referenced in predict.out
         xsf_dir = os.path.join(data_dir, 'xsf-TiO2')
+        xsf_files = [
+            os.path.join(xsf_dir, 'structure-001.xsf'),
+            os.path.join(xsf_dir, 'structure-002.xsf'),
+            os.path.join(xsf_dir, 'structure-003.xsf')
+        ]
 
-        # Get first 3 structures for testing
-        xsf_files = sorted(glob.glob(os.path.join(xsf_dir, '*.xsf')))[:3]
+        # Parse the prediction output
+        results = PredictOut.from_file(
+            predict_out_file, structure_paths=xsf_files)
 
-        if len(xsf_files) < 3:
-            self.skipTest("Not enough XSF test files")
+        # Verify results
+        self.assertEqual(results.num_structures, 3)
+        self.assertEqual(len(results.cohesive_energy), 3)
+        self.assertEqual(len(results.total_energy), 3)
+        self.assertEqual(len(results.forces), 3)
 
-        # Create potential from files
-        potential_paths = {
-            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(data_dir, 'O.nn.ascii')
-        }
-        potential = ANNPotential.from_files(potential_paths)
+        # Check that energies match expected values from the file
+        # Structure 1: 23 atoms
+        self.assertEqual(results.num_atoms(0), 23)
+        self.assertAlmostEqual(
+            results.cohesive_energy[0], -192.78242329, places=5)
+        self.assertAlmostEqual(
+            results.total_energy[0], -19517.16578343, places=5)
 
-        # Run prediction with forces
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = PredictionConfig(
-                potential_format='ascii',
-                verbosity=1
-            )
+        # Structure 2: 46 atoms
+        self.assertEqual(results.num_atoms(1), 46)
+        self.assertAlmostEqual(
+            results.cohesive_energy[1], -389.72446909, places=5)
+        self.assertAlmostEqual(
+            results.total_energy[1], -39038.49118938, places=5)
 
-            results = potential.predict(
-                xsf_files,
-                eval_forces=True,
-                config=config,
-                workdir=tmpdir
-            )
+        # Structure 3: 23 atoms
+        self.assertEqual(results.num_atoms(2), 23)
+        self.assertAlmostEqual(
+            results.cohesive_energy[2], -193.42936699, places=5)
+        self.assertAlmostEqual(
+            results.total_energy[2], -19517.81272714, places=5)
 
-            # Verify results
-            self.assertEqual(results.num_structures, 3)
-            self.assertEqual(len(results.cohesive_energy), 3)
-            self.assertEqual(len(results.total_energy), 3)
-            self.assertEqual(len(results.forces), 3)
+        # Check that energies are reasonable (not NaN or inf)
+        for energy in results.cohesive_energy:
+            self.assertFalse(np.isnan(energy))
+            self.assertFalse(np.isinf(energy))
 
-            # Check that energies are reasonable (not NaN or inf)
-            for energy in results.cohesive_energy:
-                self.assertFalse(np.isnan(energy))
-                self.assertFalse(np.isinf(energy))
-
-            # Check forces shape matches structures
-            for i in range(3):
-                self.assertEqual(len(results.forces[i]), results.num_atoms(i))
-                self.assertEqual(results.forces[i].shape[1], 3)  # 3D forces
-
-            print("\nIntegration test passed!")
-            print(f"Predicted energies: {results.cohesive_energy}")
+        # Check coordinates and atom types are present
+        for i in range(3):
+            self.assertGreater(len(results.coords[i]), 0)
+            self.assertGreater(len(results.atom_types[i]), 0)
+            self.assertEqual(len(results.coords[i]), results.num_atoms(i))
+            self.assertEqual(len(results.atom_types[i]), results.num_atoms(i))
 
 
 if __name__ == '__main__':

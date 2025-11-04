@@ -26,12 +26,14 @@ class MetricsTracker:
         self.history: Dict[str, List[float]] = {
             "train_energy_rmse": [],
             "test_energy_rmse": [],
+            "train_energy_mae": [],
+            "test_energy_mae": [],
             "train_force_rmse": [],
             "test_force_rmse": [],
-            "learning_rates": [],
-            "epoch_times": [],
-            "epoch_forward_time": [],
-            "epoch_backward_time": [],
+            "learning_rate": [],
+            "epoch_time": [],
+            "forward_time": [],
+            "backward_time": [],
         }
 
         if track_detailed_timing:
@@ -51,8 +53,10 @@ class MetricsTracker:
     def update(
         self,
         train_energy_rmse: float,
+        train_energy_mae: float,
         train_force_rmse: float,
         test_energy_rmse: float,
+        test_energy_mae: float,
         test_force_rmse: float,
         learning_rate: float,
         epoch_time: float,
@@ -68,10 +72,14 @@ class MetricsTracker:
         ----------
         train_energy_rmse : float
             Training energy RMSE.
+        train_energy_mae : float
+            Training energy MAE.
         train_force_rmse : float
             Training force RMSE (or NaN if not computed).
         test_energy_rmse : float
             Validation energy RMSE (or NaN if no validation).
+        test_energy_mae : float
+            Validation energy MAE (or NaN if no validation).
         test_force_rmse : float
             Validation force RMSE (or NaN if not computed).
         learning_rate : float
@@ -89,13 +97,15 @@ class MetricsTracker:
             Detailed validation timing breakdown (same keys as train_timing).
         """
         self.history["train_energy_rmse"].append(float(train_energy_rmse))
+        self.history["train_energy_mae"].append(float(train_energy_mae))
         self.history["train_force_rmse"].append(float(train_force_rmse))
         self.history["test_energy_rmse"].append(float(test_energy_rmse))
+        self.history["test_energy_mae"].append(float(test_energy_mae))
         self.history["test_force_rmse"].append(float(test_force_rmse))
-        self.history["learning_rates"].append(float(learning_rate))
-        self.history["epoch_times"].append(float(epoch_time))
-        self.history["epoch_forward_time"].append(float(forward_time))
-        self.history["epoch_backward_time"].append(float(backward_time))
+        self.history["learning_rate"].append(float(learning_rate))
+        self.history["epoch_time"].append(float(epoch_time))
+        self.history["forward_time"].append(float(forward_time))
+        self.history["backward_time"].append(float(backward_time))
 
         if self.track_detailed_timing:
             self.history["epoch_data_loading_time_train"].append(

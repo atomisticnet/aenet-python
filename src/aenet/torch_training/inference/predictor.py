@@ -32,11 +32,10 @@ class Predictor:
         Descriptor for featurization.
     normalizer : NormalizationManager
         Normalization manager with trained statistics.
-    energy_target : str
-        Either 'cohesive' or 'total'. Determines how to interpret
-        model outputs.
-    E_atomic : dict, optional
-        Atomic reference energies per species (for cohesive conversion).
+    atomic_energies : dict, optional
+        Atomic reference energies per species. These are added back to
+        model predictions to get total energies. Defaults to zeros if
+        not provided.
     device : torch.device
         Device for computation.
     dtype : torch.dtype
@@ -48,30 +47,27 @@ class Predictor:
         model,
         descriptor,
         normalizer: NormalizationManager,
-        energy_target: str = "cohesive",
-        E_atomic: Optional[Dict[str, float]] = None,
+        atomic_energies: Optional[Dict[str, float]] = None,
         device: torch.device = torch.device("cpu"),
         dtype: torch.dtype = torch.float64,
     ):
         self.model = model
         self.descriptor = descriptor
         self.normalizer = normalizer
-        self.energy_target = energy_target
-        self.E_atomic = E_atomic
+        self.atomic_energies = atomic_energies
         self.device = device
         self.dtype = dtype
 
-        # Build E_atomic_by_index if available
-        self.E_atomic_by_index: Optional[torch.Tensor] = None
-        if E_atomic is not None:
-            e_list = []
-            for s in descriptor.species:
-                e_list.append(float(E_atomic.get(s, 0.0)))
-            self.E_atomic_by_index = torch.tensor(
-                e_list, dtype=dtype, device=device
-            )
-
-        self._warn_missing_E_atomic_once: bool = False
+        # Build atomic_energies_by_index (defaults to zeros if not provided)
+        e_list = []
+        for s in descriptor.species:
+            if atomic_energies is not None:
+                e_list.append(float(atomic_energies.get(s, 0.0)))
+            else:
+                e_list.append(0.0)
+        self.atomic_energies_by_index = torch.tensor(
+            e_list, dtype=dtype, device=device
+        )
 
     def predict(
         self,
@@ -162,7 +158,6 @@ class Predictor:
                     device=self.device, dtype=self.dtype)
                 species_idx = batch["species_indices"].to(device=self.device)
                 n_atoms_b = batch["n_atoms"].to(device=self.device)
-                species_lists = batch["species_lists"]
 
                 # Feature normalization (on device)
                 feats = self.normalizer.apply_feature_normalization(feats)
@@ -189,32 +184,15 @@ class Predictor:
                     E_pred = self.normalizer.denormalize_energy(
                         energy_pred_norm_b[j], int(n_atoms_b[j].item())
                     )
-                    if self.energy_target == "cohesive":
-                        if self.E_atomic is not None:
-                            E_atoms_sum = sum(
-                                self.E_atomic.get(s, 0.0)
-                                for s in species_lists[j]
-                            )
-                        elif self.E_atomic_by_index is not None:
-                            sl = slice(offsets[j], offsets[j + 1])
-                            E_atoms_sum = float(
-                                self.E_atomic_by_index[species_idx[sl]]
-                                .sum()
-                                .detach()
-                                .cpu()
-                            )
-                        else:
-                            if not self._warn_missing_E_atomic_once:
-                                print(
-                                    "[WARN] energy_target='cohesive' but "
-                                    "atomic energies are unavailable; "
-                                    "returning cohesive energies."
-                                )
-                                self._warn_missing_E_atomic_once = True
-                            E_atoms_sum = 0.0
-                        E_total = E_pred + E_atoms_sum
-                    else:
-                        E_total = E_pred
+                    # Add atomic reference energies to get total energy
+                    sl = slice(offsets[j], offsets[j + 1])
+                    E_atoms_sum = float(
+                        self.atomic_energies_by_index[species_idx[sl]]
+                        .sum()
+                        .detach()
+                        .cpu()
+                    )
+                    E_total = E_pred + E_atoms_sum
                     energies.append(E_total)
 
                     # Per-atom energies if requested
@@ -290,39 +268,20 @@ class Predictor:
                 for n in n_atoms_b.tolist():
                     offsets.append(offsets[-1] + int(n))
 
-                # Cohesive conversion and per-atom energies if requested
+                # Add atomic reference energies to get total energy
                 species_f = batch["species_f"]  # list[str] length N_total
                 for j in range(len(n_atoms_b)):
                     E_pred = self.normalizer.denormalize_energy(
                         energy_pred_norm_b[j], int(n_atoms_b[j].item())
                     )
-                    if self.energy_target == "cohesive":
-                        if self.E_atomic is not None:
-                            sl = slice(offsets[j], offsets[j + 1])
-                            E_atoms_sum = sum(
-                                self.E_atomic.get(s, 0.0)
-                                for s in species_f[sl]
-                            )
-                        elif self.E_atomic_by_index is not None:
-                            sl = slice(offsets[j], offsets[j + 1])
-                            E_atoms_sum = float(
-                                self.E_atomic_by_index[species_idx[sl]]
-                                .sum()
-                                .detach()
-                                .cpu()
-                            )
-                        else:
-                            if not self._warn_missing_E_atomic_once:
-                                print(
-                                    "[WARN] energy_target='cohesive' but "
-                                    "atomic energies are unavailable; "
-                                    "returning cohesive energies."
-                                )
-                                self._warn_missing_E_atomic_once = True
-                            E_atoms_sum = 0.0
-                        E_total = E_pred + E_atoms_sum
-                    else:
-                        E_total = E_pred
+                    sl = slice(offsets[j], offsets[j + 1])
+                    E_atoms_sum = float(
+                        self.atomic_energies_by_index[species_idx[sl]]
+                        .sum()
+                        .detach()
+                        .cpu()
+                    )
+                    E_total = E_pred + E_atoms_sum
                     energies.append(E_total)
 
                     if return_atom_energies:
@@ -467,33 +426,14 @@ class Predictor:
             )
             t_energy_end = time_module.time() if track_timing else 0.0
 
-            # Convert to total energy if training target was cohesive
-            if self.energy_target == "cohesive":
-                # Sum of atomic reference energies for the structure
-                if self.E_atomic is not None:
-                    E_atoms_sum = sum(
-                        self.E_atomic.get(s, 0.0) for s in st.species
-                    )
-                elif self.E_atomic_by_index is not None:
-                    E_atoms_sum = float(
-                        self.E_atomic_by_index[species_indices]
-                        .sum()
-                        .detach()
-                        .cpu()
-                    )
-                else:
-                    if not self._warn_missing_E_atomic_once:
-                        print(
-                            "[WARN] energy_target='cohesive' but atomic "
-                            "energies are unavailable; returning "
-                            "cohesive energies."
-                        )
-                        self._warn_missing_E_atomic_once = True
-                    E_atoms_sum = 0.0
-                E_total = E_pred + E_atoms_sum
-            else:
-                # Model was trained on total energies
-                E_total = E_pred
+            # Add atomic reference energies to get total energy
+            E_atoms_sum = float(
+                self.atomic_energies_by_index[species_indices]
+                .sum()
+                .detach()
+                .cpu()
+            )
+            E_total = E_pred + E_atoms_sum
 
             energies.append(E_total)
 
@@ -586,11 +526,11 @@ class Predictor:
             If no atomic energies are available.
         """
         if atomic_energies is None:
-            atomic_energies = self.E_atomic
+            atomic_energies = self.atomic_energies
         if atomic_energies is None:
             raise ValueError(
                 "Atomic energies not available. Provide atomic_energies or "
-                "use a predictor with E_atomic set."
+                "use a predictor with atomic_energies set."
             )
 
         E_atoms = sum(

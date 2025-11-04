@@ -56,7 +56,7 @@ def test_predict_returns_total_energy_when_trained_on_cohesive():
     arch = _make_arch()
     pot = TorchANNPotential(arch=arch, descriptor=descriptor)
 
-    # Configure training to 'cohesive' with known atomic reference energies
+    # Configure training with known atomic reference energies
     E_H = 1.23
     cfg = TorchTrainingConfig(
         iterations=0,
@@ -68,20 +68,18 @@ def test_predict_returns_total_energy_when_trained_on_cohesive():
         save_forces=False,
         normalize_features=False,
         normalize_energy=False,
-        energy_target="cohesive",
-        E_atomic={"H": E_H},
+        atomic_energies={"H": E_H},
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
     )
 
     # Train with 0 iterations to set up internal state (_E_atomic, etc.)
     pot.train(
         structures=[s],
         config=cfg,
-        checkpoint_dir=None,
-        checkpoint_interval=0,
-        max_checkpoints=None,
-        resume_from=None,
-        save_best=False,
-        use_scheduler=False,
     )
 
     # Ensure model outputs zero cohesive energy by zeroing weights
@@ -123,20 +121,18 @@ def test_cohesive_energy_helper_works_with_internal_atomic_energies():
         force_weight=0.0,
         memory_mode="cpu",
         device="cpu",
-        energy_target="cohesive",
-        E_atomic={"H": E_H},
+        atomic_energies={"H": E_H},
         normalize_features=False,
         normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
     )
     pot.train(
         structures=[s],
         config=cfg,
-        checkpoint_dir=None,
-        checkpoint_interval=0,
-        max_checkpoints=None,
-        resume_from=None,
-        save_best=False,
-        use_scheduler=False,
     )
 
     # Check helper: cohesive = total - sum(E_atomic)

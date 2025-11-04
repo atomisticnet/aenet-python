@@ -6,8 +6,9 @@ on-demand during training, avoiding the need to pre-compute and store
 large feature arrays.
 """
 
+import os
 import random
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -34,8 +35,85 @@ __all__ = [
     'StructureDataset',
     'CachedStructureDataset',
     'HDF5StructureDataset',
-    'train_test_split_dataset'
+    'train_test_split_dataset',
+    'convert_to_structures',
     ]
+
+
+def convert_to_structures(
+    inputs: Union[List[Structure], List, List[os.PathLike]],
+) -> List[Structure]:
+    """
+    Convert various input types to List[Structure] (torch Structure objects).
+
+    This utility function provides a unified interface for converting different
+    input formats into the torch Structure format required by Dataset classes.
+
+    Parameters
+    ----------
+    inputs : Union[List[Structure], List, List[os.PathLike]]
+        Input structures in one of three formats:
+        - List[Structure]: torch Structure objects (returned as-is)
+        - List[AtomicStructure]: aenet.geometry.AtomicStructure objects
+          (converted via to_TorchStructure())
+        - List[os.PathLike]: File paths to structure files (loaded with
+          aenet.io.structure.read() and converted)
+
+    Returns
+    -------
+    List[Structure]
+        List of torch Structure objects
+
+    Examples
+    --------
+    >>> # From file paths
+    >>> structures = convert_to_structures(['file1.xsf', 'file2.xsf'])
+
+    >>> # From AtomicStructure objects
+    >>> from aenet.io.structure import read
+    >>> atomic_structs = [read('file.xsf')]
+    >>> structures = convert_to_structures(atomic_structs)
+
+    >>> # From torch Structures (no conversion needed)
+    >>> structures = convert_to_structures(torch_structures)
+    """
+    if not inputs or len(inputs) == 0:
+        return []
+
+    # Import here to avoid circular dependencies
+    from aenet.geometry import AtomicStructure
+    from aenet.io.structure import read
+
+    first = inputs[0]
+
+    # Check type of first element to determine conversion strategy
+    if isinstance(first, (str, os.PathLike)):
+        # File paths - load and convert
+        torch_structs: List[Structure] = []
+        for path in inputs:
+            atomic = read(path)
+            converted = atomic.to_TorchStructure()
+            # to_TorchStructure() may return list or single Structure
+            if isinstance(converted, (list, tuple)):
+                torch_structs.extend(converted)
+            else:
+                torch_structs.append(converted)
+        return torch_structs
+
+    elif isinstance(first, AtomicStructure):
+        # AtomicStructure objects - convert
+        torch_structs: List[Structure] = []
+        for atomic in inputs:
+            converted = atomic.to_TorchStructure()
+            if isinstance(converted, (list, tuple)):
+                torch_structs.extend(converted)
+            else:
+                torch_structs.append(converted)
+        return torch_structs
+
+    else:
+        # Already torch Structure objects
+        return list(inputs)
 
 
 class StructureDataset(Dataset):
@@ -49,8 +127,14 @@ class StructureDataset(Dataset):
 
     Parameters
     ----------
-    structures : List[Structure]
-        List of atomic structures to include in the dataset
+    structures : Union[List[Structure], List[AtomicStructure],
+                     List[os.PathLike]]
+        Structures to include in the dataset. Accepts:
+        - List[Structure]: torch Structure objects (used directly)
+        - List[AtomicStructure]: AtomicStructure objects
+          (converted automatically)
+        - List[os.PathLike]: File paths to structure files
+          (loaded and converted)
     descriptor : ChebyshevDescriptor
         Descriptor instance for featurization
     force_fraction : float, optional
@@ -70,22 +154,24 @@ class StructureDataset(Dataset):
     min_force_structures_per_epoch : int, optional
         Minimum number of force-labeled structures to include per epoch,
         regardless of force_fraction. Default: None (no minimum)
-    cached_features_for_force : bool, optional
+    cache_features : bool, optional
         When alpha>0, cache and reuse features for structures that are not
         selected for force supervision in the current epoch-window. For those
         energy-only structures, features are served from memory and neighbor
         information is not computed. Default: False
-    cache_neighbors : bool, optional
+    cache_force_neighbors : bool, optional
         Cache per-structure neighbor graphs (lists and displacement vectors)
-        to avoid repeated neighbor searches across epochs for fixed datasets.
-        When enabled, neighbor graphs are computed once per structure and then
-        reused for both energy and force paths. Default: False
-    cache_triplets : bool, optional
+        for force training to avoid repeated neighbor searches across epochs
+        for fixed datasets. When enabled, neighbor graphs are computed once
+        per structure and then reused for both energy and force paths.
+        Only relevant for force training. Default: False
+    cache_force_triplets : bool, optional
         Build and cache CSR neighbor graphs and precomputed angular triplet
         indices per structure to enable vectorized featurization and gradient
-        paths (removes Python-level enumeration loops). When enabled and
-        use_forces=True, __getitem__ attaches 'graph' and 'triplets' entries
-        for the sampled structure. Default: False
+        paths for force training (removes Python-level enumeration loops).
+        When enabled and use_forces=True, __getitem__ attaches 'graph' and
+        'triplets' entries for the sampled structure.
+        Only relevant for force training. Default: False
     cache_persist_dir : str, optional
         Optional root directory for persisted graph/triplet caches (future).
         Default: None
@@ -104,16 +190,16 @@ class StructureDataset(Dataset):
 
     def __init__(
         self,
-        structures: List[Structure],
+        structures: Union[List[Structure], List, List[os.PathLike]],
         descriptor,  # ChebyshevDescriptor - avoid circular import
         force_fraction: float = 1.0,
         force_sampling: str = 'random',
         max_energy: Optional[float] = None,
         max_forces: Optional[float] = None,
         min_force_structures_per_epoch: Optional[int] = None,
-        cached_features_for_force: bool = False,
-        cache_neighbors: bool = False,
-        cache_triplets: bool = False,
+        cache_features: bool = False,
+        cache_force_neighbors: bool = False,
+        cache_force_triplets: bool = False,
         cache_persist_dir: Optional[str] = None,
         seed: Optional[int] = None,
     ):
@@ -123,14 +209,14 @@ class StructureDataset(Dataset):
         self.min_force_structures_per_epoch = min_force_structures_per_epoch
         self.max_energy = max_energy
         self.max_forces = max_forces
-        self.cached_features_for_force = cached_features_for_force
+        self.cache_features = cache_features
         # Simple in-memory cache for features of non-force structures
         self._feature_cache: dict[int, torch.Tensor] = {}
         # Optional neighbor graph cache to avoid repeated neighbor searches
-        self.cache_neighbors = cache_neighbors
+        self.cache_force_neighbors = cache_force_neighbors
         self._neighbor_cache: dict[int, dict] = {}
         # Optional CSR + Triplet cache to avoid per-epoch enumeration
-        self.cache_triplets = cache_triplets
+        self.cache_force_triplets = cache_force_triplets
         self.cache_persist_dir = cache_persist_dir
         self._graph_cache: dict[int, dict] = {}
         self.seed = seed
@@ -138,6 +224,9 @@ class StructureDataset(Dataset):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
+
+        # Convert input to torch Structure objects if needed
+        structures = convert_to_structures(structures)
 
         # Filter structures based on energy and force thresholds
         self.structures = self._filter_structures(structures)
@@ -266,10 +355,10 @@ class StructureDataset(Dataset):
             Dictionary containing:
             - 'features': (N, F) feature tensor
             - 'neighbor_info': neighbor data for gradient computation
-            - 'graph': CSR neighbor graph (dict) when cache_triplets=True and
-              use_forces=True, else None
-            - 'triplets': TripletIndex (dict) when cache_triplets=True and
-              use_forces=True, else None
+            - 'graph': CSR neighbor graph (dict) when cache_force_triplets=True
+              and use_forces=True, else None
+            - 'triplets': TripletIndex (dict) when cache_force_triplets=True
+              and use_forces=True, else None
             - 'positions': (N, 3) positions tensor
             - 'species': List[str] species names
             - 'species_indices': (N,) species index tensor
@@ -302,7 +391,7 @@ class StructureDataset(Dataset):
         # Compute features (and neighbor information if forces are used)
         if use_forces:
             # Force-supervised: need neighbor info for gradient path
-            if self.cache_neighbors:
+            if self.cache_force_neighbors:
                 if idx in self._neighbor_cache:
                     neighbor_info = self._neighbor_cache[idx]
                     # Build tensors from cached neighbor info and use fast path
@@ -330,7 +419,7 @@ class StructureDataset(Dataset):
                     positions, struct.species, cell, pbc
                 )
             # Optional CSR + Triplet caching for vectorized paths
-            if self.cache_triplets:
+            if self.cache_force_triplets:
                 if idx in self._graph_cache:
                     graph_trip = self._graph_cache[idx]
                 else:
@@ -357,10 +446,10 @@ class StructureDataset(Dataset):
         else:
             # Energy-only path: reuse cached features if enabled and available
             neighbor_info = None
-            if self.cached_features_for_force and idx in self._feature_cache:
+            if self.cache_features and idx in self._feature_cache:
                 features = self._feature_cache[idx]
             else:
-                if self.cache_neighbors:
+                if self.cache_force_neighbors:
                     if idx in self._neighbor_cache:
                         neighbor_info_cached = self._neighbor_cache[idx]
                         nb_idx_list_t = [
@@ -388,7 +477,7 @@ class StructureDataset(Dataset):
                     features = self.descriptor.forward_from_positions(
                         positions, struct.species, cell, pbc
                     )
-                if self.cached_features_for_force:
+                if self.cache_features:
                     self._feature_cache[idx] = features
 
         # Convert species to indices
@@ -405,7 +494,8 @@ class StructureDataset(Dataset):
         # Attach graph/triplets when available (force-supervised samples)
         graph = None
         triplets = None
-        if use_forces and self.cache_triplets and (idx in self._graph_cache):
+        if (use_forces and self.cache_force_triplets
+                and (idx in self._graph_cache)):
             graph = self._graph_cache[idx]["graph"]
             triplets = self._graph_cache[idx]["triplets"]
 
@@ -473,10 +563,31 @@ class CachedStructureDataset(Dataset):
 
     This avoids per-epoch featurization cost by computing features once
     at initialization. Force-related fields are disabled (use_forces=False).
+
+    Parameters
+    ----------
+    structures : Union[List[Structure], List[AtomicStructure],
+                     List[os.PathLike]]
+        Structures to include in the dataset. Accepts:
+        - List[Structure]: torch Structure objects (used directly)
+        - List[AtomicStructure]: AtomicStructure objects
+          (converted automatically)
+        - List[os.PathLike]: File paths to structure files
+          (loaded and converted)
+    descriptor : ChebyshevDescriptor
+        Descriptor instance for featurization
+    max_energy : float, optional
+        Exclude structures with energy per atom above this threshold.
+        Default: None (no filtering)
+    max_forces : float, optional
+        Exclude structures with max force component above this threshold.
+        Default: None (no filtering)
+    seed : int, optional
+        Random seed for reproducibility. Default: None
     """
     def __init__(
         self,
-        structures: List[Structure],
+        structures: Union[List[Structure], List, List[os.PathLike]],
         descriptor,  # ChebyshevDescriptor
         max_energy: Optional[float] = None,
         max_forces: Optional[float] = None,
@@ -490,6 +601,9 @@ class CachedStructureDataset(Dataset):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
+
+        # Convert input to torch Structure objects if needed
+        structures = convert_to_structures(structures)
 
         # Filter structures using the same logic as StructureDataset
         self.structures = self._filter_structures(structures)
@@ -612,10 +726,10 @@ def train_test_split(dataset: StructureDataset,
         max_energy=dataset.max_energy,
         max_forces=dataset.max_forces,
         min_force_structures_per_epoch=dataset.min_force_structures_per_epoch,
-        cached_features_for_force=getattr(
-            dataset, "cached_features_for_force", False),
-        cache_neighbors=getattr(dataset, "cache_neighbors", False),
-        cache_triplets=getattr(dataset, "cache_triplets", False),
+        cache_features=getattr(
+            dataset, "cache_features", False),
+        cache_force_neighbors=getattr(dataset, "cache_force_neighbors", False),
+        cache_force_triplets=getattr(dataset, "cache_force_triplets", False),
         cache_persist_dir=getattr(dataset, "cache_persist_dir", None),
         seed=seed,
     )
@@ -628,10 +742,10 @@ def train_test_split(dataset: StructureDataset,
         max_energy=dataset.max_energy,
         max_forces=dataset.max_forces,
         min_force_structures_per_epoch=dataset.min_force_structures_per_epoch,
-        cached_features_for_force=getattr(
-            dataset, "cached_features_for_force", False),
-        cache_neighbors=getattr(dataset, "cache_neighbors", False),
-        cache_triplets=getattr(dataset, "cache_triplets", False),
+        cache_features=getattr(
+            dataset, "cache_features", False),
+        cache_force_neighbors=getattr(dataset, "cache_force_neighbors", False),
+        cache_force_triplets=getattr(dataset, "cache_force_triplets", False),
         cache_persist_dir=getattr(dataset, "cache_persist_dir", None),
         seed=seed,
     )

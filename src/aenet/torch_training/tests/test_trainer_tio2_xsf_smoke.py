@@ -92,6 +92,7 @@ def test_energy_only_tio2_xsf_smoke(tmp_path: Path):
 
     pot = TorchANNPotential(arch=arch, descriptor=descriptor)
 
+    ckpt_dir = tmp_path / "ckpts"
     cfg = TorchTrainingConfig(
         iterations=1,         # single epoch
         testpercent=50,       # exercise validation + best model saving
@@ -99,24 +100,22 @@ def test_energy_only_tio2_xsf_smoke(tmp_path: Path):
         memory_mode="cpu",
         device="cpu",
         save_energies=False,
-    )
-
-    ckpt_dir = tmp_path / "ckpts"
-    history = pot.train(
-        structures=structures,
-        config=cfg,
         checkpoint_dir=str(ckpt_dir),
         checkpoint_interval=1,
         max_checkpoints=None,
-        resume_from=None,
         save_best=True,
         use_scheduler=False,
     )
 
-    # History keys populated
-    assert "train_energy_rmse" in history
-    assert len(history["train_energy_rmse"]) == 1
-    assert not math.isnan(history["train_energy_rmse"][0])
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    # TrainOut object populated
+    assert "RMSE_train" in result.errors.columns
+    assert len(result.errors) == 1
+    assert not math.isnan(result.errors["RMSE_train"].iloc[0])
 
     # Checkpoint and/or best model saved
     assert ckpt_dir.exists()
