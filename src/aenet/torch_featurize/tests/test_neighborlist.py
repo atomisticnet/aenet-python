@@ -272,7 +272,7 @@ class TestNeighborListGPU:
         not torch.cuda.is_available(), reason="CUDA not available"
     )
     def test_cpu_gpu_consistency(self):
-        """Test that CPU and GPU give same results."""
+        """Test that CPU and GPU give same results (order-independent)."""
         torch.manual_seed(42)
         positions = torch.randn(20, 3, dtype=torch.float64)
 
@@ -284,13 +284,33 @@ class TestNeighborListGPU:
         nbl_gpu = TorchNeighborList(cutoff=3.0, device="cuda")
         result_gpu = nbl_gpu.get_neighbors(positions.to("cuda"))
 
-        # Results should match (within floating point tolerance)
+        # Results should match (order-independent)
+        # GPU and CPU may return neighbors in different orders,
+        # but the sets of distances and edges should be identical
+
+        # Compare sorted distances (order-independent)
+        cpu_dists_sorted = torch.sort(result_cpu["distances"])[0]
+        gpu_dists_sorted = torch.sort(result_gpu["distances"].cpu())[0]
         assert torch.allclose(
-            result_cpu["distances"], result_gpu["distances"].cpu(), rtol=1e-12
+            cpu_dists_sorted, gpu_dists_sorted, rtol=1e-12), \
+            "CPU and GPU distances don't match (after sorting)"
+
+        # Check that same number of edges found
+        assert result_cpu["edge_index"
+                          ].shape == result_gpu["edge_index"].shape, \
+            "CPU and GPU found different number of edges"
+
+        # Verify same unique pairs exist (order-independent)
+        cpu_edges = set(
+            tuple(result_cpu["edge_index"][:, i].tolist())
+            for i in range(result_cpu["edge_index"].shape[1])
         )
-        assert torch.equal(
-            result_cpu["edge_index"], result_gpu["edge_index"].cpu()
+        gpu_edges = set(
+            tuple(result_gpu["edge_index"][:, i].cpu().tolist())
+            for i in range(result_gpu["edge_index"].shape[1])
         )
+        assert cpu_edges == gpu_edges, \
+            "CPU and GPU found different neighbor pairs"
 
 
 class TestNeighborListValidation:
