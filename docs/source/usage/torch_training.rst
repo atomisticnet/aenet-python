@@ -397,11 +397,21 @@ Force Training Parameters
    Example: ``force_fraction=0.3`` uses 30% of force-labeled structures.
 
 **force_sampling** : str (default: 'random')
-   Sampling strategy for force subset: ``'random'`` (resample each epoch) or
+   Sampling strategy for force subset: ``'random'`` (resample periodically) or
    ``'fixed'`` (static subset). Random sampling provides better generalization.
 
-**force_resample_each_epoch** : bool (default: True)
-   When ``force_sampling='random'``, resample the subset at each epoch start.
+**force_resample_num_epochs** : int (default: 0)
+   Number of epochs between resampling the force-trained subset when
+   ``force_sampling='random'``. Controls the resampling frequency:
+
+   * ``0`` = No resampling (use fixed subset for entire training)
+   * ``1`` = Resample every epoch (maximum variety, highest computational cost)
+   * ``N > 1`` = Resample every N epochs (balance between variety and efficiency)
+
+   .. note::
+      The default value of 0 (no resampling) represents a conservative choice
+      that maintains consistent training dynamics and reduces computational
+      overhead. Set to 1 or higher for dynamic resampling.
 
 **force_min_structures_per_epoch** : int (default: 1)
    Minimum number of force-labeled structures per epoch, regardless of
@@ -410,10 +420,6 @@ Force Training Parameters
 **force_scale_unbiased** : bool (default: False)
    Apply sqrt(1/f) scaling to force RMSE where f is the supervised fraction,
    approximating constant scale under sub-sampling.
-
-**epochs_per_force_window** : int (default: 1)
-   Resample random force subset every N epochs. Values >1 amortize cached
-   features across multiple epochs.
 
 
 Performance & Caching

@@ -766,17 +766,15 @@ class TorchANNPotential:
 
         for epoch in range(start_epoch, n_epochs):
             t0 = time.time()
-            # Force sampling per epoch-window (respect config flags)
+            # Force sampling per epoch-window
             if hasattr(train_ds, "resample_force_structures"):
-                epochs_per_window = int(
-                    getattr(config, "epochs_per_force_window", 1)
-                )
+                # Resample if force_resample_num_epochs > 0 and we're at
+                # the right epoch modulo
                 should_resample = (
                     config.force_sampling == "random"
-                    and bool(getattr(
-                        config, "force_resample_each_epoch", True))
+                    and config.force_resample_num_epochs > 0
                     and ((epoch - start_epoch)
-                         % max(1, epochs_per_window) == 0)
+                         % config.force_resample_num_epochs == 0)
                 )
                 if should_resample:
                     train_ds.resample_force_structures()

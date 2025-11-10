@@ -268,11 +268,13 @@ class TorchTrainingConfig:
         Fraction of structures to use for force training (0.0-1.0).
         Default: 1.0 (all structures with forces)
     force_sampling : str, optional
-        Force sampling strategy: 'random' (resample each epoch) or 'fixed'
+        Force sampling strategy: 'random' (resample periodically) or 'fixed'
         (fixed subset). Default: 'random'
-    force_resample_each_epoch : bool, optional
-        When force_sampling='random', resample the subset at the beginning
-        of each epoch. Default: True
+    force_resample_num_epochs : int, optional
+        Number of epochs between resampling the force-trained subset when
+        force_sampling='random'. Set to 0 to disable resampling (use fixed
+        subset for entire training). Set to 1 to resample every epoch.
+        Set to N>1 to resample every N epochs. Default: 0 (no resampling)
     force_min_structures_per_epoch : int, optional
         Minimum number of force-labeled structures to include per epoch,
         regardless of force_fraction. Default: 1
@@ -304,11 +306,6 @@ class TorchTrainingConfig:
     cache_scope : {'train', 'val', 'all'}, optional
         Scope limiting which dataset split(s) should be cached/persisted,
         allowing memory/I-O control. Default: 'all'
-    epochs_per_force_window : int, optional
-        Resample the random subset of force-supervised structures every this
-        many epochs (when force_sampling='random'). 1 = resample every epoch
-        (default behavior). Values >1 amortize cached features across multiple
-        epochs. Default: 1
     memory_mode : str, optional
         Memory management strategy: 'cpu', 'gpu', or 'mixed'.
         Default: 'gpu'
@@ -339,7 +336,7 @@ class TorchTrainingConfig:
     force_fraction: float = 1.0
     force_sampling: Literal['random', 'fixed'] = 'random'
     # Force subsampling controls
-    force_resample_each_epoch: bool = True
+    force_resample_num_epochs: int = 0
     force_min_structures_per_epoch: Optional[int] = 1
     force_scale_unbiased: bool = False
     # Mixed-run caching: cache features for non-force structures
@@ -356,8 +353,6 @@ class TorchTrainingConfig:
     cache_persist_dir: Optional[str] = None
     # Scope for caching/persistence
     cache_scope: Literal['train', 'val', 'all'] = 'all'
-    # Resample random force subset every this many epochs (1 = each epoch)
-    epochs_per_force_window: int = 1
     memory_mode: Literal['cpu', 'gpu', 'mixed'] = 'gpu'
     max_energy: Optional[float] = None
     max_forces: Optional[float] = None
@@ -401,6 +396,39 @@ class TorchTrainingConfig:
 
     def __post_init__(self):
         """Validate parameters after initialization."""
+        # Check for deprecated parameters and raise errors
+        if hasattr(self, 'force_resample_each_epoch'):
+            # This check handles if someone passes it as a keyword argument
+            # even though it's not in the dataclass fields anymore
+            pass
+
+        # Check if deprecated parameters were passed via __dict__ inspection
+        # (this catches cases where the parameter might be set elsewhere)
+        deprecated_params = {
+            'force_resample_each_epoch': (
+                "The parameter 'force_resample_each_epoch' has been "
+                "deprecated. Use 'force_resample_num_epochs' instead:\n"
+                "  - force_resample_num_epochs=0 for no resampling "
+                "(fixed subset)\n"
+                "  - force_resample_num_epochs=1 to resample every epoch\n"
+                "  - force_resample_num_epochs=N to resample every N epochs"
+            ),
+            'epochs_per_force_window': (
+                "The parameter 'epochs_per_force_window' has been deprecated. "
+                "Use 'force_resample_num_epochs' instead:\n"
+                "  - force_resample_num_epochs=0 for no resampling "
+                "(fixed subset)\n"
+                "  - force_resample_num_epochs=1 to resample every epoch\n"
+                "  - force_resample_num_epochs=N to resample every N epochs"
+            ),
+        }
+
+        for param, msg in deprecated_params.items():
+            # Check if parameter exists in instance __dict__
+            # (shouldn't be there as it's not in the dataclass definition)
+            if param in self.__dict__:
+                raise ValueError(msg)
+
         # Validate testpercent
         if not 0 <= self.testpercent <= 100:
             raise ValueError(
@@ -448,11 +476,11 @@ class TorchTrainingConfig:
                 f"got '{self.cache_scope}'"
             )
 
-        # Validate epochs_per_force_window
-        if int(self.epochs_per_force_window) < 1:
+        # Validate force_resample_num_epochs
+        if self.force_resample_num_epochs < 0:
             raise ValueError(
-                f"epochs_per_force_window must be >= 1, "
-                f"got {self.epochs_per_force_window}"
+                f"force_resample_num_epochs must be >= 0, "
+                f"got {self.force_resample_num_epochs}"
             )
 
         # Validate precision
