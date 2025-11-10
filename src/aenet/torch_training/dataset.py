@@ -20,6 +20,12 @@ from aenet.torch_featurize.graph import (
     build_triplets_from_csr,
 )
 
+# Progress bar (match aenet.mlip behavior)
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:
+    tqdm = None  # type: ignore
+
 # Optional import: HDF5-backed dataset and generic splitter.
 # Wrapped in try/except to avoid import errors during partial installs.
 try:
@@ -592,6 +598,7 @@ class CachedStructureDataset(Dataset):
         max_energy: Optional[float] = None,
         max_forces: Optional[float] = None,
         seed: Optional[int] = None,
+        show_progress: bool = True,
     ):
         self.descriptor = descriptor
         self.max_energy = max_energy
@@ -608,10 +615,21 @@ class CachedStructureDataset(Dataset):
         # Filter structures using the same logic as StructureDataset
         self.structures = self._filter_structures(structures)
 
-        # Build cached samples
+        # Build cached samples with progress feedback
         self._cached: List[dict] = []
+
+        # Wrap structure iteration with progress bar
+        structure_iter = self.structures
+        if show_progress and tqdm is not None:
+            structure_iter = tqdm(
+                self.structures,
+                desc="Caching features",
+                ncols=80,
+                leave=False
+            )
+
         with torch.no_grad():
-            for i, struct in enumerate(self.structures):
+            for i, struct in enumerate(structure_iter):
                 positions = torch.as_tensor(
                     struct.positions, dtype=descriptor.dtype)
                 cell = (

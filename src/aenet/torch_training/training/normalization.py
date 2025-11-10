@@ -9,6 +9,12 @@ from typing import Any, Dict, Optional
 import torch
 from torch.utils.data import DataLoader
 
+# Progress bar (match aenet.mlip behavior)
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:
+    tqdm = None  # type: ignore
+
 
 class NormalizationManager:
     """
@@ -106,6 +112,7 @@ class NormalizationManager:
         dataloader: DataLoader,
         n_features: int,
         provided_stats: Optional[Dict[str, Any]] = None,
+        show_progress: bool = True,
     ):
         """
         Compute or load feature normalization statistics.
@@ -119,6 +126,8 @@ class NormalizationManager:
         provided_stats : dict, optional
             Pre-computed statistics with 'mean' and 'std'/'cov' keys.
             If provided, these will be used instead of computing from data.
+        show_progress : bool, optional
+            Whether to show progress bar during computation. Default: True
         """
         if not self._normalize_features:
             return
@@ -139,7 +148,7 @@ class NormalizationManager:
                 ).view(-1)
                 return
 
-        # Compute from training data
+        # Compute from training data with progress bar
         sum_f = torch.zeros(n_features, dtype=self.dtype, device="cpu")
         sumsq_f = torch.zeros(n_features, dtype=self.dtype, device="cpu")
         # Track exact min/max across the dataset
@@ -157,8 +166,23 @@ class NormalizationManager:
         )
         total_atoms = 0
 
+        # Wrap dataloader with progress bar
+        batch_iter = dataloader
+        if show_progress and tqdm is not None:
+            try:
+                total = len(dataloader)
+            except Exception:
+                total = None
+            batch_iter = tqdm(
+                dataloader,
+                total=total,
+                desc="Computing feature stats",
+                ncols=80,
+                leave=False
+            )
+
         with torch.no_grad():
-            for batch in dataloader:
+            for batch in batch_iter:
                 feats = batch["features"]
                 feats = feats.to(dtype=self.dtype, device="cpu")
                 sum_f += feats.sum(dim=0).cpu()
@@ -195,6 +219,7 @@ class NormalizationManager:
         atomic_energies_by_index: Optional[torch.Tensor] = None,
         provided_shift: Optional[float] = None,
         provided_scaling: Optional[float] = None,
+        show_progress: bool = True,
     ):
         """
         Compute energy normalization statistics.
@@ -214,6 +239,8 @@ class NormalizationManager:
             Override computed E_shift.
         provided_scaling : float, optional
             Override computed E_scaling.
+        show_progress : bool, optional
+            Whether to show progress bar during computation. Default: True
         """
         if not self.normalize_energy:
             return
@@ -228,14 +255,29 @@ class NormalizationManager:
         if provided_shift is not None and provided_scaling is not None:
             return
 
-        # Compute from data
+        # Compute from data with progress bar
         e_min = None
         e_max = None
         e_sum = 0.0
         n_struct = 0
 
+        # Wrap dataloader with progress bar
+        batch_iter = dataloader
+        if show_progress and tqdm is not None:
+            try:
+                total = len(dataloader)
+            except Exception:
+                total = None
+            batch_iter = tqdm(
+                dataloader,
+                total=total,
+                desc="Computing energy stats",
+                ncols=80,
+                leave=False
+            )
+
         with torch.no_grad():
-            for batch in dataloader:
+            for batch in batch_iter:
                 n_atoms_b = batch["n_atoms"].to(self.device)
                 energy_ref_b = batch["energy_ref"].to(
                     self.device, dtype=self.dtype

@@ -552,12 +552,14 @@ class TorchANNPotential:
                     train_structs = structures_all
                     test_structs = []
                 from .dataset import CachedStructureDataset
+                show_progress = bool(getattr(config, "show_progress", True))
                 train_ds = CachedStructureDataset(
                     structures=train_structs,
                     descriptor=self.descriptor,
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
                     seed=None,
+                    show_progress=show_progress,
                 )
                 test_ds = (
                     CachedStructureDataset(
@@ -566,6 +568,7 @@ class TorchANNPotential:
                         max_energy=config.max_energy,
                         max_forces=config.max_forces,
                         seed=None,
+                        show_progress=show_progress,
                     )
                     if (config.testpercent > 0 and len(test_structs) > 0)
                     else None
@@ -662,6 +665,7 @@ class TorchANNPotential:
             n_features = None  # type: ignore[assignment]
 
         # Feature stats
+        show_progress = bool(getattr(config, "show_progress", True))
         if normalize_features and n_features is not None:
             provided_stats = getattr(config, "feature_stats", None)
             if provided_stats:
@@ -673,7 +677,7 @@ class TorchANNPotential:
 
             if not self._normalizer.has_feature_stats():
                 self._normalizer.compute_feature_stats(
-                    stats_loader, n_features)
+                    stats_loader, n_features, show_progress=show_progress)
 
         # Energy normalization stats
         if normalize_energy:
@@ -689,7 +693,8 @@ class TorchANNPotential:
             else:
                 # Compute from data
                 self._normalizer.compute_energy_stats(
-                    stats_loader, atomic_energies_by_index
+                    stats_loader, atomic_energies_by_index,
+                    show_progress=show_progress
                 )
 
         # Optimizer and scheduler using OptimizerBuilder
