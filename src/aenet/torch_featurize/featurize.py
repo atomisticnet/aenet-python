@@ -86,6 +86,8 @@ class ChebyshevDescriptor(nn.Module):
             min_cutoff=min_cutoff,
             dtype=dtype,
         )
+        # Move to device (ensures internal buffers are on correct device)
+        self.rad_basis.to(self.device)
 
         # SINGLE angular basis function (not per type triplet!)
         self.ang_basis = AngularBasis(
@@ -94,6 +96,8 @@ class ChebyshevDescriptor(nn.Module):
             min_cutoff=min_cutoff,
             dtype=dtype,
         )
+        # Move to device (ensures internal buffers are on correct device)
+        self.ang_basis.to(self.device)
 
         # Calculate number of features
         self.n_features = self._calculate_n_features()
