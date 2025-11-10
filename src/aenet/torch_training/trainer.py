@@ -605,6 +605,13 @@ class TorchANNPotential:
                 else:
                     train_ds, test_ds = full_ds, None
 
+        # Warmup caches if using StructureDataset with caching enabled
+        show_progress = bool(getattr(config, "show_progress", True))
+        if isinstance(train_ds, StructureDataset):
+            train_ds.warmup_caches(show_progress=show_progress)
+        if isinstance(test_ds, StructureDataset):
+            test_ds.warmup_caches(show_progress=show_progress)
+
         # DataLoaders
         batch_size = OptimizerBuilder.get_batch_size(config.method)
         dl_kwargs: Dict[str, Any] = {}

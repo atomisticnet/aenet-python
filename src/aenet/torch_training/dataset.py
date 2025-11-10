@@ -562,6 +562,45 @@ class StructureDataset(Dataset):
             'species': sorted(species_set),
         }
 
+    def warmup_caches(self, show_progress: bool = True):
+        """
+        Pre-populate caches by iterating through all structures.
+
+        This method triggers lazy cache population by accessing each structure
+        once before training begins. Only runs if any cache options are
+        enabled (cache_features, cache_force_neighbors, cache_force_triplets).
+
+        Provides progress feedback during the warmup phase to avoid the
+        appearance of the training hanging during first-epoch cache build.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Whether to show progress bar during warmup. Default: True
+        """
+        # Check if any caching is enabled
+        needs_warmup = (
+            self.cache_features or
+            self.cache_force_neighbors or
+            self.cache_force_triplets
+        )
+
+        if not needs_warmup:
+            return  # Nothing to warm up
+
+        # Iterate through dataset with progress bar
+        iterator = range(len(self))
+        if show_progress and tqdm is not None:
+            iterator = tqdm(
+                iterator,
+                desc="Warming up caches",
+                ncols=80,
+                leave=False
+            )
+
+        for idx in iterator:
+            _ = self[idx]  # Trigger lazy cache population
+
 
 class CachedStructureDataset(Dataset):
     """
