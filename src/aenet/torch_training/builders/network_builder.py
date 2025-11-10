@@ -6,6 +6,7 @@ specifications.
 """
 
 import importlib.util
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -166,7 +167,7 @@ class NetworkBuilder:
             layers.append(
                 (f"Linear_Sp{i+1}_F{len(hs)+1}", nn.Linear(hs[-1], 1))
             )
-            seqs.append(nn.Sequential(dict(layers)))  # type: ignore
+            seqs.append(nn.Sequential(OrderedDict(layers)))
 
         return nn.ModuleList(seqs)
 

@@ -27,7 +27,7 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "numpy>=2.0.0",
-    "scipy>=2.0.0",
+    "scipy>=1.13.0",
     "pandas>=1.2.4",
     "tables>=3.6.1",
     "tqdm>=4.62.3",
@@ -36,9 +36,11 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = [
-    "torch>=2.0.0",
-    "torch-scatter>=2.1.0",
-    "torch-cluster>=1.6.0",
+    "torch>=2.4.1",
+]
+pyg = [
+    "torch-scatter>=2.1.2",
+    "torch-cluster>=1.6.3",
 ]
 dev = [
     "pytest>=7.0.0",
