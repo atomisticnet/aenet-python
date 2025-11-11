@@ -102,7 +102,10 @@ def _extract_hidden_and_activations_from_seq(
     # [Linear, Act, Linear, Act, ..., Linear(out)]
     act_names: List[str] = []
     for m in seq:
-        if isinstance(m, nn.Tanh):
+        if isinstance(m, nn.Linear):
+            # Skip Linear layers - they're transformations, not activations
+            continue
+        elif isinstance(m, nn.Tanh):
             act_names.append("tanh")
         elif isinstance(m, nn.Sigmoid):
             act_names.append("sigmoid")

@@ -59,6 +59,9 @@ def _descriptor_to_config(desc: ChebyshevDescriptor) -> Dict[str, Any]:
 def _descriptor_from_config(cfg: Dict[str, Any]) -> ChebyshevDescriptor:
     dtype = _dtype_from_str(str(cfg.get("dtype", "float64")))
     device = str(cfg.get("device", "cpu"))
+    # If saved device is CUDA but not available, fall back to CPU
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        device = "cpu"
     return ChebyshevDescriptor(
         species=list(cfg["species"]),
         rad_order=int(cfg["rad_order"]),
