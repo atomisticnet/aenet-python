@@ -8,16 +8,16 @@ path in _extract_hidden_and_activations_from_seq).
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 from aenet.torch_training.ascii_export import (
-    _extract_hidden_and_activations_from_seq,
-    export_to_ascii_impl
+    _extract_hidden_and_activations_from_seq
 )
 
 
 class TestFallbackNetworkExtraction:
-    """Test extraction of network structure from Sequential without metadata."""
+    """
+    Test extraction of network structure from Sequential without metadata.
+    """
 
     def test_extract_simple_network(self):
         """Test extraction from a simple 2-layer network."""
@@ -30,7 +30,8 @@ class TestFallbackNetworkExtraction:
             nn.Linear(20, 1)
         )
 
-        hidden_sizes, activations = _extract_hidden_and_activations_from_seq(seq)
+        (hidden_sizes, activations
+         ) = _extract_hidden_and_activations_from_seq(seq)
 
         assert hidden_sizes == [20], f"Expected [20], got {hidden_sizes}"
         assert activations == ["tanh"], f"Expected ['tanh'], got {activations}"
@@ -39,7 +40,8 @@ class TestFallbackNetworkExtraction:
         """Test extraction from a 3-layer network."""
         import torch.nn as nn
 
-        # Create: Linear(10,20) -> Tanh -> Linear(20,15) -> Sigmoid -> Linear(15,1)
+        # Create: Linear(10,20) -> Tanh -> Linear(20,15)
+        #                       -> Sigmoid -> Linear(15,1)
         seq = nn.Sequential(
             nn.Linear(10, 20),
             nn.Tanh(),
@@ -48,9 +50,11 @@ class TestFallbackNetworkExtraction:
             nn.Linear(15, 1)
         )
 
-        hidden_sizes, activations = _extract_hidden_and_activations_from_seq(seq)
+        (hidden_sizes, activations
+         ) = _extract_hidden_and_activations_from_seq(seq)
 
-        assert hidden_sizes == [20, 15], f"Expected [20, 15], got {hidden_sizes}"
+        assert hidden_sizes == [20, 15], \
+            f"Expected [20, 15], got {hidden_sizes}"
         assert activations == ["tanh", "sigmoid"], \
             f"Expected ['tanh', 'sigmoid'], got {activations}"
 
@@ -65,7 +69,8 @@ class TestFallbackNetworkExtraction:
             nn.Linear(20, 1)
         )
 
-        hidden_sizes, activations = _extract_hidden_and_activations_from_seq(seq)
+        (hidden_sizes, activations
+         ) = _extract_hidden_and_activations_from_seq(seq)
 
         assert hidden_sizes == [20], f"Expected [20], got {hidden_sizes}"
         assert activations == ["linear"], \
@@ -73,7 +78,8 @@ class TestFallbackNetworkExtraction:
 
     def test_linear_layers_are_skipped(self):
         """
-        Regression test: ensure nn.Linear layers are skipped, not treated as activations.
+        Regression test: ensure nn.Linear layers are skipped, not
+        treated as activations.
 
         This was the original bug - nn.Linear modules were being processed
         as if they were activation functions, causing a NotImplementedError.
@@ -90,7 +96,8 @@ class TestFallbackNetworkExtraction:
         )
 
         # This should NOT raise NotImplementedError about nn.Linear
-        hidden_sizes, activations = _extract_hidden_and_activations_from_seq(seq)
+        (hidden_sizes, activations
+         ) = _extract_hidden_and_activations_from_seq(seq)
 
         assert hidden_sizes == [20, 15]
         assert activations == ["tanh", "tanh"]
@@ -109,7 +116,8 @@ class TestFallbackNetworkExtraction:
             nn.Linear(10, 1)
         )
 
-        hidden_sizes, activations = _extract_hidden_and_activations_from_seq(seq)
+        (hidden_sizes, activations
+         ) = _extract_hidden_and_activations_from_seq(seq)
 
         assert hidden_sizes == [20, 15, 10]
         assert activations == ["tanh", "sigmoid", "linear"]
@@ -162,16 +170,13 @@ class TestASCIIExportWithFallback:
 
     def test_ascii_export_without_metadata(self, simple_trainer, tmp_path):
         """
-        Test that ASCII export works when network lacks hidden_size/active_names.
+        Test that ASCII export works when network lacks
+        hidden_size/active_names.
 
         This is a regression test for the bug where models without NetAtom
         metadata would fail during ASCII export.
         """
         trainer, structures = simple_trainer
-
-        # Verify the network doesn't have the metadata attributes
-        # (it might if NetAtom is used, so we test the fallback explicitly)
-        net = trainer.net
 
         # Export should work regardless
         output_dir = tmp_path / "ascii_output"
@@ -189,7 +194,8 @@ class TestASCIIExportWithFallback:
             # Verify file has content
             assert file_path.stat().st_size > 0
 
-    def test_ascii_export_produces_valid_format(self, simple_trainer, tmp_path):
+    def test_ascii_export_produces_valid_format(
+            self, simple_trainer, tmp_path):
         """Test that exported ASCII files have the expected structure."""
         trainer, structures = simple_trainer
 

@@ -108,10 +108,11 @@ class TestPyTorchFortranInferenceEquivalence:
         torch_energy = torch_results.total_energy[0]
         fortran_energy = fortran_results.total_energy[0]
 
-        print(f"\nIsolated TiO2 cluster comparison:")
+        print("\nIsolated TiO2 cluster comparison:")
         print(f"  PyTorch energy:  {torch_energy:.8f} eV")
         print(f"  Fortran energy:  {fortran_energy:.8f} eV")
-        print(f"  Difference:      {abs(torch_energy - fortran_energy):.2e} eV")
+        print("  Difference:      "
+              f"{abs(torch_energy - fortran_energy):.2e} eV")
 
         np.testing.assert_allclose(
             torch_energy,
@@ -126,7 +127,8 @@ class TestPyTorchFortranInferenceEquivalence:
         fortran_forces = fortran_results.forces[0]  # numpy array
 
         assert torch_forces.shape == fortran_forces.shape, \
-            f"Force shapes differ: {torch_forces.shape} vs {fortran_forces.shape}"
+            f"Force shapes differ: {torch_forces.shape} " \
+            f"vs {fortran_forces.shape}"
 
         # Check forces per atom
         n_atoms = torch_forces.shape[0]
@@ -201,10 +203,11 @@ class TestPyTorchFortranInferenceEquivalence:
         torch_energy = torch_results.total_energy[0]
         fortran_energy = fortran_results.total_energy[0]
 
-        print(f"\nPeriodic TiO2 cell comparison:")
+        print("\nPeriodic TiO2 cell comparison:")
         print(f"  PyTorch energy:  {torch_energy:.8f} eV")
         print(f"  Fortran energy:  {fortran_energy:.8f} eV")
-        print(f"  Difference:      {abs(torch_energy - fortran_energy):.2e} eV")
+        print("  Difference:      "
+              f"{abs(torch_energy - fortran_energy):.2e} eV")
 
         np.testing.assert_allclose(
             torch_energy,
@@ -219,7 +222,8 @@ class TestPyTorchFortranInferenceEquivalence:
         fortran_forces = fortran_results.forces[0]  # numpy array
 
         assert torch_forces.shape == fortran_forces.shape, \
-            f"Force shapes differ: {torch_forces.shape} vs {fortran_forces.shape}"
+            f"Force shapes differ: {torch_forces.shape} " \
+            f"vs {fortran_forces.shape}"
 
         # Check forces per atom
         n_atoms = torch_forces.shape[0]
@@ -239,14 +243,13 @@ class TestPyTorchFortranInferenceEquivalence:
 
         print("  ✓ PyTorch and Fortran predictions match!")
 
-
     def test_fallback_network_fortran_equivalence(self, tmp_path, monkeypatch):
         """
         Test PyTorch-Fortran equivalence using existing trained model.
 
-        This ensures the ASCII export (whether using preferred path with metadata
-        or fallback path without) produces numerically equivalent results to
-        PyTorch inference.
+        This ensures the ASCII export (whether using preferred path with
+        metadata or fallback path without) produces numerically equivalent
+        results to PyTorch inference.
         """
         # Import here to avoid errors when torch not available
         from aenet.torch_training.trainer import TorchANNPotential
@@ -259,7 +262,8 @@ class TestPyTorchFortranInferenceEquivalence:
         struc = aenet.io.structure.read(str(TIO2_CLUSTER_PATH))
         torch_struc = struc.to_TorchStructure()[0]
 
-        # Load existing trained model (has normalization stats, training history)
+        # Load existing trained model (has normalization stats,
+        # training history)
         torch_pot = TorchANNPotential.from_file(str(TIO2_MODEL_PATH))
 
         # Predict with PyTorch
@@ -300,20 +304,23 @@ class TestPyTorchFortranInferenceEquivalence:
         torch_energy = torch_results.total_energy[0]
         fortran_energy = fortran_results.total_energy[0]
 
-        print(f"\nFallback network test:")
+        print("\nFallback network test:")
         print(f"  Network type: {type(torch_pot.net).__name__}")
-        print(f"  Has metadata: hidden_size={hasattr(torch_pot.net, 'hidden_size')}, "
+        print("  Has metadata: hidden_size="
+              f"{hasattr(torch_pot.net, 'hidden_size')}, "
               f"active_names={hasattr(torch_pot.net, 'active_names')}")
         print(f"  PyTorch energy:  {torch_energy:.8f} eV")
         print(f"  Fortran energy:  {fortran_energy:.8f} eV")
-        print(f"  Difference:      {abs(torch_energy - fortran_energy):.2e} eV")
+        print("  Difference:      "
+              f"{abs(torch_energy - fortran_energy):.2e} eV")
 
         np.testing.assert_allclose(
             torch_energy,
             fortran_energy,
             rtol=1e-6,
             atol=1e-6,
-            err_msg="Total energies differ between PyTorch and Fortran (fallback network)"
+            err_msg=("Total energies differ between PyTorch and "
+                     "Fortran (fallback network)")
         )
 
         # Compare forces
@@ -321,7 +328,8 @@ class TestPyTorchFortranInferenceEquivalence:
         fortran_forces = fortran_results.forces[0]
 
         assert torch_forces.shape == fortran_forces.shape, \
-            f"Force shapes differ: {torch_forces.shape} vs {fortran_forces.shape}"
+            f"Force shapes differ: {torch_forces.shape} " \
+            f"vs {fortran_forces.shape}"
 
         # Check a few atoms
         n_atoms = min(5, torch_forces.shape[0])
@@ -336,7 +344,8 @@ class TestPyTorchFortranInferenceEquivalence:
             fortran_forces,
             rtol=1e-5,
             atol=1e-5,
-            err_msg="Forces differ between PyTorch and Fortran (fallback network)"
+            err_msg=("Forces differ between PyTorch and Fortran "
+                     "(fallback network)")
         )
 
         print("  ✓ Fallback network produces equivalent results!")
