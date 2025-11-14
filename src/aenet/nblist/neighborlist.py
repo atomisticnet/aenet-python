@@ -61,10 +61,14 @@ class NeighborList(object):
             self._avec = np.array([[a, 0.0, 0.0],
                                    [0.0, b, 0.0],
                                    [0.0, 0.0, c]])
+            # Store the shift for later use
+            self._coord_shift = cmin
             coordinates -= cmin
         else:
             self._pbc = True
             self._avec = np.array(lattice_vectors)
+            # No shift for periodic structures
+            self._coord_shift = np.zeros(3)
 
         if cartesian:
             self._coo = self.cart2frac(coordinates)
@@ -85,7 +89,9 @@ class NeighborList(object):
             c = np.linalg.norm(self._avec[2])
             N = max(1, round(self._ncoo/natoms_per_box))
             d = (float(a*b*c)/float(N))**(1./3.)
-            self._nboxes = (int(round(a/d)), int(round(b/d)), int(round(c/d)))
+            self._nboxes = (max(1, int(round(a/d))),
+                            max(1, int(round(b/d))),
+                            max(1, int(round(c/d))))
 
         self._nboxes_tot = np.prod(self._nboxes)
         self._box = np.empty(self._ncoo, dtype=int)
@@ -107,15 +113,35 @@ class NeighborList(object):
         avec_box[0] /= float(self._nboxes[0])
         avec_box[1] /= float(self._nboxes[1])
         avec_box[2] /= float(self._nboxes[2])
-        T_box = self.star_setup(avec_box, self._range, self._tol)
-        # represent these T vectors in the grid base to reduce their
-        # number to the unique ones only:
-        self._T_box = []
-        for T in T_box:
-            bid = self._box_ID(*T)
-            if (not (bid in self._T_box)) and (bid != 0):
-                self._T_box.append(bid)
-        self._T_box = np.array(self._T_box, dtype=int)
+
+        if self._pbc:
+            T_box = self.star_setup(avec_box, self._range, self._tol)
+            # represent these T vectors in the grid base to reduce their
+            # number to the unique ones only:
+            self._T_box = []
+            for T in T_box:
+                bid = self._box_ID(*T)
+                if (not (bid in self._T_box)) and (bid != 0):
+                    self._T_box.append(bid)
+            self._T_box = np.array(self._T_box, dtype=int)
+        else:
+            # For non-PBC, check neighboring boxes without periodic wrapping.
+            # Store raw offsets so we can validate per-atom later.
+            box_size = np.array(
+                [np.linalg.norm(avec_box[i]) for i in range(3)])
+            if self._range:
+                n_check = np.ceil(self._range / box_size).astype(int)
+            else:
+                n_check = np.ones(3, dtype=int)  # nearest neighbors only
+
+            offsets = []
+            for ix in range(-n_check[0], n_check[0]+1):
+                for iy in range(-n_check[1], n_check[1]+1):
+                    for iz in range(-n_check[2], n_check[2]+1):
+                        if (ix, iy, iz) == (0, 0, 0):
+                            continue
+                        offsets.append((int(ix), int(iy), int(iz)))
+            self._T_box = offsets
 
         self._build_neighbor_list()
 
@@ -234,9 +260,23 @@ class NeighborList(object):
         nbl = self._box_contents(bid_home)
         # remove the original atom from the list
         del nbl[nbl.index(i)]
-        for T in self._T_box:
-            bid = self._add_T_to_bid(bid_home, T)
-            nbl += self._box_contents(bid)
+
+        if self._pbc:
+            for T in self._T_box:
+                bid = self._add_T_to_bid(bid_home, T)
+                if bid != FINAL:
+                    nbl += self._box_contents(bid)
+        else:
+            na, nb, nc = self._box_nabc(bid_home)
+            for da, db, dc in self._T_box:
+                bid = self._box_ID(na + da, nb + db, nc + dc)
+                if bid != FINAL:
+                    nbl += self._box_contents(bid)
+            # Deduplicate indices for non-periodic systems to
+            # avoid double counting
+            nbl = list(dict.fromkeys(nbl))
+            # Ensure the central atom is not included
+            nbl = [k for k in nbl if k != i]
 
         return nbl
 
@@ -277,9 +317,9 @@ class NeighborList(object):
             dr = self._tol
 
         if r and (r <= self._range):
-            r2 = (r+dr)**2
+            r2 = r**2
         elif self._range:
-            r2 = (self._range+dr)**2
+            r2 = self._range**2
         else:
             print("Error: no range specified.")
             print("Use: get_nearest_neighbors() instead")
@@ -292,36 +332,78 @@ class NeighborList(object):
         coo_i_T = -self._T_latt + coo_i
         coo_i_T = np.dot(coo_i_T, self._avec)
 
-        # periodic images of i
-        coo_j = np.dot(self._coo[i], self._avec)
-        v_ij = coo_i_T - coo_j
-        d2 = np.sum(v_ij*v_ij, axis=1)
-        idx = (d2 <= r2) * (d2 > EPS)  # filter out the atom itself
-        if return_coords and return_self:
-            dist.append([0.0])
-            Tvecs.append([0, 0, 0])
+        # periodic images of i (only relevant for PBC systems)
+        if self._pbc:
+            coo_j = np.dot(self._coo[i], self._avec)
+            v_ij = coo_i_T - coo_j
+            d2 = np.sum(v_ij*v_ij, axis=1)
+            # Include periodic images of i within cutoff
+            # (including self at d=0)
+            idx = (d2 <= r2)
+            if np.any(idx):
+                dist += list(np.sqrt(d2[idx]))
+                Tvecs += list(self._T_latt[idx])
+                nbl += len(d2[idx]) * [i]
+                if return_coords:
+                    coords_original = coo_i_T[idx] + self._coord_shift
+                    coords += list(coords_original)
+        elif return_self:
+            # For non-PBC, just add self when requested
             nbl.append(i)
-            coords.append(coo_i)
-        if np.any(idx):
-            dist += list(np.sqrt(d2[idx]))
-            Tvecs += list(self._T_latt[idx])
-            nbl += len(d2[idx])*[i]
+            dist.append(0.0)
+            Tvecs.append([0, 0, 0])
             if return_coords:
-                coords += list(v_ij[idx] + coo_i)
+                coords.append(
+                    np.dot(self._coo[i], self._avec) + self._coord_shift)
 
         # further possible neighbors
         possible = self.get_possible_neighbors(i)
         for j in possible:
+            # Guard against self-inclusion via box enumeration
+            if j == i:
+                continue
             coo_j = np.dot(self._coo[j], self._avec)
             v_ij = coo_i_T - coo_j
             d2 = np.sum(v_ij*v_ij, axis=1)
-            idx = (d2 <= r2)
+            # Exclude self (zero distance) and apply strict cutoff
+            idx = (d2 < (r2 - EPS)) * (d2 > EPS)
             if np.any(idx):
                 dist += list(np.sqrt(d2[idx]))
                 Tvecs += list(self._T_latt[idx])
                 nbl += len(d2[idx])*[j]
                 if return_coords:
-                    coords += list(v_ij[idx] + coo_i)
+                    # v_ij = coo_i_T - coo_j means coo_j = coo_i_T - v_ij
+                    # Return j's coordinates as seen from each valid image of i
+                    coo_j_for_images = coo_i_T[idx] - v_ij[idx]
+                    coords_original = coo_j_for_images + self._coord_shift
+                    coords += list(coords_original)
+
+        # Deduplicate neighbors in non-periodic case
+        # (no periodic images expected)
+        if not self._pbc:
+            if return_coords:
+                unique = {}
+                for jj, cc, dd, tt in zip(nbl, coords, dist, Tvecs):
+                    # keep the closest entry if duplicates exist
+                    if (jj not in unique) or (dd < unique[jj][1] - EPS):
+                        unique[jj] = (cc, dd, tt)
+                nbl = list(unique.keys())
+                coords = [unique[j][0] for j in nbl]
+                dist = [unique[j][1] for j in nbl]
+                Tvecs = [unique[j][2] for j in nbl]
+            else:
+                seen = set()
+                nbl_new = []
+                dist_new = []
+                Tvecs_new = []
+                for jj, dd, tt in zip(nbl, dist, Tvecs):
+                    if jj in seen:
+                        continue
+                    seen.add(jj)
+                    nbl_new.append(jj)
+                    dist_new.append(dd)
+                    Tvecs_new.append(tt)
+                nbl, dist, Tvecs = nbl_new, dist_new, Tvecs_new
 
         if return_coords:
             return (nbl, coords, dist, Tvecs)
@@ -801,16 +883,24 @@ class NeighborList(object):
         Divide cell into boxes and assign each coordinate
         """
 
-        self._wrap_to_home_cell()
+        # Only wrap if periodic boundary conditions are enabled
+        if self._pbc:
+            self._wrap_to_home_cell()
 
         # assign each coordinate to a box
         for i in range(self._ncoo):
-            na = int(np.floor(self._coo[i][0]*self._nboxes[0]))
-            nb = int(np.floor(self._coo[i][1]*self._nboxes[1]))
-            nc = int(np.floor(self._coo[i][2]*self._nboxes[2]))
+            # Clamp fractional coordinates to [0, 1 - eps]
+            # to avoid edge spillover
+            fx = min(max(self._coo[i][0], 0.0), 1.0 - np.finfo(float).eps)
+            fy = min(max(self._coo[i][1], 0.0), 1.0 - np.finfo(float).eps)
+            fz = min(max(self._coo[i][2], 0.0), 1.0 - np.finfo(float).eps)
+            na = int(np.floor(fx * self._nboxes[0]))
+            nb = int(np.floor(fy * self._nboxes[1]))
+            nc = int(np.floor(fz * self._nboxes[2]))
             bid = self._box_ID(na, nb, nc)
             self._box[i] = bid
-            self._add_to_box(bid, i)
+            if bid != FINAL:
+                self._add_to_box(bid, i)
 
     def _wrap_to_home_cell(self):
         """
@@ -833,11 +923,19 @@ class NeighborList(object):
         Nbb = self._nboxes[1]
         Nbc = self._nboxes[2]
 
-        bid = int(((na + Nba) % Nba))
-        bid += int(((nb + Nbb) % Nbb)*Nba)
-        bid += int(((nc + Nbc) % Nbc)*Nbb*Nba)
+        if self._pbc:
+            bid = int(((na + Nba) % Nba))
+            bid += int(((nb + Nbb) % Nbb) * Nba)
+            bid += int(((nc + Nbc) % Nbc) * Nbb * Nba)
+            return bid
 
-        return bid
+        if (0 <= na < Nba) and (0 <= nb < Nbb) and (0 <= nc < Nbc):
+            bid = int(na)
+            bid += int(nb * Nba)
+            bid += int(nc * Nba * Nbb)
+            return bid
+
+        return FINAL
 
     def _box_nabc(self, bid):
         """
@@ -859,9 +957,21 @@ class NeighborList(object):
         box ID BID.
         """
 
+        if (bid == FINAL) or (T == FINAL):
+            return FINAL
+
         (na, nb, nc) = self._box_nabc(bid)
-        (ta, tb, tc) = self._box_nabc(T)
-        return self._box_ID(*np.add((na, nb, nc), (ta, tb, tc)))
+
+        if self._pbc:
+            (ta, tb, tc) = self._box_nabc(T)
+            return self._box_ID(na + ta, nb + tb, nc + tc)
+
+        if isinstance(T, tuple):
+            ta, tb, tc = T
+        else:
+            ta, tb, tc = self._box_nabc(T)
+
+        return self._box_ID(na + ta, nb + tb, nc + tc)
 
     def _add_to_box(self, bid, i):
         """
@@ -891,8 +1001,10 @@ class NeighborList(object):
 
         ids = []
         i = self._first[bid]
-        if i != FINAL:
-            ids.append(i)
+        # If the box is empty, return immediately to avoid invalid indexing
+        if i == FINAL:
+            return ids
+        ids.append(i)
         while self._next[i] != FINAL:
             i = self._next[i]
             ids.append(i)
