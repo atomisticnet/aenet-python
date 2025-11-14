@@ -20,6 +20,7 @@ DEFAULT = {
         "train_x_path": None,
         "predict_x_path": None,
         "trnset2ascii_x_path": None,
+        "aenet_lib_path": None,
         "mpi_enabled": False,
         "mpi_launcher": "mpirun -np {num_proc} {exec}",
     },

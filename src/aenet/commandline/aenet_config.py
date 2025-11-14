@@ -113,13 +113,16 @@ class Config(AenetToolABC):
 
         print('aenet root path: {}'.format(aenet_dict['root_path']))
 
-        def get_exec_path(name, subdir, current):
+        def get_exec_path(name, subdirs, current):
             if current is not None and os.path.exists(current):
                 path_try = current
             else:
-                path_try = glob.glob(
-                    os.path.join(aenet_dict['root_path'],
-                                 subdir, '{}*'.format(name)))
+                path_try = []
+                for subdir in subdirs:
+                    path_try += glob.glob(
+                        os.path.join(aenet_dict['root_path'],
+                                     '**', subdir, '{}*'.format(name)),
+                        recursive=True)
                 path_try = path_try[0] if len(path_try) > 0 else ''
             path = input("Path to `{}` [{}]: ".format(name, path_try))
             path = path if len(path) > 0 else path_try
@@ -129,13 +132,15 @@ class Config(AenetToolABC):
             return path
 
         aenet_dict['generate_x_path'] = get_exec_path(
-            'generate.x', 'bin', aenet_dict['generate_x_path'])
+            'generate.x', ['bin'], aenet_dict['generate_x_path'])
         aenet_dict['train_x_path'] = get_exec_path(
-            'train.x', 'bin', aenet_dict['train_x_path'])
+            'train.x', ['bin'], aenet_dict['train_x_path'])
         aenet_dict['predict_x_path'] = get_exec_path(
-            'predict.x', 'bin', aenet_dict['predict_x_path'])
+            'predict.x', ['bin'], aenet_dict['predict_x_path'])
         aenet_dict['trnset2ascii_x_path'] = get_exec_path(
-            'trnset2ASCII.x', 'tools', aenet_dict['trnset2ascii_x_path'])
+            'trnset2ASCII.x', ['tools'], aenet_dict['trnset2ascii_x_path'])
+        aenet_dict['aenet_lib_path'] = get_exec_path(
+            'libaenet.[sd][oy]*', ['lib', 'src'], aenet_dict['aenet_lib_path'])
         return {'aenet': aenet_dict}
 
     def configure_mpi(self, args):
