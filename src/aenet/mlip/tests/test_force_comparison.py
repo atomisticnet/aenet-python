@@ -12,6 +12,8 @@ particularly for non-periodic (isolated) structures.
 
 import os
 import unittest
+import tempfile
+import shutil
 import numpy as np
 
 from aenet.mlip import (LibAenetInterface, AenetCalculator,
@@ -33,14 +35,44 @@ class TestForceComparison(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Set up test data paths."""
-        # Get path to shared test data
-        test_dir = os.path.dirname(__file__)
-        cls.data_dir = os.path.join(test_dir, '../../tests/data')
+        """Set up test data paths and create temporary working directory."""
+        # Store original working directory
+        cls.original_cwd = os.getcwd()
 
+        # Get path to shared test data
+        test_dir = os.path.dirname(os.path.abspath(__file__))
+        source_data_dir = os.path.join(test_dir, '../../tests/data')
+
+        # Create temporary directory for test execution
+        cls.temp_dir = tempfile.mkdtemp(prefix='aenet_test_')
+
+        # Copy required test data files to temp directory
+        # Copy binary potential files
+        for element in ['Ti', 'O']:
+            src_file = os.path.join(source_data_dir, f'{element}.nn')
+            if os.path.exists(src_file):
+                shutil.copy2(src_file, cls.temp_dir)
+
+        # Copy XSF structures directory if it exists
+        source_xsf_dir = os.path.join(source_data_dir, 'xsf-TiO2')
+        if os.path.exists(source_xsf_dir):
+            dest_xsf_dir = os.path.join(cls.temp_dir, 'xsf-TiO2')
+            shutil.copytree(source_xsf_dir, dest_xsf_dir)
+
+        # Copy cluster file if it exists
+        cluster_source = os.path.join(
+            test_dir, '../../torch_training/tests/data/TiO2-cluster-12A.xsf'
+        )
+        if os.path.exists(cluster_source):
+            shutil.copy2(cluster_source, cls.temp_dir)
+
+        # Change to temporary directory
+        os.chdir(cls.temp_dir)
+
+        # Set up paths relative to temp directory
         cls.potential_paths = {
-            'Ti': os.path.join(cls.data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(cls.data_dir, 'O.nn.ascii')
+            'Ti': 'Ti.nn',
+            'O': 'O.nn'
         }
 
         # Check if test data exists
@@ -48,13 +80,11 @@ class TestForceComparison(unittest.TestCase):
             os.path.exists(p) for p in cls.potential_paths.values()
         )
 
-        cls.xsf_dir = os.path.join(cls.data_dir, 'xsf-TiO2')
+        cls.xsf_dir = 'xsf-TiO2'
         cls.has_structures = os.path.exists(cls.xsf_dir)
 
-        # Check for torch training test data (isolated cluster)
-        cls.cluster_file = os.path.join(
-            test_dir, '../../torch_training/tests/data/TiO2-cluster-12A.xsf'
-        )
+        # Check for cluster file
+        cls.cluster_file = 'TiO2-cluster-12A.xsf'
         cls.has_cluster = os.path.exists(cls.cluster_file)
 
         # Check if predict.x is available
@@ -62,6 +92,16 @@ class TestForceComparison(unittest.TestCase):
         cls.has_predict_x = os.path.exists(
             aenet_paths.get('predict_x_path', '')
         )
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up: return to original directory and remove temp directory."""
+        # Change back to original directory
+        os.chdir(cls.original_cwd)
+
+        # Remove temporary directory and all its contents
+        if hasattr(cls, 'temp_dir') and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
 
     def setUp(self):
         """Set up each test."""
@@ -177,14 +217,14 @@ class TestForceComparison(unittest.TestCase):
 
         # Method 1: LibAenetInterface
         interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         lib_energy, lib_forces = interface.predict(structure, forces=True)
 
         # Method 2: AenetCalculator (ASE)
         atoms = ase.io.read(xsf_file)
         calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         atoms.calc = calc
         calc_energy = atoms.get_potential_energy()
@@ -194,7 +234,7 @@ class TestForceComparison(unittest.TestCase):
         subprocess_forces = None
         if self.has_predict_x:
             potential = ANNPotential.from_files(
-                self.potential_paths, potential_format='ascii'
+                self.potential_paths
             )
             results = potential.predict([structure], eval_forces=True)
             subprocess_energy = results.total_energy[0]
@@ -243,14 +283,14 @@ class TestForceComparison(unittest.TestCase):
 
         # Method 1: LibAenetInterface (Python neighbor list)
         interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         lib_energy, lib_forces = interface.predict(structure, forces=True)
 
         # Method 2: AenetCalculator (ASE neighbor list)
         atoms = ase.io.read(self.cluster_file)
         calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         atoms.calc = calc
         calc_energy = atoms.get_potential_energy()
@@ -260,7 +300,7 @@ class TestForceComparison(unittest.TestCase):
         subprocess_forces = None
         if self.has_predict_x:
             potential = ANNPotential.from_files(
-                self.potential_paths, potential_format='ascii'
+                self.potential_paths
             )
             results = potential.predict([self.cluster_file], eval_forces=True)
             subprocess_energy = results.total_energy[0]
@@ -311,7 +351,7 @@ class TestForceComparison(unittest.TestCase):
 
         # Method 1: LibAenetInterface
         interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         lib_energy, lib_forces = interface.predict(structure, forces=True)
 
@@ -323,7 +363,7 @@ class TestForceComparison(unittest.TestCase):
             pbc=False
         )
         calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii'
+            self.potential_paths
         )
         atoms.calc = calc
         calc_energy = atoms.get_potential_energy()
