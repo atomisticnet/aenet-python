@@ -17,6 +17,7 @@ outputs/
 debug/
 profiling/
 fortran/
+dev-notes/
 .vscode/
 
 # Sphinx build and generated files
