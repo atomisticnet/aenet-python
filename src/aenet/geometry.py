@@ -1015,7 +1015,7 @@ class AtomicStructure(object):
         # Prefer Torch-based neighbor list if available;
         # fall back to NumPy version
         try:
-            from .torch_featurize.neighborlist \
+            from .torch_nblist \
                 import TorchNeighborList  # type: ignore
 
             # Use TorchNeighborList with automatic truncation handling

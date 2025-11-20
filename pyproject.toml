@@ -138,3 +138,7 @@ line-ending = "auto"
 markers = [
     "cpu: mark tests intended for CPU-only execution or labeled as CPU",
 ]
+norecursedirs = [
+    "external",
+    "fortran",
+]

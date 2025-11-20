@@ -14,8 +14,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 
+
 try:
-    from torch_cluster import radius_graph
+    from torch_cluster import radius, radius_graph
 
     TORCH_CLUSTER_AVAILABLE = True
 except ImportError:
@@ -43,6 +44,20 @@ class TorchNeighborList:
         >>> result = nbl.get_neighbors(positions)
         >>> edge_index = result['edge_index']  # (2, num_edges)
         >>> distances = result['distances']    # (num_edges,)
+
+    Notes:
+        - Default PBC backend is 'ghost' which constructs a support set of
+          ghost images near periodic boundaries and performs a single
+          bipartite radius search (support -> central).
+        - Offsets returned under PBC are integer lattice offsets defined
+          relative to wrapped fractional coordinates (positions wrapped
+          to [0,1) before offsetting). Downstream code should reconstruct
+          displacements as:
+              r_ij = ((frac[j] + offsets) @ cell) - (frac[i] @ cell)
+          where frac = remainder(positions @ inv(cell), 1.0).
+        - Fully differentiable and GPU-compatible. Truncation is handled by
+          auto-growing max_num_neighbors up to auto_max_neighbors with
+          warnings.
     """
 
     def __init__(
@@ -56,6 +71,7 @@ class TorchNeighborList:
         truncation_handling: str = "auto",
         auto_multiplier: int = 2,
         auto_max_neighbors: int = 65536,
+        pbc_backend: str = "ghost",
     ):
         """
         Initialize neighbor list.
@@ -91,6 +107,15 @@ class TorchNeighborList:
         self.truncation_handling = truncation_handling
         self.auto_multiplier = int(auto_multiplier)
         self.auto_max_neighbors = int(auto_max_neighbors)
+        self.pbc_backend = pbc_backend
+        # Deprecation notice for legacy backend
+        if self.pbc_backend == "legacy":
+            warnings.warn(
+                "TorchNeighborList: legacy PBC backend is deprecated and will"
+                "be removed in a future release. Use pbc_backend='ghost' "
+                "(default).",
+                DeprecationWarning,
+            )
 
         # Validate cutoff_dict if both types and dict are provided
         if cutoff_dict is not None and atom_types is not None:
@@ -344,6 +369,261 @@ class TorchNeighborList:
             edge_index: (2, num_edges) neighbor pairs [source, target]
             distances: (num_edges,) pairwise distances in Angstroms
             offsets: (num_edges, 3) cell offset vectors for each edge
+        """
+        backend = getattr(self, "pbc_backend", "legacy")
+        if backend == "ghost":
+            return self._get_neighbors_pbc_cell_list(
+                positions, cell, pbc, fractional
+            )
+        elif backend == "legacy":
+            return self._get_neighbors_pbc_old(
+                positions, cell, pbc, fractional
+            )
+        else:
+            raise ValueError(f"Unknown pbc_backend: {backend}")
+
+    def _get_neighbors_pbc_cell_list(
+        self,
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        pbc: Optional[torch.Tensor] = None,
+        fractional: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Optimized PBC neighbor finding using ghost atoms.
+
+        Instead of iterating over cells in Python (slow), we replicate atoms
+        near the boundaries to create "ghost" atoms, then run a single
+        radius_graph on the extended system.
+        """
+        if pbc is None:
+            pbc = torch.tensor(
+                [True, True, True], dtype=torch.bool, device=self.device
+            )
+        else:
+            pbc = pbc.to(self.device)
+
+        positions = positions.to(self.device).to(self.dtype)
+        cell = cell.to(self.device).to(self.dtype)
+
+        # Ensure we have fractional coordinates
+        if not fractional:
+            try:
+                cell_inv = torch.linalg.inv(cell)
+                positions_frac = positions @ cell_inv
+            except RuntimeError:
+                positions_frac = torch.zeros_like(positions)
+        else:
+            positions_frac = positions
+
+        # Wrap fractional coordinates to [0, 1)
+        positions_frac = torch.remainder(positions_frac, 1.0)
+
+        # Calculate perpendicular widths of the cell to determine cutoff
+        # in fractional coords
+        # Volume = det(cell)
+        # Area_i = |a_j x a_k|
+        # Width_i = Volume / Area_i
+        volume = torch.abs(torch.det(cell)).clamp_min(1e-12)
+        cross_0 = torch.norm(torch.linalg.cross(cell[1], cell[2]))
+        cross_1 = torch.norm(torch.linalg.cross(cell[2], cell[0]))
+        cross_2 = torch.norm(torch.linalg.cross(cell[0], cell[1]))
+
+        widths = volume / torch.stack([cross_0, cross_1, cross_2]
+                                      ).clamp_min(1e-12)
+        cutoff_frac = (self.cutoff / widths).to(self.device) * 1.01
+        # Number of periodic image layers needed along each lattice vector
+        search_layers = torch.ceil(self.cutoff / widths).to(torch.long)
+
+        # Start with original atoms
+        # We track: (positions, indices, offsets)
+        # indices: original atom index
+        # offsets: (3,) integer offset of the image
+
+        # Current set of atoms (starts with central cell)
+        current_pos = positions_frac
+        current_indices = torch.arange(len(positions), device=self.device)
+        current_offsets = torch.zeros((len(positions), 3),
+                                      dtype=torch.long,
+                                      device=self.device)
+
+        # Iteratively replicate along each periodic dimension
+        for i in range(3):
+            if not pbc[i]:
+                continue
+
+            # Determine how many image layers are required along axis i
+            s_i = int(search_layers[i].item())
+            if s_i <= 0:
+                continue
+
+            # For each layer k, replicate a snapshot of the current set
+            # to avoid re-replicating newly added ghosts within the same k
+            for k in range(1, s_i + 1):
+                base_pos_k = current_pos
+                base_idx_k = current_indices
+                base_off_k = current_offsets
+
+                # Lower boundary: replicate to +k (image +k)
+                mask_lower = base_pos_k[:, i] < cutoff_frac[i]
+                if mask_lower.any():
+                    ghosts_pos_lower = base_pos_k[mask_lower].clone()
+                    ghosts_pos_lower[:, i] = ghosts_pos_lower[:, i] + float(k)
+                    ghosts_indices_lower = base_idx_k[mask_lower]
+                    ghosts_offsets_lower = base_off_k[mask_lower].clone()
+                    ghosts_offsets_lower[:, i] = ghosts_offsets_lower[:, i] + k
+
+                    current_pos = torch.cat([current_pos, ghosts_pos_lower],
+                                            dim=0)
+                    current_indices = torch.cat([current_indices,
+                                                 ghosts_indices_lower], dim=0)
+                    current_offsets = torch.cat([current_offsets,
+                                                 ghosts_offsets_lower], dim=0)
+
+                # Upper boundary: replicate to -k (image -k)
+                mask_upper = base_pos_k[:, i] > (1.0 - cutoff_frac[i])
+                if mask_upper.any():
+                    ghosts_pos_upper = base_pos_k[mask_upper].clone()
+                    ghosts_pos_upper[:, i] = ghosts_pos_upper[:, i] - float(k)
+                    ghosts_indices_upper = base_idx_k[mask_upper]
+                    ghosts_offsets_upper = base_off_k[mask_upper].clone()
+                    ghosts_offsets_upper[:, i] = ghosts_offsets_upper[:, i] - k
+
+                    current_pos = torch.cat([current_pos, ghosts_pos_upper],
+                                            dim=0)
+                    current_indices = torch.cat([current_indices,
+                                                 ghosts_indices_upper], dim=0)
+                    current_offsets = torch.cat([current_offsets,
+                                                 ghosts_offsets_upper], dim=0)
+
+        # Deduplicate ghosts by (original_index, offsets) to avoid duplicates
+        # that can arise from different replication paths.
+        if current_pos.shape[0] > 0:
+            keys = torch.stack(
+                [
+                    current_indices.to(torch.long),
+                    current_offsets[:, 0],
+                    current_offsets[:, 1],
+                    current_offsets[:, 2],
+                ],
+                dim=1,
+            )
+            # Build first-occurrence mask using a Python set
+            # (small int tensors)
+            seen = set()
+            keep_list = []
+            for r in keys.cpu().tolist():
+                t = tuple(r)
+                if t in seen:
+                    keep_list.append(False)
+                else:
+                    seen.add(t)
+                    keep_list.append(True)
+            keep_mask = torch.tensor(keep_list, device=self.device,
+                                     dtype=torch.bool)
+            current_pos = current_pos[keep_mask]
+            current_indices = current_indices[keep_mask]
+            current_offsets = current_offsets[keep_mask]
+
+        # Convert all fractional positions to Cartesian
+        all_cart_pos = current_pos @ cell
+
+        # Run radius_graph on the full set
+        # We want neighbors for the original atoms (first N atoms)
+        # But radius_graph(x) computes all pairs.
+        # We can filter later, or use bipartite radius(x, y).
+        # x = all atoms (potential neighbors)
+        # y = original atoms (central cell)
+
+        n_orig = len(positions)
+        central_cart_pos = all_cart_pos[:n_orig]
+
+        # Use radius(x, y) -> neighbors of y in x
+        # x = support (all), y = query (central)
+        cur_max_nn = int(max(self.max_num_neighbors, 4096))
+        while True:
+            row, col = radius(
+                x=all_cart_pos,
+                y=central_cart_pos,
+                r=self._radius_with_inclusive(),
+                max_num_neighbors=cur_max_nn,
+                num_workers=1,
+            )
+            # Check truncation on the query (central) nodes
+            truncated = False
+            if row.numel() > 0:
+                deg = torch.bincount(row, minlength=n_orig)
+                truncated = deg.numel() > 0 and deg.max().item() >= cur_max_nn
+
+            if truncated:
+                if (self.truncation_handling == "auto"
+                        and cur_max_nn < self.auto_max_neighbors):
+                    new_max = min(cur_max_nn * self.auto_multiplier,
+                                  self.auto_max_neighbors)
+                    warnings.warn(
+                        f"TorchNeighborList: max_num_neighbors={cur_max_nn} "
+                        "hit under PBC (bipartite radius); "
+                        f"retrying with max_num_neighbors={new_max}.",
+                        RuntimeWarning,
+                    )
+                    cur_max_nn = int(new_max)
+                    continue
+                elif self.truncation_handling == "error":
+                    raise RuntimeError(
+                        "TorchNeighborList: neighbor list truncated at "
+                        f"max_num_neighbors={cur_max_nn} (PBC bipartite). "
+                        "Increase max_num_neighbors or reduce cutoff."
+                    )
+                elif self.truncation_handling == "warn":
+                    warnings.warn(
+                        f"TorchNeighborList: neighbor list may be truncated "
+                        f"at max_num_neighbors={cur_max_nn} (PBC bipartite).",
+                        RuntimeWarning
+                    )
+            break
+        # Update stored value if auto grew
+        self.max_num_neighbors = max(self.max_num_neighbors, cur_max_nn)
+
+        # row: indices in central_cart_pos (0 to N-1) -> source
+        # col: indices in all_cart_pos -> target
+
+        # Filter out self-loops (where index is same AND offset is zero)
+        # target indices (col) map to original indices via current_indices[col]
+        target_indices = current_indices[col]
+        target_offsets = current_offsets[col]
+
+        # Self loop condition: source_idx == target_idx AND target_offset == 0
+        # row is already source_idx (since we queried with
+        # central atoms 0..N-1)
+        mask_self = (row == target_indices) & (torch.all(target_offsets == 0,
+                                                         dim=1))
+        mask_valid = ~mask_self
+
+        # Apply mask
+        row = row[mask_valid]
+        col = col[mask_valid]
+        target_indices = target_indices[mask_valid]
+        target_offsets = target_offsets[mask_valid]
+
+        # Compute distances
+        diff = central_cart_pos[row] - all_cart_pos[col]
+        distances = torch.norm(diff, dim=1)
+
+        # Construct edge_index
+        edge_index = torch.stack([row, target_indices], dim=0)
+
+        return edge_index, distances, target_offsets
+
+    def _get_neighbors_pbc_old(
+        self,
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        pbc: Optional[torch.Tensor] = None,
+        fractional: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Legacy implementation: Find neighbors with periodic boundary
+        conditions.  (Kept for validation purposes)
         """
         if pbc is None:
             pbc = torch.tensor(
@@ -972,5 +1252,6 @@ class TorchNeighborList:
     def __repr__(self) -> str:
         return (
             f"TorchNeighborList(cutoff={self.cutoff}, "
-            f"device='{self.device}', dtype={self.dtype})"
+            f"device='{self.device}', dtype={self.dtype}, "
+            f"pbc_backend='{getattr(self, 'pbc_backend', 'ghost')}')"
         )

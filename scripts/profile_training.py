@@ -502,6 +502,13 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
     # Training config (CPU, no scheduler; energy_target=total
     # to avoid atomic ref issues)
     method = Adam(mu=args.lr, batchsize=args.batch_size)
+
+    # Map CLI args to new parameter names
+    force_resample_num_epochs = (
+        1 if args.force_resample_each_epoch == "on" else
+        int(args.epochs_per_force_window)
+    )
+
     cfg = TorchTrainingConfig(
         iterations=args.epochs,
         method=method,
@@ -509,15 +516,15 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
         force_weight=args.force_weight,
         force_fraction=float(args.force_fraction),
         force_sampling=str(args.force_sampling),
-        force_resample_each_epoch=(args.force_resample_each_epoch == "on"),
+        force_resample_num_epochs=force_resample_num_epochs,
         force_min_structures_per_epoch=int(
             args.force_min_structures_per_epoch),
         force_scale_unbiased=(args.force_scale_unbiased == "on"),
-        cached_features_for_force=(args.cached_features_for_force == "on"),
-        cache_neighbors=(args.cache_neighbors == "on"),
-        cache_triplets=(args.cache_triplets == "on"),
-        cache_persist_dir=(args.cache_persist_dir if args.cache_persist_dir else None),
-        epochs_per_force_window=int(args.epochs_per_force_window),
+        cache_features=(args.cached_features_for_force == "on"),
+        cache_force_neighbors=(args.cache_neighbors == "on"),
+        cache_force_triplets=(args.cache_triplets == "on"),
+        cache_persist_dir=(args.cache_persist_dir
+                           if args.cache_persist_dir else None),
         memory_mode="cpu",
         max_energy=None,
         max_forces=None,
@@ -526,11 +533,9 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
         timing=False,
         device="cpu",
         precision=args.precision,
-        energy_target="total",  # use total energies as labels
-        E_atomic=None,
+        atomic_energies=None,  # use total energies as labels
         normalize_features=True,
         normalize_energy=True,
-        cached_features=(args.cached == "on"),
         # DataLoader worker controls
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
@@ -541,17 +546,14 @@ def run_training_mode(args: argparse.Namespace) -> Dict[str, Any]:
 
     # High-level wall-time per epoch (derived from pot.history)
     t0 = time.perf_counter()
-    history = pot.train(
+    _ = pot.train(
         structures=structures,
         config=cfg,
-        checkpoint_dir=None,
-        checkpoint_interval=0,
-        max_checkpoints=0,
-        resume_from=None,
-        save_best=False,
-        use_scheduler=False,
     )
     total_time = time.perf_counter() - t0
+
+    # Access history directly from trainer
+    history = pot.history
 
     # Summaries
     n_epochs = len(history.get("epoch_times", []))

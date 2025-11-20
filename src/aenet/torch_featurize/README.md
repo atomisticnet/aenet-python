@@ -52,7 +52,7 @@ Replace `torch-2.1.0` with your installed PyTorch version and `cu118`/`cu121` wi
 
 ```python
 import torch
-from aenet.torch_featurize import TorchNeighborList
+from aenet.torch_nblist import TorchNeighborList
 
 # Water molecule positions (Cartesian coordinates in Angstroms)
 positions = torch.tensor([
@@ -75,7 +75,7 @@ num_neighbors = result['num_neighbors']  # (N,) neighbors per atom
 
 ```python
 import torch
-from aenet.torch_featurize import TorchNeighborList
+from aenet.torch_nblist import TorchNeighborList
 
 # Fractional coordinates [0, 1)
 positions = torch.rand(100, 3, dtype=torch.float64)
@@ -101,7 +101,7 @@ offsets = result['offsets']        # (num_edges, 3) cell offsets
 
 ```python
 import torch
-from aenet.torch_featurize import TorchNeighborList
+from aenet.torch_nblist import TorchNeighborList
 
 # Create data on GPU
 positions = torch.randn(1000, 3, dtype=torch.float64, device='cuda')

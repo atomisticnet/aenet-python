@@ -12,7 +12,7 @@ import torch.nn as nn
 from torch_scatter import scatter_add
 
 from .chebyshev import AngularBasis, RadialBasis
-from .neighborlist import TorchNeighborList
+from ..torch_nblist import TorchNeighborList
 from .graph import center_ids_of_edge as _center_ids_of_edge
 
 
@@ -26,6 +26,20 @@ class ChebyshevDescriptor(nn.Module):
     - Typespin coefficients centered around zero
 
     This exactly matches the behavior of aenet's Fortran implementation.
+
+    Notes
+    -----
+    - Under PBC, neighbor displacements are reconstructed using wrapped
+      fractional positions and integer image offsets provided by the ghost
+      PBC backend of TorchNeighborList. Specifically:
+          positions_frac = remainder(positions @ inv(cell), 1.0)
+          r_ij = ((positions_frac[j] + offsets) @ cell)
+                 - (positions_frac[i] @ cell)
+      This aligns featurization with the neighbor list semantics and ensures
+      PBC vs explicit supercell consistency.
+    - The neighbor cutoff used internally for neighbor list construction is
+      max(rad_cutoff, ang_cutoff) to ensure complete coverage for both
+      basis sets.
     """
 
     def __init__(
@@ -38,6 +52,7 @@ class ChebyshevDescriptor(nn.Module):
         min_cutoff: float = 0.55,
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
+        profile_timing: bool = False,
     ):
         """
         Initialize Chebyshev descriptor.
@@ -51,6 +66,8 @@ class ChebyshevDescriptor(nn.Module):
             min_cutoff: Minimum distance cutoff (Angstroms)
             device: 'cpu' or 'cuda'
             dtype: torch.float64 for double precision
+            profile_timing: If True, track separate timings for neighbor
+                list construction vs feature computation
         """
         super().__init__()
 
@@ -63,6 +80,12 @@ class ChebyshevDescriptor(nn.Module):
         self.min_cutoff = min_cutoff
         self.device = device
         self.dtype = dtype
+
+        # Timing profiling
+        self.profile_timing = profile_timing
+        self.nblist_time = 0.0
+        self.feature_time = 0.0
+        self.nblist_calls = 0
 
         # Multi-species flag
         self.multi = self.n_species > 1
@@ -164,6 +187,40 @@ class ChebyshevDescriptor(nn.Module):
     def get_n_features(self) -> int:
         """Get number of features (same for all species)."""
         return self.n_features
+
+    def get_timing_stats(self) -> dict:
+        """
+        Get timing statistics for neighbor list vs feature computation.
+
+        Returns
+        -------
+            Dictionary with keys:
+                - nblist_time: Total time spent in neighbor list construction
+                - feature_time: Total time spent in feature computation
+                - nblist_calls: Number of neighbor list calls
+                - nblist_time_per_call: Average time per neighbor list call
+                - feature_time_per_call: Average time per feature computation
+        """
+        stats = {
+            'nblist_time': self.nblist_time,
+            'feature_time': self.feature_time,
+            'nblist_calls': self.nblist_calls,
+        }
+        if self.nblist_calls > 0:
+            stats['nblist_time_per_call'
+                  ] = self.nblist_time / self.nblist_calls
+            stats['feature_time_per_call'
+                  ] = self.feature_time / self.nblist_calls
+        else:
+            stats['nblist_time_per_call'] = 0.0
+            stats['feature_time_per_call'] = 0.0
+        return stats
+
+    def reset_timing_stats(self):
+        """Reset timing statistics to zero."""
+        self.nblist_time = 0.0
+        self.feature_time = 0.0
+        self.nblist_calls = 0
 
     def compute_radial_features(
         self,
@@ -525,11 +582,27 @@ class ChebyshevDescriptor(nn.Module):
         Returns
         -------
             features: (N, n_features) feature matrix
+
+        Notes
+        -----
+        For periodic systems, displacements are reconstructed using wrapped
+        fractional coordinates and integer offsets from the neighbor list:
+            positions_frac = remainder(positions @ inv(cell), 1.0)
+            r_ij = ((positions_frac[j] + offsets) @ cell)
+                   - (positions_frac[i] @ cell)
+        This matches the semantics of the ghost PBC backend for correctness and
+        PBC vs supercell consistency.
         """
+        import time
+
         # Move inputs to device
         positions = positions.to(self.device).to(self.dtype)
         if cell is not None:
             cell = cell.to(self.device).to(self.dtype)
+
+        # Timing: Neighbor list construction
+        if self.profile_timing:
+            t_nb_start = time.perf_counter()
 
         # Get neighbor data using the maximum cutoff
         neighbor_data = self.nbl.get_neighbors(
@@ -552,9 +625,14 @@ class ChebyshevDescriptor(nn.Module):
         j_indices = edge_index[1]
 
         if cell is not None and offsets is not None:
+            # Use wrapped fractional positions to be consistent with the PBC
+            # ghost backend offsets (which are defined relative to wrapped
+            # fractional coords)
+            cell_inv = torch.linalg.inv(cell)
+            positions_frac = torch.remainder(positions @ cell_inv, 1.0)
             r_ij = (
-                positions[j_indices] + offsets.to(self.dtype) @ cell
-            ) - positions[i_indices]
+                (positions_frac[j_indices] + offsets.to(self.dtype)) @ cell
+            ) - (positions_frac[i_indices] @ cell)
         else:
             r_ij = positions[j_indices] - positions[i_indices]
 
@@ -571,9 +649,19 @@ class ChebyshevDescriptor(nn.Module):
             neighbor_indices.append(atom_neighbors)
             neighbor_vectors.append(atom_vectors)
 
-        # Call core forward method
-        return self.forward(positions, species,
-                            neighbor_indices, neighbor_vectors)
+        if self.profile_timing:
+            self.nblist_time += time.perf_counter() - t_nb_start
+            self.nblist_calls += 1
+            t_feat_start = time.perf_counter()
+
+        # Call core forward method (feature computation)
+        features = self.forward(positions, species,
+                                neighbor_indices, neighbor_vectors)
+
+        if self.profile_timing:
+            self.feature_time += time.perf_counter() - t_feat_start
+
+        return features
 
     def _compute_radial_gradients(
         self,
@@ -911,9 +999,13 @@ class ChebyshevDescriptor(nn.Module):
         j_indices = edge_index[1]
 
         if cell is not None and offsets is not None:
+            # Use wrapped fractional positions to align with
+            # ghost-backend offsets
+            cell_inv = torch.linalg.inv(cell)
+            positions_frac = torch.remainder(positions_device @ cell_inv, 1.0)
             r_ij = (
-                positions_device[j_indices] + offsets.to(self.dtype) @ cell
-            ) - positions_device[i_indices]
+                (positions_frac[j_indices] + offsets.to(self.dtype)) @ cell
+            ) - (positions_frac[i_indices] @ cell)
         else:
             r_ij = positions_device[j_indices] - positions_device[i_indices]
 
@@ -1452,10 +1544,14 @@ class ChebyshevDescriptor(nn.Module):
         j_indices = edge_index[1]
 
         if cell is not None and offsets is not None:
-            # Periodic system: include cell offsets
+            # Periodic system: reconstruct displacements using wrapped
+            # fractional coordinates to ensure consistency with
+            # ghost-backend image offsets
+            cell_inv = torch.linalg.inv(cell)
+            positions_frac = torch.remainder(positions @ cell_inv, 1.0)
             r_ij = (
-                positions[j_indices] + offsets.to(self.dtype) @ cell
-            ) - positions[i_indices]
+                (positions_frac[j_indices] + offsets.to(self.dtype)) @ cell
+            ) - (positions_frac[i_indices] @ cell)
         else:
             # Isolated system
             r_ij = positions[j_indices] - positions[i_indices]

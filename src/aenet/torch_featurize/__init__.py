@@ -29,7 +29,7 @@ __all__ = [
 # Map exported names to (relative_module, attr_name)
 _NAME_TO_SPEC: Dict[str, Tuple[str, str]] = {
     # neighbor list
-    "TorchNeighborList": (".neighborlist", "TorchNeighborList"),
+    "TorchNeighborList": ("..torch_nblist", "TorchNeighborList"),
     # chebyshev bases
     "ChebyshevPolynomials": (".chebyshev", "ChebyshevPolynomials"),
     "RadialBasis": (".chebyshev", "RadialBasis"),
