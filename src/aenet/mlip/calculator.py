@@ -40,6 +40,12 @@ class AenetCalculator(Calculator):
     potential_format : str, optional
         Format of potential files: 'ascii' or None (binary).
         Default: None (binary)
+    skin : float, optional
+        Skin distance for neighbor list in Angstroms. The neighbor list
+        will only be rebuilt when atoms move more than skin/2 from their
+        positions at the last rebuild. Larger values reduce rebuild frequency
+        but increase memory usage. Recommended: 0.3-1.0 Å for typical MD.
+        Default: 0.5
     **kwargs
         Additional keyword arguments passed to ASE Calculator
 
@@ -53,6 +59,12 @@ class AenetCalculator(Calculator):
     ...     'Ti': 'Ti.nn',
     ...     'O': 'O.nn'
     ... })
+    >>>
+    >>> # For MD simulations, optionally adjust skin parameter
+    >>> calc = AenetASECalculator({
+    ...     'Ti': 'Ti.nn',
+    ...     'O': 'O.nn'
+    ... }, skin=1.0)  # Larger skin for fewer rebuilds
     >>>
     >>> # Attach to atoms object
     >>> atoms = bulk('TiO2', 'rutile', a=4.6, c=2.95)
@@ -69,6 +81,7 @@ class AenetCalculator(Calculator):
         self,
         potential_paths: Dict[str, str],
         potential_format: Optional[str] = None,
+        skin: float = 0.5,
         **kwargs
     ):
         if not ASE_AVAILABLE:
@@ -81,8 +94,14 @@ class AenetCalculator(Calculator):
 
         self.potential_paths = potential_paths
         self.potential_format = potential_format
+        self.skin = skin  # Skin distance for neighbor list (in Angstroms)
         self._atom_types = list(potential_paths.keys())
         self._session = None
+
+        # Neighbor list caching
+        self._neighbor_list = None
+        self._nl_cutoffs = None
+        self._nl_natoms = None
 
     def _ensure_session(self):
         """Acquire libaenet session if needed."""
@@ -135,14 +154,32 @@ class AenetCalculator(Calculator):
         # Get cutoff radius from libaenet
         Rc_min, Rc_max = libaenet.get_cutoff_radius()
 
-        # Build ASE neighbor list
+        # Build or reuse ASE neighbor list with caching
         from ase.neighborlist import NeighborList
         cutoffs = [Rc_max / 2.0] * natoms  # ASE uses half-cutoffs
-        nl = NeighborList(
-            cutoffs, skin=0.0, sorted=False, self_interaction=False,
-            bothways=True
+
+        # Check if we need to rebuild the neighbor list
+        rebuild_needed = (
+            self._neighbor_list is None or
+            self._nl_natoms != natoms or
+            self._nl_cutoffs != cutoffs or
+            'numbers' in system_changes or
+            'cell' in system_changes or
+            'pbc' in system_changes
         )
-        nl.update(self.atoms)
+
+        if rebuild_needed:
+            # Create new neighbor list with skin for efficient updates
+            self._neighbor_list = NeighborList(
+                cutoffs, skin=self.skin, sorted=False, self_interaction=False,
+                bothways=True
+            )
+            self._nl_cutoffs = cutoffs
+            self._nl_natoms = natoms
+
+        # Update neighbor list (efficient if atoms haven't moved much)
+        self._neighbor_list.update(self.atoms)
+        nl = self._neighbor_list
 
         # Determine if forces are needed
         calc_forces = 'forces' in properties
