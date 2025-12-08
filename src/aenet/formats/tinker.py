@@ -8,7 +8,7 @@ import numpy as np
 import re
 
 from ..geometry import AtomicStructure
-from ..util import cellmatrix_from_params, standard_cell
+from ..geometry.utils import cellmatrix_from_params, standard_cell
 from ..staticdata import atomic_species
 from .. import units
 from .parser_abc import ParserABC

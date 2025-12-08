@@ -12,7 +12,7 @@ from ..geometry import AtomicStructure
 from ..exceptions import ArgumentError
 from .parser_abc import ParserABC
 from ..staticdata import atomic_number, atomic_species
-from ..util import symmetry_equivalent_atoms
+from ..geometry.utils import symmetry_equivalent_atoms
 
 __author__ = "Alexander Urban"
 __date__ = "2015-11-16"

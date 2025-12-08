@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-A type to represent the most important atomic structure data.
+AtomicStructure - container class for atomic structure information.
 
 """
 
@@ -9,8 +9,9 @@ import numpy as np
 import sys
 import warnings
 
-from .exceptions import ArgumentError, IncompatibleStructureError
-from . import util
+from ..exceptions import ArgumentError, IncompatibleStructureError
+from .. import util
+from .._optional import require_pymatgen
 
 __author__ = "Alexander Urban, Nongnuch Artrith"
 __date__ = "2013-06-05"
@@ -135,11 +136,81 @@ class AtomicStructure(object):
             self.fixed = np.array(fixed, dtype=bool)
 
     @classmethod
+    def from_file(cls, filename, **kwargs):
+        """
+        Create an AtomicStructure from a file.
+
+        Parameters
+        ----------
+        filename : str
+            Path to the structure file.
+        """
+        from ..io.structure import read_safely
+        return read_safely(filename, **kwargs)
+
+    @classmethod
     def from_pymatgen_structure(cls, structure, **kwargs):
         coords = structure.frac_coords[:]
         types = [str(s.symbol) for s in structure.species]
         avec = structure.lattice.matrix
         return cls(coords, types, avec=avec, fractional=True, **kwargs)
+
+    def to_pymatgen_structure(self, frame=-1):
+        """
+        Convert AtomicStructure to pymatgen Structure.
+
+        Parameters
+        ----------
+        frame : int, optional
+            Frame index to convert (default: -1 = last frame)
+
+        Returns
+        -------
+        pymatgen.core.Structure
+            Pymatgen Structure object
+
+        Raises
+        ------
+        ImportError
+            If pymatgen is not installed
+        ValueError
+            If species names are not known (names_known=False)
+        """
+        require_pymatgen("Converting to pymatgen Structure")
+
+        if not self.names_known:
+            raise ValueError(
+                "Cannot convert to pymatgen Structure: atomic species "
+                "names are not known. Structure was likely created with "
+                "numeric type IDs instead of chemical symbols."
+            )
+
+        if not self.pbc:
+            raise ValueError(
+                "Cannot convert non-periodic structure to pymatgen Structure. "
+                "Pymatgen requires periodic boundary conditions."
+            )
+
+        # Import here to avoid import-time dependency
+        from pymatgen.core import Structure, Lattice
+
+        # Get lattice and coordinates for specified frame
+        lattice = Lattice(self.avec[frame])
+        species = list(self.types)
+        coords = self.coords[frame]
+
+        # Convert to fractional coordinates
+        frac_coords = self.cart2frac(coords, frame=frame)
+
+        # Create pymatgen Structure
+        structure = Structure(
+            lattice=lattice,
+            species=species,
+            coords=frac_coords,
+            coords_are_cartesian=False
+        )
+
+        return structure
 
     @classmethod
     def from_ase_atoms(cls, atoms, **kwargs):
@@ -213,7 +284,7 @@ class AtomicStructure(object):
         -------
         Structure or list[Structure]
         """
-        from .torch_training.config import Structure as TorchStructure
+        from ..torch_training.config import Structure as TorchStructure
 
         def _convert_one(fidx: int):
             positions = np.array(self.coords[fidx])
@@ -277,7 +348,7 @@ class AtomicStructure(object):
             ostr += " Unit cell volume   : {:.3f} Ang^3\n".format(
                 self.cellvolume())
             (avec, a, b, c, alpha, beta, gamma, ab, ac, bc
-             ) = self.standard_cell(angles=True, areas=True)
+             ) = util.standard_cell(self.avec[-1], angles=True, areas=True)
             ostr += (" Cell parameters    : " +
                      "{:.8f} {:.8f} {:.8f} ".format(a, b, c) +
                      "{:.8f} {:.8f} {:.8f}\n").format(alpha, beta, gamma)
@@ -797,9 +868,10 @@ class AtomicStructure(object):
         Interpolate between this structure and a second structure S2,
         possibly via a third structure S3 in N steps.
 
-        See the documentation for geometry.interpolate() for more info.
+        See the documentation for interpolation.interpolate() for more info.
         """
-
+        # Import here to avoid circular dependency
+        from .interpolation import interpolate
         return interpolate(self, s2, n, s3)
 
     def supercell(self, mult=[1, 1, 1], frame=None):
@@ -889,8 +961,8 @@ class AtomicStructure(object):
         if (not self.pbc) or (not minimal):
             return np.linalg.norm(self.coords[frame][j]-self.coords[frame][i])
         else:
-            coo_i = self.fracoo(i, frame=frame, wrap=False)
-            coo_j = self.fracoo(i, frame=frame, wrap=False)
+            coo_i = self.fraccoo(i, frame=frame, wrap=False)
+            coo_j = self.fraccoo(j, frame=frame, wrap=False)
             dist = coo_j - coo_i
             T = np.sign(dist)*np.floor(np.abs(dist))
             dist -= T
@@ -959,9 +1031,12 @@ class AtomicStructure(object):
                     types.append(types[i])
             struc = AtomicStructure(coords, types, avec=avec_new, fixed=fixed)
         else:
-            a = np.max(self.coords[frame][0]) - np.min(self.coords[frame][0])
-            b = np.max(self.coords[frame][0]) - np.min(self.coords[frame][0])
-            c = np.max(self.coords[frame][0]) - np.min(self.coords[frame][0])
+            a = np.max(self.coords[frame][:, 0]
+                       ) - np.min(self.coords[frame][:, 0])
+            b = np.max(self.coords[frame][:, 1]
+                       ) - np.min(self.coords[frame][:, 1])
+            c = np.max(self.coords[frame][:, 2]
+                       ) - np.min(self.coords[frame][:, 2])
             a += amount
             b += amount
             c += amount
@@ -982,7 +1057,6 @@ class AtomicStructure(object):
 
         Args:
           idx (list): list of atomic indices starting with 0
-          frame (int): selected trajectory frame
 
         Returns:
           new AtomicStructure object
@@ -1015,7 +1089,7 @@ class AtomicStructure(object):
         # Prefer Torch-based neighbor list if available;
         # fall back to NumPy version
         try:
-            from .torch_nblist \
+            from ..torch_nblist \
                 import TorchNeighborList  # type: ignore
 
             # Use TorchNeighborList with automatic truncation handling
@@ -1057,7 +1131,7 @@ class AtomicStructure(object):
                 f"({e}). Install with: pip install 'aenet[torch]'",
                 RuntimeWarning,
             )
-            from .nblist.neighborlist import NeighborList  # type: ignore
+            from ..nblist.neighborlist import NeighborList  # type: ignore
 
             nbl = NeighborList.from_AtomicStructure(
                 self, frame=frame, interaction_range=cutoff
@@ -1104,66 +1178,3 @@ class AtomicStructure(object):
             return np.dot(cartcoo, self.bvec[frame])
         else:
             return np.dot(cartcoo, np.linalg.inv(avec))
-
-
-def interpolate(s1, s2, n=1, s3=None):
-    """
-    Interpolate between the two structures s1 and s2.  Return n
-    interpolated structures.  If only s1 and s2 are specified, the
-    structures will be linearly interpolated.  If also s3 is given,
-    all interpolated structures will be on a parabola through s3.
-
-    Arguments:
-      s1, s2    end points for interpolated path (AtomicStructure)
-      s3        optional intermediate point (AtomicStructure)
-      n         number of interpolated structures to be returned
-
-    Returns:
-      Instance of AtmicStructure with n+2 frames, where the first and
-      the last frame correspond to s1 and s2.
-    """
-
-    if ((s2.natoms != s1.natoms) or (s2.ntypes != s1.ntypes) or
-            (s1.pbc != s2.pbc)):
-        raise ArgumentError(
-            "Incompatible start and end structures for interpolation.")
-    if (s3) and ((s3.natoms != s1.natoms) or (s3.ntypes != s1.ntypes) or
-                 (s3.pbc != s1.pbc)):
-        raise ArgumentError(
-            "Incompatible intermediate structure for interpolation.")
-
-    if s1.pbc:
-        s = AtomicStructure(s1.coords[-1], s1.types, avec=s1.avec[-1],
-                            fixed=s1.fixed)
-    else:
-        s = AtomicStructure(s1.coords[-1], s1.types, fixed=s1.fixed)
-    if not s3:
-        # linear interpolation between s1 and s2
-        for x in np.linspace(0.0, 1.0, n+2):
-            if (x > 0.0):
-                coords = (1.0-x)*s1.coords[-1] + x*s2.coords[-1]
-                if s.pbc:
-                    avec = (1.0-x)*s1.avec[-1] + x*s2.avec[-1]
-                    s.add_frame(coords, avec=avec)
-                else:
-                    s.add_frame(coords)
-    else:
-        c0 = s1.coords[-1]
-        c1 = -3.0*s1.coords[-1] - s2.coords[-1] + 4.0*s3.coords[-1]
-        c2 = 2.0*s1.coords[-1] + 2.0*s2.coords[-1] - 4.0*s3.coords[-1]
-        if s.pbc:
-            a0 = s1.avec[-1]
-            a1 = -3.0*s1.avec[-1] - s2.avec[-1] + 4.0*s3.avec[-1]
-            a2 = 2.0*s1.avec[-1] + 2.0*s2.avec[-1] - 4.0*s3.avec[-1]
-        # second order interpolation, assuming s3 is exactly half-way
-        # from s1 to s2
-        for x in np.linspace(0.0, 1.0, n+2):
-            if (x > 0.0):
-                coords = c0 + c1*x + c2*x*x
-                if s.pbc:
-                    avec = a0 + a1*x + a2*x*x
-                    s.add_frame(coords, avec=avec)
-                else:
-                    s.add_frame(coords)
-
-    return s
