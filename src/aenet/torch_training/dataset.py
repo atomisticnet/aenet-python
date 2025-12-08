@@ -401,12 +401,15 @@ class StructureDataset(Dataset):
                 if idx in self._neighbor_cache:
                     neighbor_info = self._neighbor_cache[idx]
                     # Build tensors from cached neighbor info and use fast path
+                    # Ensure tensors are on the same device as descriptor
                     nb_idx_list_t = [
-                        torch.as_tensor(arr, dtype=torch.long)
+                        torch.as_tensor(arr, dtype=torch.long
+                                        ).to(self.descriptor.device)
                         for arr in neighbor_info["neighbor_lists"]
                     ]
                     nb_vec_list_t = [
-                        torch.as_tensor(vec, dtype=self.descriptor.dtype)
+                        torch.as_tensor(vec, dtype=self.descriptor.dtype
+                                        ).to(self.descriptor.device)
                         for vec in neighbor_info["neighbor_vectors"]
                     ]
                     features = self.descriptor.forward(
@@ -458,12 +461,15 @@ class StructureDataset(Dataset):
                 if self.cache_force_neighbors:
                     if idx in self._neighbor_cache:
                         neighbor_info_cached = self._neighbor_cache[idx]
+                        # Ensure tensors are on the same device as descriptor
                         nb_idx_list_t = [
-                            torch.as_tensor(arr, dtype=torch.long)
+                            torch.as_tensor(arr, dtype=torch.long
+                                            ).to(self.descriptor.device)
                             for arr in neighbor_info_cached["neighbor_lists"]
                         ]
                         nb_vec_list_t = [
-                            torch.as_tensor(vec, dtype=self.descriptor.dtype)
+                            torch.as_tensor(vec, dtype=self.descriptor.dtype
+                                            ).to(self.descriptor.device)
                             for vec in neighbor_info_cached["neighbor_vectors"]
                         ]
                         features = self.descriptor.forward(
