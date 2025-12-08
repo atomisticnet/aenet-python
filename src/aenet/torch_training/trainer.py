@@ -612,6 +612,19 @@ class TorchANNPotential:
         if isinstance(test_ds, StructureDataset):
             test_ds.warmup_caches(show_progress=show_progress)
 
+        # Initial force structure selection for random sampling
+        # This must be called at least once before training to populate
+        # selected_force_indices when using force_sampling="random"
+        if isinstance(train_ds, StructureDataset):
+            if (train_ds.force_sampling == "random"
+                    and config.force_fraction < 1.0):
+                train_ds.resample_force_structures()
+        # Also initialize test dataset force sampling if applicable
+        if isinstance(test_ds, StructureDataset):
+            if (test_ds.force_sampling == "random"
+                    and config.force_fraction < 1.0):
+                test_ds.resample_force_structures()
+
         # DataLoaders
         batch_size = OptimizerBuilder.get_batch_size(config.method)
         dl_kwargs: Dict[str, Any] = {}
