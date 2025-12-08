@@ -379,15 +379,20 @@ class StructureDataset(Dataset):
         """
         struct = self.structures[idx]
 
-        # Convert to torch tensors (match descriptor dtype)
-        positions = torch.from_numpy(struct.positions
-                                     ).to(self.descriptor.dtype)
+        # Convert to torch tensors (match descriptor dtype and device)
+        positions = torch.from_numpy(struct.positions).to(
+            dtype=self.descriptor.dtype,
+            device=self.descriptor.device
+        )
         cell = (
-            torch.from_numpy(struct.cell).to(self.descriptor.dtype)
+            torch.from_numpy(struct.cell).to(
+                dtype=self.descriptor.dtype,
+                device=self.descriptor.device
+            )
             if struct.cell is not None else None
         )
         pbc = (
-            torch.from_numpy(struct.pbc)
+            torch.from_numpy(struct.pbc).to(device=self.descriptor.device)
             if struct.pbc is not None else None
         )
 
