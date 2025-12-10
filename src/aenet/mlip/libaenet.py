@@ -31,7 +31,7 @@ ffi.cdef("""
     void aenet_print_info(void);
     void aenet_load_potential(int type_id, char* filename, int* stat);
     void aenet_load_potential_ascii(int type_id, char* filename, int* stat);
-    _Bool aenet_all_loaded(void);
+    uint8_t aenet_all_loaded(void);
 
     double aenet_free_atom_energy(int type_id);
 
