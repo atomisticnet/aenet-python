@@ -513,7 +513,7 @@ def all_loaded() -> bool:
         )
 
     lib = _get_library()
-    return bool(lib.aenet_all_loaded())
+    return lib.aenet_all_loaded() != 0
 
 
 def free_atom_energy(atom_type: str) -> float:
