@@ -31,7 +31,7 @@ ffi.cdef("""
     void aenet_print_info(void);
     void aenet_load_potential(int type_id, char* filename, int* stat);
     void aenet_load_potential_ascii(int type_id, char* filename, int* stat);
-    _Bool aenet_all_loaded(void);
+    uint8_t aenet_all_loaded(void);
 
     double aenet_free_atom_energy(int type_id);
 
@@ -513,7 +513,7 @@ def all_loaded() -> bool:
         )
 
     lib = _get_library()
-    return bool(lib.aenet_all_loaded())
+    return lib.aenet_all_loaded() != 0
 
 
 def free_atom_energy(atom_type: str) -> float:
