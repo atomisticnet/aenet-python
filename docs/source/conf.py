@@ -45,7 +45,7 @@ autodoc_mock_imports = [
     'torch',
     'torch_scatter',
     'torch_cluster',
-    'numpy',
+    'ase',
     'scipy',
     'pandas',
     'tables',
@@ -60,6 +60,12 @@ templates_path = ['_templates']
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = []
+
+# Suppress noisy warnings during build
+suppress_warnings = [
+    'autodoc.mocked_object',
+    'toc.not_included',
+]
 
 
 # -- Options for HTML output -------------------------------------------------

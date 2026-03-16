@@ -11,7 +11,6 @@ import warnings
 
 from ..exceptions import ArgumentError, IncompatibleStructureError
 from .. import util
-from .._optional import require_pymatgen
 
 __author__ = "Alexander Urban, Nongnuch Artrith"
 __date__ = "2013-06-05"
@@ -176,7 +175,6 @@ class AtomicStructure(object):
         ValueError
             If species names are not known (names_known=False)
         """
-        require_pymatgen("Converting to pymatgen Structure")
 
         if not self.names_known:
             raise ValueError(
@@ -192,7 +190,12 @@ class AtomicStructure(object):
             )
 
         # Import here to avoid import-time dependency
-        from pymatgen.core import Structure, Lattice
+        try:
+            from pymatgen.core import Structure, Lattice
+        except ImportError as e:
+            raise ImportError(
+                "pymatgen is required for converting to pymatgen Structure."
+            ) from e
 
         # Get lattice and coordinates for specified frame
         lattice = Lattice(self.avec[frame])

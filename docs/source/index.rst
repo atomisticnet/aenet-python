@@ -80,6 +80,8 @@ Tools for Data Generation and Acquisition
    :maxdepth: 2
 
    usage/structure_manipulation
+   usage/transformations_basic
+   usage/transformations_advanced
    usage/data_acquisition
    usage/commandline
 

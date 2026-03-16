@@ -32,9 +32,8 @@ class ChebyshevDescriptor(nn.Module):
     - Under PBC, neighbor displacements are reconstructed using wrapped
       fractional positions and integer image offsets provided by the ghost
       PBC backend of TorchNeighborList. Specifically:
-          positions_frac = remainder(positions @ inv(cell), 1.0)
-          r_ij = ((positions_frac[j] + offsets) @ cell)
-                 - (positions_frac[i] @ cell)
+      positions_frac = remainder(positions @ inv(cell), 1.0)
+      r_ij = ((positions_frac[j] + offsets) @ cell)-(positions_frac[i] @ cell)
       This aligns featurization with the neighbor list semantics and ensures
       PBC vs explicit supercell consistency.
     - The neighbor cutoff used internally for neighbor list construction is

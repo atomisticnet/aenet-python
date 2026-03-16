@@ -7,6 +7,7 @@ This section provides detailed API documentation for the aenet-python package.
    :maxdepth: 2
 
    trainset
+   transformations
    torch_featurize
    torch_training_builders
    torch_training_training
@@ -18,6 +19,14 @@ Training Set Management
 :doc:`trainset`
    Training set file handling and data loading. Includes support for
    neighbor information required for force training with PyTorch autograd.
+
+Structure Transformations
+--------------------------
+
+:doc:`transformations`
+   Structure transformation framework for generating structural variations.
+   Includes deterministic transformations (displacement, volume, strain)
+   and stochastic transformations.
 
 PyTorch Featurization
 ---------------------

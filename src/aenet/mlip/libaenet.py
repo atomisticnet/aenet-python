@@ -429,7 +429,8 @@ def load_potential(atom_type: str, filename: str,
     Raises
     ------
     RuntimeError
-        If library not initialized
+        If library not initialized or library version is too old for
+        ASCII format
     ValueError
         If atom type unknown or format string invalid
     AenetError
@@ -467,8 +468,22 @@ def load_potential(atom_type: str, filename: str,
         else:
             raise ValueError(f"Unknown potential format: {format!r}")
 
+    # Check if ASCII loading is supported
+    if is_ascii and not hasattr(lib, 'aenet_load_potential_ascii'):
+        raise RuntimeError(
+            f"ASCII potential format requested for '{atom_type}', but your "
+            f"libaenet library is too old and does not export the "
+            f"'aenet_load_potential_ascii' C binding. "
+            f"Please either:\n"
+            f"  1. Upgrade your aenet installation to a version that supports "
+            f"ASCII loading via the C API (post-2023), or\n"
+            f"  2. Convert your ASCII potentials to binary format using "
+            f"`predict.x` or the standalone conversion tool, then use "
+            f"potential_format=None."
+        )
+
     # Call appropriate loader
-    if is_ascii and hasattr(lib, 'aenet_load_potential_ascii'):
+    if is_ascii:
         lib.aenet_load_potential_ascii(type_id, c_filename, stat)
         op_name = f"load_potential_ascii for {atom_type}"
     else:

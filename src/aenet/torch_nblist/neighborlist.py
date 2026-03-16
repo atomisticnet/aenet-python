@@ -53,7 +53,7 @@ class TorchNeighborList:
           relative to wrapped fractional coordinates (positions wrapped
           to [0,1) before offsetting). Downstream code should reconstruct
           displacements as:
-              r_ij = ((frac[j] + offsets) @ cell) - (frac[i] @ cell)
+          r_ij = ((frac[j] + offsets) @ cell) - (frac[i] @ cell)
           where frac = remainder(positions @ inv(cell), 1.0).
         - Fully differentiable and GPU-compatible. Truncation is handled by
           auto-growing max_num_neighbors up to auto_max_neighbors with
