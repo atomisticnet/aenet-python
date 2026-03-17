@@ -357,16 +357,22 @@ class Sconv(AenetToolABC):
     def standard_cell(self, struc, **kwargs):
         if 'frame' in kwargs:
             frame = kwargs['frame']
-            frac_coords = struc.cart2frac(struc.coords[frame], frame=frame)
-            struc.avec[frame] = util.standard_cell(struc.avec[frame])
-            struc.bvec[frame] = np.linalg.inv(struc.avec[frame])
-            struc.coords[frame] = struc.frac2cart(frac_coords, frame=frame)
+            struc.update_cell(
+                util.standard_cell(struc.avec[frame]),
+                frame=frame,
+                preserve="fractional",
+                keep_energy=True,
+                keep_forces=True,
+            )
         else:
             for f in range(struc.nframes):
-                frac_coords = struc.cart2frac(struc.coords[f], frame=f)
-                struc.avec[f] = util.standard_cell(struc.avec[f])
-                struc.bvec[f] = np.linalg.inv(struc.avec[f])
-                struc.coords[f] = struc.frac2cart(frac_coords, frame=f)
+                struc.update_cell(
+                    util.standard_cell(struc.avec[f]),
+                    frame=f,
+                    preserve="fractional",
+                    keep_energy=True,
+                    keep_forces=True,
+                )
         return struc
 
     def rotate_structure(self, struc, rotate_angle, **kwargs):
@@ -425,10 +431,13 @@ class Sconv(AenetToolABC):
 
         for frame in frames:
             if struc.pbc:
-                frac_coords = struc.cart2frac(struc.coords[frame], frame=frame)
-                struc.avec[frame] = np.dot(S, struc.avec[frame])
-                struc.bvec[frame] = np.linalg.inv(struc.avec[frame])
-                struc.coords[frame] = struc.frac2cart(frac_coords, frame=frame)
+                struc.update_cell(
+                    np.dot(S, struc.avec[frame]),
+                    frame=frame,
+                    preserve="fractional",
+                    keep_energy=True,
+                    keep_forces=True,
+                )
             else:
                 struc.coords[frame] = np.dot(struc.coords[frame], S)
         return struc

@@ -704,6 +704,68 @@ class AtomicStructure(object):
         else:
             self.forces.append(None)
 
+    def update_cell(self, avec, frame=-1, preserve="fractional",
+                    keep_forces=False, keep_energy=False):
+        """
+        Update the unit cell of a periodic structure frame.
+
+        Parameters
+        ----------
+        avec : array_like, shape (3, 3)
+            New lattice vector matrix. Rows correspond to lattice vectors.
+        frame : int, optional
+            Frame index to update (default: -1, last frame).
+        preserve : {"fractional", "cartesian"}, optional
+            Coordinate convention to preserve during the cell update.
+            ``"fractional"`` keeps fractional coordinates fixed and
+            recomputes Cartesian coordinates from the new cell.
+            ``"cartesian"`` keeps Cartesian coordinates fixed.
+        keep_forces : bool, optional
+            If ``False`` (default), clear forces for the updated frame
+            because they may be stale after the cell change.
+        keep_energy : bool, optional
+            If ``False`` (default), clear the total energy for the
+            updated frame because it may be stale after the cell change.
+
+        Raises
+        ------
+        ArgumentError
+            If the structure is non-periodic, the new cell is not shape
+            ``(3, 3)``, or ``preserve`` is invalid.
+        """
+        if not self.pbc:
+            raise ArgumentError(
+                "Can not update cell of a non-periodic structure."
+            )
+
+        preserve_mode = str(preserve).strip().lower()
+        if preserve_mode not in ("fractional", "cartesian"):
+            raise ArgumentError(
+                "Invalid preserve mode '{}'. Use 'fractional' or "
+                "'cartesian'.".format(preserve)
+            )
+
+        avec_new = np.array(avec, dtype=float)
+        if avec_new.shape != (3, 3):
+            raise ArgumentError(
+                "Lattice vector matrix must have shape (3, 3), got {}."
+                .format(avec_new.shape)
+            )
+
+        if preserve_mode == "fractional":
+            frac_coords = self.cart2frac(self.coords[frame], frame=frame)
+
+        self.avec[frame] = avec_new
+        self.bvec[frame] = np.linalg.inv(avec_new)
+
+        if preserve_mode == "fractional":
+            self.coords[frame] = self.frac2cart(frac_coords, frame=frame)
+
+        if not keep_energy:
+            self.energy[frame] = None
+        if not keep_forces:
+            self.forces[frame] = None
+
     def add_comment(self, comment):
         self.comments.append(comment)
 
