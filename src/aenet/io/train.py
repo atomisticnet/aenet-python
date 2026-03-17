@@ -160,7 +160,9 @@ class TrainOut(object):
         else:
             self.path = None
             self.errors = self._build_errors_from_history(history_data)
-            self.energies = None
+            self.energies = self._read_energy_files(
+                energies_train_files, energies_test_files
+            )
             self.timing = self._build_timing_from_history(history_data)
             self.learning_rate = history_data.get('learning_rate', None)
 
@@ -507,6 +509,8 @@ class TrainOut(object):
         cls,
         history: Dict[str, List[float]],
         config: Optional[Any] = None,
+        energies_train_files: Optional[List[os.PathLike]] = None,
+        energies_test_files: Optional[List[os.PathLike]] = None,
     ) -> 'TrainOut':
         """
         Create TrainOut from PyTorch training history.
@@ -542,7 +546,12 @@ class TrainOut(object):
         >>> print(results.stats)
         >>> results.plot_training_summary()
         """
-        return cls(history_data=history, config=config)
+        return cls(
+            history_data=history,
+            config=config,
+            energies_train_files=energies_train_files,
+            energies_test_files=energies_test_files,
+        )
 
 
 class Energies(object):
@@ -589,15 +598,17 @@ class Energies(object):
             columns = fp.readline()
         columns = columns.replace("Cost Func", "Cost-Func")
         columns = columns.split()
+        if columns and columns[0] == "#":
+            columns = columns[1:]
         self._columns = columns
         self.energies_train = pd.read_csv(path_train,
                                           sep=r'\s+',
-                                          skiprows=0, header=0,
+                                          skiprows=1, header=None,
                                           names=columns)
         if path_test is not None:
             self.energies_test = pd.read_csv(path_test,
                                              sep=r'\s+',
-                                             skiprows=0, header=0,
+                                             skiprows=1, header=None,
                                              names=columns)
         else:
             self.energies_test = None
@@ -640,7 +651,7 @@ class Energies(object):
         """
         energies_train_new = pd.read_csv(path_train,
                                          sep=r'\s+',
-                                         skiprows=0, header=0,
+                                         skiprows=1, header=None,
                                          names=self._columns)
         self.energies_train = pd.concat(
             [self.energies_train, energies_train_new],
@@ -648,7 +659,7 @@ class Energies(object):
         if path_test is not None:
             energies_test_new = pd.read_csv(path_test,
                                             sep=r'\s+',
-                                            skiprows=0, header=0,
+                                            skiprows=1, header=None,
                                             names=self._columns)
             self.energies_test = pd.concat(
                 [self.energies_test, energies_test_new],

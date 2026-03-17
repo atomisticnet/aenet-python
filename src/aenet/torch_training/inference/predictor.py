@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from .datasets import (
     EnergyInferenceDataset,
     energy_collate,
+    dataset_energy_collate,
     ForceInferenceDataset,
     force_collate,
 )
@@ -497,6 +498,154 @@ class Predictor:
             forces_out if eval_forces else None,
             atom_energies_out if return_atom_energies else None,
             timing_dict,
+        )
+
+    def predict_dataset(
+        self,
+        dataset,
+        eval_forces: bool = False,
+        return_atom_energies: bool = False,
+        track_timing: bool = False,
+        batch_size: Optional[int] = None,
+        num_workers: Optional[int] = None,
+        prefetch_factor: Optional[int] = None,
+        persistent_workers: Optional[bool] = None,
+    ) -> Tuple[
+        List[float],
+        Optional[List[torch.Tensor]],
+        Optional[List[torch.Tensor]],
+        Optional[Dict[str, List[float]]],
+        Dict[str, Any],
+    ]:
+        """
+        Predict energies from a dataset that already yields featurized samples.
+
+        This path is intended for PyTorch-only dataset-backed inference where
+        reusing cached features is desirable.
+        """
+        if eval_forces:
+            raise NotImplementedError(
+                "predict_dataset() currently supports energy-only inference."
+            )
+
+        nw = int(num_workers) if num_workers is not None else 0
+        pf = int(prefetch_factor) if prefetch_factor is not None else 2
+        pw = (bool(persistent_workers)
+              if persistent_workers is not None else True)
+        bs = int(batch_size) if batch_size is not None else 32
+
+        dl_kwargs: Dict[str, Any] = dict(num_workers=nw)
+        if nw > 0:
+            dl_kwargs.update(prefetch_factor=pf, persistent_workers=pw)
+
+        loader = DataLoader(
+            dataset,
+            batch_size=bs,
+            shuffle=False,
+            collate_fn=dataset_energy_collate,
+            **dl_kwargs,
+        )
+
+        import time as time_module
+
+        energies: List[float] = []
+        atom_energies_out: List[torch.Tensor] = []
+        coords_out: List[Optional[Any]] = []
+        atom_types_out: List[List[str]] = []
+        names_out: List[Optional[str]] = []
+
+        timing_dict: Optional[Dict[str, List[float]]] = None
+        if track_timing:
+            timing_dict = {
+                'featurization': [],
+                'energy_eval': [],
+                'force_eval': [],
+                'total': []
+            }
+
+        for batch in loader:
+            t_b0 = time_module.time() if track_timing else 0.0
+
+            feats = batch["features"].to(device=self.device, dtype=self.dtype)
+            species_idx = batch["species_indices"].to(device=self.device)
+            n_atoms_b = batch["n_atoms"].to(device=self.device)
+            feats = self.normalizer.apply_feature_normalization(feats)
+
+            t_energy_start = time_module.time() if track_timing else 0.0
+            E_atomic_b = self.model(feats, species_idx)
+            batch_idx = torch.repeat_interleave(
+                torch.arange(len(n_atoms_b), device=self.device),
+                n_atoms_b.long(),
+            )
+            energy_pred_norm_b = torch.zeros(
+                len(n_atoms_b), dtype=feats.dtype, device=self.device
+            )
+            energy_pred_norm_b.scatter_add_(
+                0, batch_idx, E_atomic_b.squeeze()
+            )
+            t_energy_end = time_module.time() if track_timing else 0.0
+
+            offsets = [0]
+            for n in n_atoms_b.tolist():
+                offsets.append(offsets[-1] + int(n))
+
+            species_lists = batch["species_lists"]
+            positions_list = batch["positions_list"]
+            names_list = batch["names_list"]
+
+            for j in range(len(n_atoms_b)):
+                E_pred = self.normalizer.denormalize_energy(
+                    energy_pred_norm_b[j], int(n_atoms_b[j].item())
+                )
+                sl = slice(offsets[j], offsets[j + 1])
+                E_atoms_sum = float(
+                    self.atomic_energies_by_index[species_idx[sl]]
+                    .sum()
+                    .detach()
+                    .cpu()
+                )
+                energies.append(E_pred + E_atoms_sum)
+                atom_types_out.append(list(species_lists[j]))
+                names_out.append(
+                    str(names_list[j]) if names_list[j] is not None else None
+                )
+
+                pos = positions_list[j]
+                if pos is None:
+                    coords_out.append(None)
+                elif isinstance(pos, torch.Tensor):
+                    coords_out.append(pos.detach().cpu().numpy())
+                else:
+                    coords_out.append(pos)
+
+                if return_atom_energies:
+                    E_atomic_denorm = (
+                        E_atomic_b[sl] * self.normalizer.E_scaling
+                    )
+                    atom_energies_out.append(E_atomic_denorm.detach().cpu())
+
+            if track_timing and timing_dict is not None:
+                t_b1 = time_module.time()
+                per = (t_b1 - t_b0) / float(len(n_atoms_b))
+                for _ in range(len(n_atoms_b)):
+                    timing_dict["featurization"].append(0.0)
+                    timing_dict["energy_eval"].append(
+                        t_energy_end - t_energy_start
+                    )
+                    timing_dict["force_eval"].append(0.0)
+                    timing_dict["total"].append(per)
+
+        metadata = {
+            "coords": coords_out,
+            "atom_types": atom_types_out,
+            "names": names_out,
+        }
+        return (
+            energies,
+            None,
+            atom_energies_out if return_atom_energies else None,
+            timing_dict,
+            metadata,
         )
 
     def cohesive_energy(

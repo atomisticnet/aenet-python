@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
+from collections import Counter
+from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional, Union
 
 import torch
@@ -393,6 +396,130 @@ class TorchANNPotential:
         >>> print(pot.metadata['training_config'])
         """
         return self._metadata
+
+    def _structures_from_dataset(
+        self,
+        dataset: Optional[Dataset],
+    ) -> Optional[List[Structure]]:
+        """Best-effort extraction of torch-training structures from a dataset."""
+        if dataset is None:
+            return None
+        if isinstance(dataset, Subset):
+            base_structures = self._structures_from_dataset(dataset.dataset)
+            if base_structures is None:
+                return None
+            return [base_structures[i] for i in dataset.indices]
+
+        structures = getattr(dataset, "structures", None)
+        if structures is None:
+            return None
+        return list(structures)
+
+    def _write_energies_file(
+        self,
+        structures: List[Structure],
+        outfile: Union[str, os.PathLike],
+        predict_out: Optional[Any] = None,
+    ) -> str:
+        """Write Fortran-compatible energies.* output for a structure list."""
+        if predict_out is None:
+            predict_out = self.predict(structures, eval_forces=False)
+        species_order = [str(sp) for sp in self.descriptor.species]
+        species_headers = "".join(f" #{sp}" for sp in species_order)
+        header = (
+            "#  Ref(eV)        ANN(eV)      #atoms  Ref(eV/atom)"
+            "   ANN(eV/atom) Ref-ANN(eV/atom)    Cost-Func"
+            f"{species_headers}    Path-of-input-file"
+        )
+
+        out_path = Path(outfile)
+        with open(out_path, "w", encoding="utf-8") as fp:
+            fp.write(header + "\n")
+            for idx, (struct, ann_energy) in enumerate(
+                zip(structures, predict_out.total_energy)
+            ):
+                n_atoms = int(struct.n_atoms)
+                ref_energy = float(struct.energy)
+                ann_energy = float(ann_energy)
+                ref_per_atom = ref_energy / float(n_atoms)
+                ann_per_atom = ann_energy / float(n_atoms)
+                diff_per_atom = ref_per_atom - ann_per_atom
+                if self._normalizer.normalize_energy:
+                    cost_func = diff_per_atom * float(self._normalizer.E_scaling)
+                else:
+                    cost_func = diff_per_atom
+
+                species_counts = Counter(str(sp) for sp in struct.species)
+                path_str = (
+                    str(struct.name)
+                    if getattr(struct, "name", None)
+                    else f"structure_{idx:06d}"
+                )
+
+                fp.write(
+                    " "
+                    f"{ref_energy:14.6E} "
+                    f"{ann_energy:14.6E} "
+                    f"{n_atoms:5d} "
+                    f"{ref_per_atom:14.6E} "
+                    f"{ann_per_atom:14.6E} "
+                    f"{diff_per_atom:14.6E} "
+                    f"{cost_func:14.6E}"
+                )
+                for sp in species_order:
+                    fp.write(f" {species_counts.get(sp, 0):4d}")
+                fp.write(f" {path_str}\n")
+
+        return str(out_path)
+
+    def _save_energy_outputs(
+        self,
+        config: TorchTrainingConfig,
+        train_ds: Optional[Dataset],
+        test_ds: Optional[Dataset],
+    ) -> Tuple[List[str], List[str]]:
+        """Emit energies.train/test files when requested."""
+        if not bool(getattr(config, "save_energies", False)):
+            return [], []
+
+        train_structures = self._structures_from_dataset(train_ds)
+        test_structures = self._structures_from_dataset(test_ds)
+
+        if train_structures is None:
+            warnings.warn(
+                "save_energies=True, but the training dataset does not expose "
+                "raw structures. Energy files were not written.",
+                UserWarning,
+            )
+            return [], []
+
+        train_predict_out = None
+        test_predict_out = None
+        try:
+            train_predict_out = self.predict_dataset(train_ds)
+            if test_ds is not None:
+                test_predict_out = self.predict_dataset(test_ds)
+        except (NotImplementedError, ValueError, KeyError, TypeError):
+            train_predict_out = None
+            test_predict_out = None
+
+        train_files = [os.path.basename(
+            self._write_energies_file(
+                train_structures,
+                "energies.train.0",
+                predict_out=train_predict_out,
+            )
+        )]
+        test_files: List[str] = []
+        if test_structures:
+            test_files.append(os.path.basename(
+                self._write_energies_file(
+                    test_structures,
+                    "energies.test.0",
+                    predict_out=test_predict_out,
+                )
+            ))
+        return train_files, test_files
 
     def train(
         self,
@@ -910,12 +1037,19 @@ class TorchANNPotential:
         # Store optimizer and config for later saving
         self._optimizer = optimizer
         self._training_config = config
+        energies_train_files, energies_test_files = self._save_energy_outputs(
+            config=config,
+            train_ds=train_ds,
+            test_ds=test_ds,
+        )
 
         # Import TrainOut and return structured results
         from aenet.io.train import TrainOut
         return TrainOut.from_torch_history(
             history=self._metrics.get_history(),
-            config=config
+            config=config,
+            energies_train_files=energies_train_files,
+            energies_test_files=energies_test_files,
         )
 
     @torch.no_grad()
@@ -1044,6 +1178,119 @@ class TorchANNPotential:
             cohesive_energy=cohesive_energies,
             total_energy=energies,
             structure_paths=input_paths,
+            timing=timing,
+        )
+
+    def predict_dataset(
+        self,
+        dataset: Dataset,
+        eval_forces: bool = False,
+        config: Optional[Any] = None,
+    ):
+        """
+        Predict energies from a PyTorch dataset.
+
+        This torch-only convenience API is useful when the dataset already
+        stores precomputed features, such as ``CachedStructureDataset``, so
+        inference can reuse cached tensors instead of featurizing again.
+
+        Parameters
+        ----------
+        dataset : torch.utils.data.Dataset
+            Dataset yielding samples with ``features``, ``species_indices``,
+            ``n_atoms``, and ``species`` fields. ``Subset`` wrappers are
+            supported.
+        eval_forces : bool, optional
+            Force prediction is not currently implemented for dataset-backed
+            inference. Default: False.
+        config : PredictionConfig, optional
+            Prediction configuration. If None, uses defaults. Default: None
+
+        Returns
+        -------
+        PredictOut
+            Prediction results. This matches the structure-based ``predict()``
+            return type.
+        """
+        from aenet.mlip import PredictionConfig as PC
+        from aenet.io.predict import PredictOut
+        import warnings
+
+        if config is None:
+            config = PC()
+
+        changed_options = config.user_changed()
+        unsupported = (set(changed_options.keys()) -
+                       self._supported_config_options)
+        if unsupported:
+            unsupported_list = ', '.join(sorted(unsupported))
+            warnings.warn(
+                f"The following PredictionConfig parameters are not "
+                f"supported by the PyTorch API and will be ignored: "
+                f"{unsupported_list}",
+                UserWarning
+            )
+
+        predictor = Predictor(
+            model=self.model,
+            descriptor=self.descriptor,
+            normalizer=self._normalizer,
+            atomic_energies=self._atomic_energies,
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+        energies, _, atom_energies, timing, metadata = predictor.predict_dataset(
+            dataset=dataset,
+            eval_forces=eval_forces,
+            return_atom_energies=config.print_atomic_energies,
+            track_timing=config.timing,
+            batch_size=getattr(config, "batch_size", None),
+            num_workers=getattr(config, "num_workers", None),
+            prefetch_factor=getattr(config, "prefetch_factor", None),
+            persistent_workers=getattr(config, "persistent_workers", None),
+        )
+
+        structures = self._structures_from_dataset(dataset)
+        coords = metadata["coords"]
+        atom_types = metadata["atom_types"]
+        names = metadata["names"]
+        if structures is not None:
+            coords = [s.positions for s in structures]
+            atom_types = [s.species for s in structures]
+            names = [str(s.name) if s.name is not None else None
+                     for s in structures]
+
+        if any(c is None for c in coords):
+            raise ValueError(
+                "predict_dataset() could not reconstruct coordinates for all "
+                "dataset entries."
+            )
+
+        cohesive_energies: List[float] = []
+        for i, species in enumerate(atom_types):
+            total_e = energies[i]
+            if self._atomic_energies:
+                atomic_sum = sum(self._atomic_energies.get(sp, 0.0)
+                                 for sp in species)
+                cohesive_energies.append(total_e - atomic_sum)
+            else:
+                cohesive_energies.append(total_e)
+
+        atom_energies_np = None
+        if atom_energies:
+            atom_energies_np = [ae.numpy() for ae in atom_energies]
+
+        structure_paths = names if any(name is not None for name in names) else None
+
+        return PredictOut(
+            coords=coords,
+            forces=None,
+            atom_types=atom_types,
+            atom_energies=atom_energies_np,
+            cohesive_energy=cohesive_energies,
+            total_energy=energies,
+            structure_paths=structure_paths,
             timing=timing,
         )
 

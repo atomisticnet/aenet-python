@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import pytest
+from torch.utils.data import Subset
 
 from aenet.torch_training import (
     TorchTrainingConfig,
@@ -8,6 +9,7 @@ from aenet.torch_training import (
     TorchANNPotential,
 )
 from aenet.torch_featurize import ChebyshevDescriptor
+from aenet.torch_training.dataset import CachedStructureDataset
 
 
 def _make_descriptor(dtype=torch.float64):
@@ -139,3 +141,112 @@ def test_cohesive_energy_helper_works_with_internal_atomic_energies():
     expected_coh = E_total - 3 * E_H
     coh = pot.cohesive_energy(s)
     assert pytest.approx(coh, rel=0, abs=1e-12) == expected_coh
+
+
+@pytest.mark.cpu
+def test_predict_dataset_reuses_cached_features(monkeypatch):
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+            [0.0, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    s1 = Structure(
+        positions=positions,
+        species=["H", "H", "H"],
+        energy=1.0,
+        forces=None,
+        name="s1.xsf",
+    )
+    s2 = Structure(
+        positions=positions + 0.05,
+        species=["H", "H", "H"],
+        energy=1.5,
+        forces=None,
+        name="s2.xsf",
+    )
+
+    descriptor = _make_descriptor(dtype=torch.float64)
+    arch = _make_arch()
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        normalize_features=False,
+        normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+    pot.train(structures=[s1, s2], config=cfg)
+
+    ds = CachedStructureDataset(
+        structures=[s1, s2],
+        descriptor=descriptor,
+        show_progress=False,
+    )
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("forward_from_positions should not be called")
+
+    monkeypatch.setattr(descriptor, "forward_from_positions", _fail)
+
+    results = pot.predict_dataset(ds)
+    assert len(results.total_energy) == 2
+    assert results.paths == ["s1.xsf", "s2.xsf"]
+
+
+@pytest.mark.cpu
+def test_predict_dataset_supports_subset():
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+            [0.0, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    s1 = Structure(positions=positions, species=["H", "H", "H"],
+                   energy=1.0, forces=None, name="s1.xsf")
+    s2 = Structure(positions=positions + 0.05, species=["H", "H", "H"],
+                   energy=1.5, forces=None, name="s2.xsf")
+
+    descriptor = _make_descriptor(dtype=torch.float64)
+    arch = _make_arch()
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        normalize_features=False,
+        normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+    pot.train(structures=[s1, s2], config=cfg)
+
+    ds = CachedStructureDataset(
+        structures=[s1, s2],
+        descriptor=descriptor,
+        show_progress=False,
+    )
+    subset = Subset(ds, [1])
+
+    results = pot.predict_dataset(subset)
+    assert len(results.total_energy) == 1
+    assert results.paths == ["s2.xsf"]
+    assert results.atom_types[0] == ["H", "H", "H"]

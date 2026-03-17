@@ -151,6 +151,7 @@ For energy-only training, features can be pre-computed once and cached for ~100Ã
 - Energy-only training (``force_weight=0.0``)
 - Multiple training runs with same data
 - When training speed is critical
+- Energy-only inference with ``TorchANNPotential.predict_dataset()``
 
 **Automatic usage:**
 
@@ -167,6 +168,25 @@ The trainer automatically uses ``CachedStructureDataset`` when you pass ``struct
    )
 
    pot.train(structures=structures, config=config)
+
+Dataset-backed inference can reuse these cached features directly:
+
+.. code-block:: python
+
+   from aenet.mlip import PredictionConfig
+
+   dataset = CachedStructureDataset(
+       structures=structures,
+       descriptor=descr,
+       show_progress=False,
+   )
+
+   results = pot.predict_dataset(
+       dataset,
+       config=PredictionConfig(batch_size=32)
+   )
+
+This avoids recomputing descriptor features during energy-only inference.
 
 
 HDF5StructureDataset: Large-Scale Lazy-Loading

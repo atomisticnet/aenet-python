@@ -72,6 +72,13 @@ def make_arch_H(descriptor: ChebyshevDescriptor):
     }
 
 
+def zero_model_weights(pot: TorchANNPotential):
+    for seq in pot.net.functions:
+        for p in seq.parameters():
+            with torch.no_grad():
+                p.zero_()
+
+
 @pytest.mark.cpu
 def test_energy_only_smoke(tmp_path: Path):
     structures = make_simple_structures_H_two()
@@ -154,3 +161,169 @@ def test_force_training_smoke(tmp_path: Path):
     assert ckpt_dir.exists()
     files = list(ckpt_dir.glob("checkpoint_epoch_*.pt"))
     assert len(files) >= 1
+
+
+@pytest.mark.cpu
+def test_save_energies_writes_compatible_trainout_files(tmp_path: Path,
+                                                        monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=50,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    assert (tmp_path / "energies.train.0").exists()
+    assert (tmp_path / "energies.test.0").exists()
+    assert result.energies is not None
+    assert len(result.energies.energies_train) == 1
+    assert len(result.energies.energies_test) == 1
+    assert "ANN(eV/atom)" in result.energies.energies_train.columns
+    assert "Ref(eV/atom)" in result.energies.energies_train.columns
+
+
+@pytest.mark.cpu
+def test_save_energies_uses_predict_dataset_for_cached_splits(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    call_count = {"forward_from_positions": 0}
+    orig_forward = descriptor.forward_from_positions
+
+    def _wrapped_forward(*args, **kwargs):
+        call_count["forward_from_positions"] += 1
+        return orig_forward(*args, **kwargs)
+
+    monkeypatch.setattr(descriptor, "forward_from_positions", _wrapped_forward)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=50,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        cache_features=True,
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    # One featurization per structure during CachedStructureDataset build,
+    # and no extra featurization during save_energies.
+    assert call_count["forward_from_positions"] == 2
+
+
+@pytest.mark.cpu
+def test_save_energies_without_test_split_writes_train_only(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    assert (tmp_path / "energies.train.0").exists()
+    assert not (tmp_path / "energies.test.0").exists()
+    assert result.energies is not None
+    assert len(result.energies.energies_train) == 2
+    assert result.energies.energies_test is None
+
+
+@pytest.mark.cpu
+def test_save_energies_uses_total_energy_columns_with_atomic_references(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    for s in structures:
+        s.energy = 3.69  # 3 H atoms with E_H = 1.23 each
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+    zero_model_weights(pot)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        atomic_energies={"H": 1.23},
+        normalize_features=False,
+        normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    train_df = result.energies.energies_train
+    assert np.allclose(train_df["Ref(eV)"].values, 3.69)
+    assert np.allclose(train_df["ANN(eV)"].values, 3.69)
+    assert np.allclose(train_df["Ref-ANN(eV/atom)"].values, 0.0)

@@ -310,3 +310,44 @@ def energy_collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         "n_atoms": n_atoms,
         "species_lists": species_lists,
     }
+
+
+def dataset_energy_collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Collate generic dataset samples for energy-only prediction.
+
+    This path reuses precomputed ``features`` when the dataset provides them,
+    which makes it suitable for ``CachedStructureDataset`` and other
+    dataset-backed inference workflows.
+    """
+    features_list: List[torch.Tensor] = []
+    species_idx_list: List[torch.Tensor] = []
+    n_atoms_list: List[int] = []
+    species_lists: List[List[str]] = []
+    positions_list: List[Any] = []
+    names_list: List[Any] = []
+
+    for s in batch:
+        features_list.append(s["features"])
+        species_idx_list.append(s["species_indices"])
+        n_atoms_list.append(int(s["n_atoms"]))
+        species_lists.append(list(s["species"]))
+        positions_list.append(s.get("positions", None))
+        names_list.append(s.get("name", None))
+
+    features = (torch.cat(features_list, dim=0)
+                if features_list else torch.empty(0, 0))
+    species_indices = (
+        torch.cat(species_idx_list, dim=0)
+        if species_idx_list
+        else torch.empty(0, dtype=torch.long)
+    )
+    n_atoms = torch.tensor(n_atoms_list, dtype=torch.long)
+    return {
+        "features": features,
+        "species_indices": species_indices,
+        "n_atoms": n_atoms,
+        "species_lists": species_lists,
+        "positions_list": positions_list,
+        "names_list": names_list,
+    }

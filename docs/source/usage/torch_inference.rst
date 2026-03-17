@@ -83,3 +83,37 @@ The unified API returns a :class:`~aenet.io.predict.PredictOut` object containin
 
 This API is identical to the Fortran-based inference API, enabling seamless
 interoperability between training in PyTorch and inference in Fortran.
+
+
+Dataset-Backed Inference
+------------------------
+
+The PyTorch backend also provides a torch-only optimization path for
+dataset-backed inference:
+
+.. code-block:: python
+
+   from aenet.mlip import PredictionConfig
+   from aenet.torch_training.dataset import CachedStructureDataset
+
+   ds = CachedStructureDataset(
+       structures=structures,
+       descriptor=descr,
+       show_progress=False,
+   )
+
+   results = pot.predict_dataset(
+       ds,
+       config=PredictionConfig(batch_size=32)
+   )
+
+This is useful when the dataset already stores precomputed ``features``.
+For example, ``CachedStructureDataset`` can reuse cached feature tensors and
+avoid featurizing the structures again during energy-only inference.
+
+Notes:
+
+* ``predict_dataset()`` is available only for ``TorchANNPotential``.
+* The current implementation supports energy-only inference
+  (``eval_forces=False``).
+* The return type is still :class:`~aenet.io.predict.PredictOut`.
