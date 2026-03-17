@@ -7,11 +7,13 @@ the subprocess-based ANNPotential.predict() method.
 """
 
 import os
+import tempfile
 import unittest
+
 import numpy as np
 
-from aenet.mlip import LibAenetInterface, ANNPotential, libaenet
 from aenet.geometry import AtomicStructure
+from aenet.mlip import ANNPotential, LibAenetInterface, libaenet
 
 
 class TestLibAenetInterface(unittest.TestCase):
@@ -25,8 +27,8 @@ class TestLibAenetInterface(unittest.TestCase):
         cls.data_dir = os.path.join(test_dir, '../../tests/data')
 
         cls.potential_paths = {
-            'Ti': os.path.join(cls.data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(cls.data_dir, 'O.nn.ascii')
+            'Ti': os.path.join(cls.data_dir, 'Ti.nn'),
+            'O': os.path.join(cls.data_dir, 'O.nn')
         }
 
         # Check if test data exists
@@ -50,18 +52,16 @@ class TestLibAenetInterface(unittest.TestCase):
 
     def test_initialization(self):
         """Test LibAenetInterface initialization."""
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
+        interface = LibAenetInterface(self.potential_paths)
         self.assertEqual(interface.potential_paths, self.potential_paths)
-        self.assertEqual(interface.potential_format, 'ascii')
+        self.assertIsNone(interface.potential_format)
         self.assertIsNone(interface._session)
 
     def test_predict_energy_only(self):
         """Test energy prediction without forces."""
         from aenet.formats.xsf import XSFParser
 
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
+        interface = LibAenetInterface(self.potential_paths)
 
         # Load a structure
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
@@ -80,8 +80,7 @@ class TestLibAenetInterface(unittest.TestCase):
         """Test energy and force prediction."""
         from aenet.formats.xsf import XSFParser
 
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
+        interface = LibAenetInterface(self.potential_paths)
 
         # Load a structure
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
@@ -103,7 +102,7 @@ class TestLibAenetInterface(unittest.TestCase):
 
     @unittest.skipIf(
         not os.path.exists(os.path.join(os.path.dirname(__file__),
-                                        '../../tests/data/Ti.nn.ascii')),
+                                        '../../tests/data/Ti.nn')),
         "Test data not available"
     )
     def test_compare_with_subprocess(self):
@@ -119,27 +118,33 @@ class TestLibAenetInterface(unittest.TestCase):
         parser = XSFParser()
         structure = parser.read(xsf_file)
 
-        # Method 1: Library interface
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
-        lib_energy, lib_forces = interface.predict(structure, forces=True)
-
-        # Method 2: Subprocess-based
-        potential = ANNPotential.from_files(
-            self.potential_paths,
-            potential_format='ascii'
-        )
-
         # Check if predict.x is available
         from aenet import config as cfg
         aenet_paths = cfg.read('aenet')
         if not os.path.exists(aenet_paths.get('predict_x_path', '')):
             self.skipTest("predict.x not available")
 
-        results = potential.predict(
-            [structure],
-            eval_forces=True
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                # Build both interfaces inside the temp cwd so any transient
+                # converted network files stay isolated.
+                interface = LibAenetInterface(self.potential_paths)
+                lib_energy, lib_forces = interface.predict(
+                    structure, forces=True)
+
+                # Build the subprocess-backed potential inside the temp cwd so
+                # any transient converted network files stay isolated.
+                potential = ANNPotential.from_files(
+                    self.potential_paths,
+                )
+                results = potential.predict(
+                    [xsf_file],
+                    eval_forces=True,
+                )
+            finally:
+                os.chdir(cwd)
 
         # Compare total energies (predict.x headline value)
         subprocess_energy = results.total_energy[0]
@@ -163,8 +168,7 @@ class TestLibAenetInterface(unittest.TestCase):
         """Test prediction on multiple structures."""
         from aenet.formats.xsf import XSFParser
 
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
+        interface = LibAenetInterface(self.potential_paths)
         parser = XSFParser()
 
         # Load multiple structures
@@ -189,8 +193,7 @@ class TestLibAenetInterface(unittest.TestCase):
     def test_cleanup(self):
         """Test that session cleanup happens properly."""
         # Create and use interface
-        interface = LibAenetInterface(
-            self.potential_paths, potential_format='ascii')
+        interface = LibAenetInterface(self.potential_paths)
 
         # Force initialization
         from aenet.formats.xsf import XSFParser
@@ -240,16 +243,14 @@ class TestLibAenetInterfaceErrors(unittest.TestCase):
         data_dir = os.path.join(test_dir, '../../tests/data')
 
         potential_paths = {
-            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(data_dir, 'O.nn.ascii')
+            'Ti': os.path.join(data_dir, 'Ti.nn'),
+            'O': os.path.join(data_dir, 'O.nn')
         }
 
         if not all(os.path.exists(p) for p in potential_paths.values()):
             self.skipTest("Test potentials not available")
 
-        lib = LibAenetInterface(
-            potential_paths, potential_format='ascii'
-        )
+        lib = LibAenetInterface(potential_paths)
 
         # Create structure with atom type not in potentials
         structure = AtomicStructure(

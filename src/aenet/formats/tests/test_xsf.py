@@ -8,8 +8,9 @@ __email__ = "alexurba@mit.edu, nartrith@mit.edu"
 __date__ = "2014-10-13"
 __version__ = "0.1"
 
-import unittest
 import os
+import tempfile
+import unittest
 
 from ...io import structure
 
@@ -30,10 +31,11 @@ class XSFTest(unittest.TestCase):
         self.assertEqual(c['Li'], 12)
         self.assertEqual(c['Mo'], 6)
         self.assertEqual(c['O'],  18)
-        structure.write(struc, filename='TEST.xsf')
-        struc2 = structure.read('TEST.xsf')
-        self.assertEqual(struc, struc2)
-        os.unlink('TEST.xsf')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = os.path.join(tmpdir, 'TEST.xsf')
+            structure.write(struc, filename=output_file)
+            struc2 = structure.read(output_file)
+            self.assertEqual(struc, struc2)
 
     def test_periodic(self):
         struc = structure.read(periodic_xsf)
@@ -44,10 +46,11 @@ class XSFTest(unittest.TestCase):
         self.assertEqual(c['Li'], 12)
         self.assertEqual(c['Mo'], 6)
         self.assertEqual(c['O'],  18)
-        structure.write(struc, filename='TEST.xsf')
-        struc2 = structure.read('TEST.xsf')
-        self.assertEqual(struc, struc2)
-        os.unlink('TEST.xsf')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = os.path.join(tmpdir, 'TEST.xsf')
+            structure.write(struc, filename=output_file)
+            struc2 = structure.read(output_file)
+            self.assertEqual(struc, struc2)
 
     def test_trajectory(self):
         struc = structure.read(trajectory_xsf)

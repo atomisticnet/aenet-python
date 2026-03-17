@@ -8,10 +8,10 @@ the direct LibAenetInterface.
 
 import os
 import unittest
+
 import numpy as np
 
 from aenet.mlip import AenetCalculator, libaenet
-
 
 # Check if ASE is available
 try:
@@ -32,8 +32,8 @@ class TestAenetCalculator(unittest.TestCase):
         cls.data_dir = os.path.join(test_dir, '../../tests/data')
 
         cls.potential_paths = {
-            'Ti': os.path.join(cls.data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(cls.data_dir, 'O.nn.ascii')
+            'Ti': os.path.join(cls.data_dir, 'Ti.nn'),
+            'O': os.path.join(cls.data_dir, 'O.nn')
         }
 
         cls.has_potentials = all(
@@ -54,10 +54,9 @@ class TestAenetCalculator(unittest.TestCase):
 
     def test_calculator_initialization(self):
         """Test AenetCalculator initialization."""
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         self.assertEqual(calc.potential_paths, self.potential_paths)
-        self.assertEqual(calc.potential_format, 'ascii')
+        self.assertIsNone(calc.potential_format)
         self.assertIsNone(calc._session)
 
     def test_energy_calculation_periodic(self):
@@ -68,8 +67,7 @@ class TestAenetCalculator(unittest.TestCase):
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
         atoms = ase.io.read(xsf_file)
 
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         atoms.calc = calc
 
         energy = atoms.get_potential_energy()
@@ -86,8 +84,7 @@ class TestAenetCalculator(unittest.TestCase):
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
         atoms = ase.io.read(xsf_file)
 
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         atoms.calc = calc
 
         forces = atoms.get_forces()
@@ -105,8 +102,7 @@ class TestAenetCalculator(unittest.TestCase):
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
         atoms = ase.io.read(xsf_file)
 
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         atoms.calc = calc
 
         # Get initial energy
@@ -146,8 +142,7 @@ class TestAenetCalculator(unittest.TestCase):
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
         atoms = ase.io.read(xsf_file)
 
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         atoms.calc = calc
 
         # Get initial forces
@@ -187,8 +182,7 @@ class TestAenetCalculator(unittest.TestCase):
         xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
         atoms = ase.io.read(xsf_file)
 
-        calc = AenetCalculator(
-            self.potential_paths, potential_format='ascii')
+        calc = AenetCalculator(self.potential_paths)
         atoms.calc = calc
 
         # Calculate energy twice without changing anything
@@ -238,15 +232,14 @@ class TestAenetCalculatorErrors(unittest.TestCase):
         data_dir = os.path.join(test_dir, '../../tests/data')
 
         potential_paths = {
-            'Ti': os.path.join(data_dir, 'Ti.nn.ascii'),
-            'O': os.path.join(data_dir, 'O.nn.ascii')
+            'Ti': os.path.join(data_dir, 'Ti.nn'),
+            'O': os.path.join(data_dir, 'O.nn')
         }
 
         if not all(os.path.exists(p) for p in potential_paths.values()):
             self.skipTest("Test potentials not available")
 
-        calc = AenetCalculator(
-            potential_paths, potential_format='ascii')
+        calc = AenetCalculator(potential_paths)
 
         atoms = ase.Atoms(
             'Si',

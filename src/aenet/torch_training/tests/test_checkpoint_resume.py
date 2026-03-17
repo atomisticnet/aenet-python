@@ -6,24 +6,22 @@ checkpoints, with all state properly restored.
 """
 
 import tempfile
-import shutil
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-from aenet.torch_training import TorchANNPotential
-from aenet.torch_training.config import TorchTrainingConfig, Structure, Adam
 from aenet.torch_featurize import ChebyshevDescriptor
+from aenet.torch_training import TorchANNPotential
+from aenet.torch_training.config import Adam, Structure, TorchTrainingConfig
 
 
 @pytest.fixture
 def temp_checkpoint_dir():
     """Create a temporary directory for checkpoints."""
-    tmpdir = tempfile.mkdtemp()
-    yield tmpdir
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield tmpdir
 
 
 @pytest.fixture
@@ -225,6 +223,8 @@ def test_checkpoint_best_model(
         iterations=8,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=20,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
         show_progress=False,
     )
 
@@ -327,6 +327,8 @@ def test_checkpoint_resume_different_iterations(
         iterations=10,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=0,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
         show_progress=False,
     )
 

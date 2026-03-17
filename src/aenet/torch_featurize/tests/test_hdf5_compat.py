@@ -7,7 +7,6 @@ Fortran-generated files.
 """
 
 import os
-import shutil
 import tempfile
 
 import numpy as np
@@ -22,9 +21,13 @@ from aenet.trainset import TrnSet
 @pytest.fixture
 def temp_dir():
     """Create temporary directory for test files."""
-    tmpdir = tempfile.mkdtemp()
-    yield tmpdir
-    shutil.rmtree(tmpdir)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield tmpdir
+
+
+def generate_output_path(temp_dir):
+    """Return a per-test log path for `run_aenet_generate` output."""
+    return os.path.join(temp_dir, 'generate.out')
 
 
 @pytest.fixture
@@ -178,6 +181,7 @@ class TestHDF5Writing:
         featurizer.run_aenet_generate(
             xsf_files=[xsf_file],
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies={'O': -10.0, 'H': -2.5}
         )
 
@@ -205,6 +209,7 @@ class TestHDF5Writing:
         featurizer.run_aenet_generate(
             xsf_files=[xsf_file],
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies={'O': -10.0, 'H': -2.5}
         )
 
@@ -253,6 +258,7 @@ class TestHDF5Writing:
         featurizer.run_aenet_generate(
             xsf_files=xsf_files,
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies={'O': -10.0, 'H': -2.5}
         )
 
@@ -287,6 +293,7 @@ class TestHDF5Writing:
         featurizer.run_aenet_generate(
             xsf_files=glob_pattern,
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies={'O': -10.0, 'H': -2.5}
         )
 
@@ -319,6 +326,7 @@ class TestHDF5Metadata:
         featurizer.run_aenet_generate(
             xsf_files=[xsf_file],
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies=atomic_energies
         )
 
@@ -369,6 +377,7 @@ class TestHDF5Metadata:
         featurizer.run_aenet_generate(
             xsf_files=xsf_files,
             hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
             atomic_energies={'O': 0.0, 'H': 0.0}
         )
 
@@ -408,7 +417,8 @@ class TestFeatureConsistency:
         hdf5_file = os.path.join(temp_dir, 'features.h5')
         featurizer.run_aenet_generate(
             xsf_files=[xsf_file],
-            hdf5_filename=hdf5_file
+            hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
         )
 
         # Read from HDF5
@@ -438,7 +448,8 @@ class TestFeatureConsistency:
         hdf5_file = os.path.join(temp_dir, 'features.h5')
         featurizer.run_aenet_generate(
             xsf_files=[xsf_file],
-            hdf5_filename=hdf5_file
+            hdf5_filename=hdf5_file,
+            output_file=generate_output_path(temp_dir),
         )
 
         # Read and compare
