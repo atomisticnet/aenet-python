@@ -188,9 +188,7 @@ class TorchNeighborList:
 
         Example:
             >>> from aenet.geometry import AtomicStructure
-            >>> from aenet.torch_featurize.neighborlist import (
-            ...     TorchNeighborList
-            ... )
+            >>> from aenet.torch_featurize import TorchNeighborList
             >>> structure = AtomicStructure(coords, types, avec=avec)
             >>> nbl = TorchNeighborList.from_AtomicStructure(
             ...     structure, cutoff=4.0

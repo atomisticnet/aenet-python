@@ -5,7 +5,7 @@ Overview
 --------
 
 The ``aenet-python`` package provides neighbor list functionality through
-the ``TorchNeighborList`` class in ``aenet.torch_featurize.neighborlist``.
+the ``TorchNeighborList`` class exported by ``aenet.torch_featurize``.
 The neighbor list is fully integrated with ``AtomicStructure`` objects
 and can be used both through high-level convenience methods and low-level
 direct access.
@@ -14,7 +14,7 @@ direct access.
 
    The features described here make use of PyTorch.  Make sure to
    install ænet with the ``[torch]`` extra as described in
-   :doc:`/usage/installation`.  For use without PyTorch, ``aenet-python`` Also
+   :doc:`/usage/installation`.  For use without PyTorch, ``aenet-python`` also
    provides a (less efficient) pure-Python neighbor list implementation in
    ``aenet.geometry.nblist``, which can be used with ``AtomicStructure``
    objects.
@@ -55,7 +55,7 @@ For more control, use ``TorchNeighborList`` directly:
 
 .. code-block:: python
 
-   from aenet.torch_featurize.neighborlist import TorchNeighborList
+   from aenet.torch_featurize import TorchNeighborList
    import numpy as np
 
    # Create neighbor list
@@ -212,7 +212,7 @@ Create a neighbor list pre-configured for a structure:
 
 .. code-block:: python
 
-   from aenet.torch_featurize.neighborlist import TorchNeighborList
+   from aenet.torch_featurize import TorchNeighborList
 
    # Create from AtomicStructure
    nbl = TorchNeighborList.from_AtomicStructure(
