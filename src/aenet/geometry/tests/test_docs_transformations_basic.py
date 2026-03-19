@@ -123,3 +123,29 @@ def test_isovolumetric_and_shear_examples_preserve_volume(
         sheared_cells[-1][0],
         [4.0, 0.4, 0.0],
     )
+
+
+@pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_save_all_structures_example_writes_numbered_xsf_files(
+    docs_periodic_structure,
+    tmp_path,
+):
+    """The documented save-all loop should emit one file per structure."""
+    transform = AtomDisplacementTransformation(displacement=0.05)
+
+    for i, structure in enumerate(
+        transform.apply_transformation(docs_periodic_structure)
+    ):
+        structure.to_file(str(tmp_path / f"output_{i:04d}.xsf"))
+
+    written_files = sorted(path.name for path in tmp_path.glob("output_*.xsf"))
+
+    assert written_files == [
+        "output_0000.xsf",
+        "output_0001.xsf",
+        "output_0002.xsf",
+        "output_0003.xsf",
+        "output_0004.xsf",
+        "output_0005.xsf",
+    ]

@@ -123,6 +123,7 @@ Developer Documentation
 
    dev/neighbor_lists
    dev/commandline
+   dev/docs_examples
    dev/analytical_gradients
 
 API Reference
