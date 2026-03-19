@@ -26,7 +26,12 @@ Using ANN Potentials with the PyTorch Implementation
 Example notebooks
 -----------------
 
-Jupyter notebooks with examples can be found in the `notebooks
+For a longer workflow-oriented walkthrough, including the maintained TiO2
+saved-model example, batched file-backed inference, and optional GPU
+execution, see `example-06-torch-inference.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-06-torch-inference.ipynb>`_.
+
+Additional notebooks are available in the `notebooks
 <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_
 directory within the repository.
 
@@ -34,42 +39,30 @@ directory within the repository.
 Loading a Trained Model
 ------------------------
 
-To use a trained model for inference:
+Use compact page-level examples for the core API, and prefer the notebook
+linked above for larger file collections, performance tuning, and GPU-backed
+workflows.
 
 .. code-block:: python
 
-   from aenet.torch_training import TorchANNPotential
    from aenet.mlip import PredictionConfig
+   from aenet.torch_training import TorchANNPotential
 
-   # Load the model
-   pot = TorchANNPotential.from_file('./outputs/trained_model.pt')
+   pot = TorchANNPotential.from_file("outputs/trained_model.pt")
 
-   # Predict energies for structures (accepts file paths or objects)
-   results = pot.predict(['structure1.xsf', 'structure2.xsf'])
-
-   print(f"Total energies: {results.total_energy}")
-   print(f"Cohesive energies: {results.cohesive_energy}")
-
-   # Predict with forces and per-atom energies
    results = pot.predict(
-       ['structure1.xsf', 'structure2.xsf'],
+       ["structure.xsf"],
        eval_forces=True,
        config=PredictionConfig(
            print_atomic_energies=True,
-           timing=True
-       )
+           timing=True,
+       ),
    )
 
    print(f"Total energy: {results.total_energy[0]:.4f} eV")
    print(f"Cohesive energy: {results.cohesive_energy[0]:.4f} eV")
-   print(f"Max force: {results.forces[0].max():.4f} eV/Å")
-   print(f"Atom 0 energy: {results.atom_energies[0][0]:.4f} eV")
-
-   # Access timing information (if requested)
-   if results.timing:
-       print(f"Featurization time: {results.timing['featurization'][0]:.4f} s")
-       print(f"Energy eval time: {results.timing['energy_eval'][0]:.4f} s")
-       print(f"Force eval time: {results.timing['force_eval'][0]:.4f} s")
+   print(results.forces[0].shape)
+   print(results.atom_energies[0].shape)
 
 The unified API returns a :class:`~aenet.io.predict.PredictOut` object containing:
 
@@ -81,6 +74,9 @@ The unified API returns a :class:`~aenet.io.predict.PredictOut` object containin
 * ``atom_types``: Atomic species
 * ``timing``: Per-structure timing breakdown (if ``config.timing=True``)
 
+When ``timing=True``, the per-structure timing data is available through
+``results.timing``.
+
 This API is identical to the Fortran-based inference API, enabling seamless
 interoperability between training in PyTorch and inference in Fortran.
 
@@ -89,16 +85,20 @@ Dataset-Backed Inference
 ------------------------
 
 The PyTorch backend also provides a torch-only optimization path for
-dataset-backed inference:
+dataset-backed inference. The notebook linked above remains the maintained
+home for the longer file-backed TiO2 workflow.
 
 .. code-block:: python
 
+   from aenet.geometry import AtomicStructure
    from aenet.mlip import PredictionConfig
    from aenet.torch_training.dataset import CachedStructureDataset
 
+   structures = [AtomicStructure.from_file("structure.xsf")]
+
    ds = CachedStructureDataset(
        structures=structures,
-       descriptor=descr,
+       descriptor=pot.descriptor,
        show_progress=False,
    )
 
