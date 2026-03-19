@@ -5,16 +5,27 @@ This module centralizes checks and error messages for optional packages so
 subpackages like `aenet.torch_featurize` and `aenet.torch_training` can be
 imported safely even when the PyTorch stack is not installed.
 
-Users can install extras with:
+Users can install core torch support with:
     pip install "aenet[torch]"
+
+PyG-backed features additionally require `torch-scatter` and
+`torch-cluster` from the matching wheel index at:
+    https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
 """
 
 from __future__ import annotations
 
-from typing import Tuple, Optional
+PYG_WHEEL_INDEX = "https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html"
+TORCH_INSTALL_HINT = "pip install 'aenet[torch]'"
+TORCH_STACK_INSTALL_HINT = (
+    "Install core torch with: "
+    f"{TORCH_INSTALL_HINT}. "
+    "Then install torch-scatter and torch-cluster from the matching "
+    f"PyG wheel index: {PYG_WHEEL_INDEX}"
+)
 
 
-def _safe_import(module: str) -> Tuple[bool, Optional[Exception]]:
+def _safe_import(module: str) -> tuple[bool, Exception | None]:
     try:
         __import__(module)
         return True, None
@@ -37,9 +48,10 @@ def is_torch_cluster_available() -> bool:
     return ok
 
 
-def torch_status() -> Tuple[bool, str]:
+def torch_status() -> tuple[bool, str]:
     """
     Returns (available, reason_if_unavailable).
+
     Only checks core PyTorch.
     """
     ok, err = _safe_import("torch")
@@ -50,9 +62,10 @@ def torch_status() -> Tuple[bool, str]:
     return False, reason
 
 
-def torch_stack_status() -> Tuple[bool, str]:
+def torch_stack_status() -> tuple[bool, str]:
     """
-    Returns (available, reason_if_unavailable) for full featurization stack:
+    Returns (available, reason_if_unavailable) for full featurization stack.
+
       - torch
       - torch-scatter
       - torch-cluster
@@ -75,8 +88,9 @@ def torch_stack_status() -> Tuple[bool, str]:
             False,
             "Missing optional dependencies: "
             + ", ".join(missing)
-            + ". Install with: pip install 'aenet[torch]' "
-              "(ensure torch/CPU/CUDA wheels match your system)",
+            + ". "
+            + TORCH_STACK_INSTALL_HINT
+            + " (ensure torch/CPU/CUDA wheels match your system)",
         )
     return True, ""
 
@@ -86,7 +100,7 @@ def require_torch(feature: str = "this feature") -> None:
     if not ok:
         raise ImportError(
             f"{feature} requires PyTorch. {reason}. "
-            "Install with: pip install 'aenet[torch]'"
+            f"Install with: {TORCH_INSTALL_HINT}"
         )
 
 
@@ -95,5 +109,5 @@ def require_torch_stack(feature: str = "this feature") -> None:
     if not ok:
         raise ImportError(
             f"{feature} requires the PyTorch extras. {reason} "
-            "Install with: pip install 'aenet[torch]'"
+            + TORCH_STACK_INSTALL_HINT
         )

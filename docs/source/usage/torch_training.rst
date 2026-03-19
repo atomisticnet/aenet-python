@@ -9,7 +9,9 @@ and automatic differentiation for forces.
 .. note::
 
    Training as described here makes use of PyTorch.  Make sure to
-   install ænet with the ``[torch]`` extra as described in :doc:`installation`.
+   install core torch support as described in :doc:`installation`.  Most
+   descriptor-based training workflows also require the matching
+   ``torch-scatter`` and ``torch-cluster`` wheels.
 
 .. note::
 

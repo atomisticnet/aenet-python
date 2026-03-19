@@ -4,7 +4,8 @@ PyTorch-Based Featurization
 .. note::
 
    Featurization as described here makes use of PyTorch.  Make sure to
-   install ænet with the ``[torch]`` extra as described in :doc:`installation`.
+   install core torch support plus the matching ``torch-scatter`` and
+   ``torch-cluster`` wheels as described in :doc:`installation`.
 
 .. note::
 

@@ -38,6 +38,36 @@ explicitly with
 
    $ pip install ".[torch]"
 
+This installs the core PyTorch dependency only.  The PyTorch-based
+featurization and neighbor-list features also require the PyG extension
+packages ``torch-scatter`` and ``torch-cluster`` matched to the local torch
+build.
+
+Recommended installation matrix:
+
+.. sourcecode:: console
+
+   # Core PyTorch support only
+   $ pip install ".[torch]"
+
+   # Full CPU PyTorch stack
+   $ pip install ".[torch]"
+   $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html
+
+   # Full CUDA PyTorch stack
+   $ pip install ".[torch]"
+   $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
+
+Replace ``${TORCH}`` with the installed torch version (for example ``2.9.0``)
+and ``${CUDA}`` with the matching CUDA tag (for example ``cu124``).  If you
+are developing from a source checkout, the equivalent editable install is:
+
+.. sourcecode:: console
+
+   $ pip install -e ".[dev]"
+   $ pip install ".[torch]"
+   $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html
+
 
 2. Configure ænet Fortran Binaries
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

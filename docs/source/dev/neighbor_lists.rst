@@ -16,11 +16,11 @@ and optional GPU execution, see ``notebooks/example-07-neighbor-list.ipynb``.
 .. note::
 
    The features described here make use of PyTorch.  Make sure to
-   install ænet with the ``[torch]`` extra as described in
-   :doc:`/usage/installation`.  For use without PyTorch, ``aenet-python`` also
-   provides a (less efficient) pure-Python neighbor list implementation in
-   ``aenet.geometry.nblist``, which can be used with ``AtomicStructure``
-   objects.
+   install core torch support plus the matching ``torch-scatter`` and
+   ``torch-cluster`` wheels as described in :doc:`/usage/installation`.  For
+   use without PyTorch, ``aenet-python`` also provides a (less efficient)
+   pure-Python neighbor list implementation in ``aenet.geometry.nblist``,
+   which can be used with ``AtomicStructure`` objects.
 
 Quick Start
 -----------

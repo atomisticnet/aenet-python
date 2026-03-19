@@ -11,6 +11,8 @@ permissions:
 env:
   ENV_NAME: aenet-torch
   PYTHON_VERSION: "3.11"
+  TORCH_VERSION: "2.9.0"
+  PYG_WHEEL_URL: "https://data.pyg.org/whl/torch-2.9.0+cpu.html"
 
 jobs:
   unit-tests:
@@ -35,7 +37,10 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
+          micromamba run -n "${ENV_NAME}" python -m pip install \
+            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
 
       - name: Run general pytest suite
         run: |
@@ -63,7 +68,10 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
+          micromamba run -n "${ENV_NAME}" python -m pip install \
+            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
 
       - name: Run pytest docs examples
         run: |
@@ -115,7 +123,10 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
+          micromamba run -n "${ENV_NAME}" python -m pip install \
+            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
 
       - name: Prepare disposable notebook worktree
         run: |

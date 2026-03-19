@@ -6,7 +6,9 @@ Using ANN Potentials with the PyTorch Implementation
 .. note::
 
    Inference as described here makes use of PyTorch.  Make sure to
-   install ænet with the ``[torch]`` extra as described in :doc:`installation`.
+   install core torch support as described in :doc:`installation`.  The
+   descriptor-backed workflows shown here also rely on the matching
+   ``torch-scatter`` and ``torch-cluster`` wheels.
 
 .. note::
 

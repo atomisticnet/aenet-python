@@ -1211,7 +1211,10 @@ class AtomicStructure(object):
             warnings.warn(
                 "Falling back to NumPy neighbor list because PyTorch "
                 "extras are unavailable or failed at runtime "
-                f"({e}). Install with: pip install 'aenet[torch]'",
+                f"({e}). Install core torch with: pip install 'aenet[torch]'. "
+                "PyG-backed neighbor lists additionally require "
+                "torch-scatter and torch-cluster from "
+                "https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html",
                 RuntimeWarning,
             )
             from ..nblist.neighborlist import NeighborList  # type: ignore

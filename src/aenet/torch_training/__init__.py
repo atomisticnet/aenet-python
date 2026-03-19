@@ -6,11 +6,13 @@ This subpackage is optional. To use it, install PyTorch:
 
 When PyTorch is not installed, importing `aenet.torch_training` succeeds,
 but accessing symbols will raise a clear ImportError with installation
-guidance.
+guidance. Descriptor-based training workflows also require the PyG
+extensions (`torch-scatter` and `torch-cluster`) used by
+`aenet.torch_featurize`.
 """
 
 from importlib import import_module
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from .._optional import require_torch
 
@@ -43,7 +45,7 @@ __all__ = [
 ]
 
 # Map exported names to (relative_module, attr_name)
-_NAME_TO_SPEC: Dict[str, Tuple[str, str]] = {
+_NAME_TO_SPEC: dict[str, tuple[str, str]] = {
     # config
     "SGD": (".config", "SGD"),
     "Adam": (".config", "Adam"),

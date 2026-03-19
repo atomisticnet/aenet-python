@@ -24,13 +24,30 @@ For development, install in editable mode:
 
 Optional: enable PyTorch-based features (featurization and training)
 
-- From a source checkout:
+Installation matrix:
+
+- Core PyTorch support only
 
         $ pip install '.[torch]'
 
-  or for development:
+  This is sufficient for the core `aenet.torch_training` API, but not for the
+  PyG-backed featurization and neighbor-list stack.
 
-        $ pip install -e '.[dev,torch]'
+- Full CPU PyTorch stack (recommended for docs examples and notebooks)
+
+        $ pip install '.[torch]'
+        $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html
+
+- Full CUDA PyTorch stack
+
+        $ pip install '.[torch]'
+        $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
+
+- Development install with the full CPU stack
+
+        $ pip install -e '.[dev]'
+        $ pip install '.[torch]'
+        $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html
 
 If pip reports build/version conflicts for torch-scatter/torch-cluster:
 - Ensure your installed torch version matches available wheels (CPU/CUDA).
@@ -38,10 +55,13 @@ If pip reports build/version conflicts for torch-scatter/torch-cluster:
 
         $ pip install torch-scatter torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
 
-  Replace ${TORCH} (e.g., 2.3.1) and ${CUDA} (e.g., cu121 or cpu) with your environment.
+  Replace ${TORCH} (for example, 2.9.0) and ${CUDA} (for example, cu124 or
+  cpu) with your environment.
 
 Behavior without PyTorch extras:
-- aenet.torch_featurize and aenet.torch_training can be imported, but accessing symbols raises a clear ImportError suggesting: pip install 'aenet[torch]'.
+- aenet.torch_featurize and PyG-backed training workflows can be imported, but
+  accessing symbols raises a clear ImportError with guidance to install core
+  torch plus matching `torch-scatter` / `torch-cluster` wheels.
 - AtomicStructure.get_neighbors() automatically falls back to a NumPy neighbor list with a RuntimeWarning.
 
 To use the featurization capabilities, the main ænet package needs to be installed separately as described [elsewhere](http://ann.atomistic.net/documentation/).  And `aenet-python` needs to be made aware of the ænet installation path, for example, using its interactive configuration tool
