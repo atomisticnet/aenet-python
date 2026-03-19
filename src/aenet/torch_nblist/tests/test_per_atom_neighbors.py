@@ -185,28 +185,38 @@ class TestCaching:
 
         # First call - computes
         result1 = nbl.get_neighbors_of_atom(0, positions)
+        cache_key1 = nbl._cache_key
+        cached_result1 = nbl._cached_result
 
         # Second call - should use cache
         result2 = nbl.get_neighbors_of_atom(1, positions)
 
-        # Results should be consistent
+        # Results should be consistent and reuse the cached full graph.
+        assert nbl._cache_key == cache_key1
+        assert nbl._cached_result is cached_result1
         assert result1["indices"].device == result2["indices"].device
 
     def test_cache_invalidation(self):
         """Test that cache is invalidated for different positions."""
-        positions1 = torch.randn(10, 3, dtype=torch.float64)
-        positions2 = torch.randn(10, 3, dtype=torch.float64)
+        positions1 = torch.arange(30, dtype=torch.float64).reshape(10, 3)
+        positions2 = positions1.clone()
+        positions2[0, 0] += 0.25
 
         nbl = TorchNeighborList(cutoff=3.0, device="cpu")
 
         # Call with first positions
-        result1 = nbl.get_neighbors_of_atom(0, positions1)
+        nbl.get_neighbors_of_atom(0, positions1)
+        cache_key1 = nbl._cache_key
+        cached_result1 = nbl._cached_result
 
         # Call with different positions - should recompute
         result2 = nbl.get_neighbors_of_atom(0, positions2)
 
-        # Results should be different
-        assert not torch.equal(result1["indices"], result2["indices"])
+        # The cache key and stored graph should change even if a later
+        # per-atom slice happens to contain the same neighbor indices.
+        assert nbl._cache_key != cache_key1
+        assert nbl._cached_result is not cached_result1
+        assert result2["indices"].device.type == "cpu"
 
 
 class TestPerAtomPBC:

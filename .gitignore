@@ -14,6 +14,16 @@ profiling/
 outputs/
 .virtual_documents
 
+# Notebook-generated outputs
+notebooks/features.h5
+notebooks/features_torch.h5
+notebooks/generate.out
+notebooks/predict.out
+notebooks/run/
+notebooks/example-01-outputs/
+notebooks/example-05-outputs/
+notebooks/example-08-outputs/
+
 debug/
 profiling/
 fortran/

@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ENV_NAME: aenet-torch
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: ${{ env.ENV_NAME }}
+          create-args: >-
+            python=${{ env.PYTHON_VERSION }}
+            pip
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+
+      - name: Install project and dependencies
+        run: |
+          micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+
+      - name: Run general pytest suite
+        run: |
+          micromamba run -n "${ENV_NAME}" pytest -q -m "not docs_examples"
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: ${{ env.ENV_NAME }}
+          create-args: >-
+            python=${{ env.PYTHON_VERSION }}
+            pip
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+
+      - name: Install project and dependencies
+        run: |
+          micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+
+      - name: Run pytest docs examples
+        run: |
+          micromamba run -n "${ENV_NAME}" pytest -q -m docs_examples
+
+      - name: Run Sphinx doctest
+        run: |
+          micromamba run -n "${ENV_NAME}" \
+            python -m sphinx -b doctest docs/source docs/build/doctest
+
+      - name: Run warning-clean Sphinx HTML build
+        run: |
+          micromamba run -n "${ENV_NAME}" \
+            python -m sphinx -W --keep-going -b html docs/source docs/build/html
+
+  notebooks:
+    name: Notebook (${{ matrix.notebook_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - notebook: notebooks/example-01-featurization.ipynb
+            notebook_name: example-01-featurization
+          - notebook: notebooks/example-04-torch-featurization.ipynb
+            notebook_name: example-04-torch-featurization
+          - notebook: notebooks/example-05-torch-training.ipynb
+            notebook_name: example-05-torch-training
+          - notebook: notebooks/example-06-torch-inference.ipynb
+            notebook_name: example-06-torch-inference
+          - notebook: notebooks/example-07-neighbor-list.ipynb
+            notebook_name: example-07-neighbor-list
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: ${{ env.ENV_NAME }}
+          create-args: >-
+            python=${{ env.PYTHON_VERSION }}
+            pip
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+
+      - name: Install project and dependencies
+        run: |
+          micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,torch]"
+
+      - name: Prepare disposable notebook worktree
+        run: |
+          mkdir -p "${RUNNER_TEMP}/notebook-worktree"
+          rsync -a --delete --exclude ".git" ./ "${RUNNER_TEMP}/notebook-worktree/"
+
+      - name: Execute notebook
+        run: |
+          mkdir -p "${RUNNER_TEMP}/executed-notebooks"
+          micromamba run -n "${ENV_NAME}" \
+            python -m jupyter nbconvert --to notebook --execute \
+            "${RUNNER_TEMP}/notebook-worktree/${{ matrix.notebook }}" \
+            --output-dir "${RUNNER_TEMP}/executed-notebooks" \
+            --ExecutePreprocessor.timeout=600

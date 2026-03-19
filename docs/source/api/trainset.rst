@@ -168,4 +168,4 @@ The implementation maintains full backward compatibility:
 See Also
 --------
 
-* :doc:`torch_featurization` - PyTorch-based featurization APIs
+* :doc:`/usage/torch_featurization` - PyTorch-based featurization APIs
