@@ -10,6 +10,9 @@ The neighbor list is fully integrated with ``AtomicStructure`` objects
 and can be used both through high-level convenience methods and low-level
 direct access.
 
+For a longer workflow-oriented walkthrough, including low-level edge access
+and optional GPU execution, see ``notebooks/example-07-neighbor-list.ipynb``.
+
 .. note::
 
    The features described here make use of PyTorch.  Make sure to
@@ -28,50 +31,46 @@ Using with AtomicStructure
 The simplest way to use the neighbor list is through
 ``AtomicStructure.get_neighbors()``:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.geometry import AtomicStructure
-   import numpy as np
-
-   # Create a structure
-   coords = np.array([
-       [0.0, 0.0, 0.0],
-       [1.5, 0.0, 0.0],
-       [0.0, 1.5, 0.0]
-   ])
-   types = ['O', 'H', 'H']
-   structure = AtomicStructure(coords, types)
-
-   # Get neighbors of atom 0 within 2.0 Angstroms
-   neighbors = structure.get_neighbors(i=0, cutoff=2.0)
-
-   # neighbors is an AtomicStructure containing the neighboring atoms
-   print(f"Found {neighbors.natoms} neighbors")
+   >>> import numpy as np
+   >>> from aenet.geometry import AtomicStructure
+   >>> structure = AtomicStructure(
+   ...     np.array([
+   ...         [0.0, 0.0, 0.0],
+   ...         [1.5, 0.0, 0.0],
+   ...         [0.0, 1.5, 0.0],
+   ...     ]),
+   ...     ['O', 'H', 'H'],
+   ... )
+   >>> neighbors = structure.get_neighbors(i=0, cutoff=2.0)
+   >>> neighbors.natoms
+   3
+   >>> neighbors.types.tolist()
+   ['O', 'H', 'H']
 
 Direct Usage
 ~~~~~~~~~~~~
 
 For more control, use ``TorchNeighborList`` directly:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_featurize import TorchNeighborList
-   import numpy as np
-
-   # Create neighbor list
-   nbl = TorchNeighborList(cutoff=4.0, device='cpu')
-
-   # Find neighbors (accepts numpy arrays)
-   positions = np.array([[0.0, 0.0, 0.0],
-                         [1.5, 0.0, 0.0],
-                         [3.0, 0.0, 0.0]])
-
-   # Get neighbors of atom 0
-   result = nbl.get_neighbors_of_atom(0, positions)
-
-   neighbor_indices = result['indices']    # Which atoms are neighbors
-   distances = result['distances']         # Distances to neighbors
-   offsets = result['offsets']            # Cell offsets (None for isolated)
+   >>> import numpy as np
+   >>> from aenet.torch_featurize import TorchNeighborList
+   >>> nbl = TorchNeighborList(cutoff=4.0, device='cpu')
+   >>> positions = np.array([
+   ...     [0.0, 0.0, 0.0],
+   ...     [1.5, 0.0, 0.0],
+   ...     [3.0, 0.0, 0.0],
+   ... ])
+   >>> result = nbl.get_neighbors_of_atom(0, positions)
+   >>> result['indices'].cpu().tolist()
+   [1, 2]
+   >>> [round(float(d), 1) for d in result['distances'].cpu().tolist()]
+   [1.5, 3.0]
+   >>> result['offsets'] is None
+   True
 
 Configuration Options
 ---------------------
@@ -113,27 +112,31 @@ should be avoided for performance reasons.
 Periodic Boundary Conditions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For periodic systems, provide lattice vectors:
+For periodic systems, provide lattice vectors. When ``cell`` is given,
+positions are interpreted as fractional coordinates by default. Pass
+``fractional=False`` when your coordinates are Cartesian:
 
 .. code-block:: python
 
    import numpy as np
+   from aenet.torch_featurize import TorchNeighborList
 
-   # FCC lattice
-   a = 4.05  # Angstroms
-   cell = np.array([
-       [0.0, 0.5*a, 0.5*a],
-       [0.5*a, 0.0, 0.5*a],
-       [0.5*a, 0.5*a, 0.0]
+   cell = np.eye(3) * 5.0
+   cartesian_positions = np.array([
+       [0.5, 2.5, 2.5],
+       [4.5, 2.5, 2.5],
    ])
 
-   positions = np.array([[0.0, 0.0, 0.0]])  # Single atom
-
-   nbl = TorchNeighborList(cutoff=4.0)
-   result = nbl.get_neighbors_of_atom(0, positions, cell=cell)
+   nbl = TorchNeighborList(cutoff=2.0, device='cpu')
+   result = nbl.get_neighbors_of_atom(
+       0,
+       cartesian_positions,
+       cell=cell,
+       fractional=False,
+   )
 
    # Offsets show which periodic images each neighbor belongs to
-   print(result['offsets'])  # e.g., [[0,0,1], [0,1,0], ...]
+   print(result['offsets'])  # tensor([[-1, 0, 0]])
 
 Advanced Features
 -----------------
@@ -146,17 +149,33 @@ and offsets, use ``return_coordinates=True``:
 
 .. code-block:: python
 
-   nbl = TorchNeighborList(cutoff=4.0)
+   import numpy as np
+   from aenet.torch_featurize import TorchNeighborList
+
+   cell = np.eye(3) * 5.0
+   cartesian_positions = np.array([
+       [0.5, 2.5, 2.5],
+       [4.5, 2.5, 2.5],
+   ])
+   nbl = TorchNeighborList(cutoff=2.0, device='cpu')
 
    # For isolated systems
-   result = nbl.get_neighbors_of_atom(
-       0, positions, return_coordinates=True
-   )
+   isolated_positions = np.array([
+       [0.0, 0.0, 0.0],
+       [1.5, 0.0, 0.0],
+       [3.0, 0.0, 0.0],
+   ])
+   result = nbl.get_neighbors_of_atom(0, isolated_positions,
+                                      return_coordinates=True)
    neighbor_coords = result['coordinates']  # Actual 3D positions
 
    # For periodic systems - offsets are automatically applied
    result = nbl.get_neighbors_of_atom(
-       0, positions, cell=cell, return_coordinates=True
+       0,
+       cartesian_positions,
+       cell=cell,
+       fractional=False,
+       return_coordinates=True,
    )
    neighbor_coords = result['coordinates']  # PBC offsets already applied
 
@@ -170,27 +189,37 @@ For multi-component systems, different atom pairs may require different cutoffs:
 
 .. code-block:: python
 
+   import numpy as np
    import torch
+   from aenet.torch_featurize import TorchNeighborList
 
-   # Water system: O and H atoms
-   atom_types = torch.tensor([8, 1, 1, 8, 1, 1])  # Atomic numbers
+   positions = np.array([
+       [0.00000, 0.00000, 0.11779],
+       [0.00000, 0.75545, -0.47116],
+       [0.00000, -0.75545, -0.47116],
+   ])
+   atom_types = torch.tensor([8, 1, 1])  # O, H, H
 
    # Define pair-specific cutoffs
    cutoff_dict = {
-       (1, 1): 2.0,   # H-H: short cutoff
-       (1, 8): 2.5,   # H-O: bond length range
-       (8, 8): 3.5,   # O-O: longer cutoff
+       (1, 1): 1.0,
+       (1, 8): 2.5,
+       (8, 8): 3.0,
    }
 
    # Create neighbor list with type information
    nbl = TorchNeighborList(
-       cutoff=5.0,              # Max cutoff (must be >= all pair cutoffs)
+       cutoff=5.0,  # Must be >= every pair-specific cutoff
        atom_types=atom_types,
-       cutoff_dict=cutoff_dict
+       cutoff_dict=cutoff_dict,
+       device='cpu',
    )
 
-   # Neighbors are automatically filtered by type-specific cutoffs
-   result = nbl.get_neighbors_of_atom(0, positions, cell=cell)
+   oxygen_neighbors = nbl.get_neighbors_of_atom(0, positions)
+   hydrogen_neighbors = nbl.get_neighbors_of_atom(1, positions)
+
+   print(oxygen_neighbors['indices'])   # tensor([1, 2])
+   print(hydrogen_neighbors['indices'])  # tensor([0])
 
 Per-Atom Neighbor Access
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -199,8 +228,18 @@ Get neighbors for all atoms at once:
 
 .. code-block:: python
 
+   import torch
+   from aenet.torch_featurize import TorchNeighborList
+
+   positions = torch.tensor([
+       [0.0, 0.0, 0.0],
+       [1.0, 0.0, 0.0],
+       [0.0, 1.0, 0.0],
+   ], dtype=torch.float64)
+   nbl = TorchNeighborList(cutoff=1.5, device='cpu')
+
    # Returns list of neighbor dicts, one per atom
-   all_neighbors = nbl.get_neighbors_by_atom(positions, cell=cell)
+   all_neighbors = nbl.get_neighbors_by_atom(positions)
 
    for i, atom_neighbors in enumerate(all_neighbors):
        print(f"Atom {i}: {len(atom_neighbors['indices'])} neighbors")
@@ -210,16 +249,28 @@ Factory Method from AtomicStructure
 
 Create a neighbor list pre-configured for a structure:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_featurize import TorchNeighborList
-
-   # Create from AtomicStructure
-   nbl = TorchNeighborList.from_AtomicStructure(
-       structure,
-       cutoff=4.0,
-       frame=-1  # Use last frame
-   )
+   >>> import numpy as np
+   >>> from aenet.geometry import AtomicStructure
+   >>> from aenet.torch_featurize import TorchNeighborList
+   >>> structure = AtomicStructure(
+   ...     np.array([
+   ...         [0.0, 0.0, 0.0],
+   ...         [1.5, 0.0, 0.0],
+   ...         [0.0, 1.5, 0.0],
+   ...     ]),
+   ...     ['O', 'H', 'H'],
+   ... )
+   >>> nbl = TorchNeighborList.from_AtomicStructure(
+   ...     structure,
+   ...     cutoff=2.0,
+   ...     device='cpu',
+   ... )
+   >>> nbl.cutoff
+   2.0
+   >>> nbl.max_num_neighbors
+   256
 
 GPU Acceleration
 ~~~~~~~~~~~~~~~~
@@ -247,7 +298,15 @@ The neighbor list automatically caches results:
 
 .. code-block:: python
 
-   nbl = TorchNeighborList(cutoff=4.0)
+   import torch
+   from aenet.torch_featurize import TorchNeighborList
+
+   positions = torch.tensor([
+       [0.0, 0.0, 0.0],
+       [1.0, 0.0, 0.0],
+       [0.0, 1.0, 0.0],
+   ], dtype=torch.float64)
+   nbl = TorchNeighborList(cutoff=1.5, device='cpu')
 
    # First call: computes neighbor list
    result1 = nbl.get_neighbors_of_atom(0, positions)
@@ -266,4 +325,4 @@ See Also
 
 * :doc:`/usage/torch_featurization` - PyTorch-based featurization
 * :doc:`/usage/structure_manipulation` - Working with AtomicStructure
-* `Example notebooks <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_ - Jupyter notebook examples
+* `example-07-neighbor-list.ipynb <https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-07-neighbor-list.ipynb>`_ - longer low-level, GPU, and type-dependent neighbor-list examples

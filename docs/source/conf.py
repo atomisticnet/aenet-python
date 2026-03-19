@@ -42,7 +42,11 @@ extensions = ['sphinx.ext.autodoc',
 # Autosummary settings
 autosummary_generate = True
 
-# Mock imports for heavy dependencies
+# Mock imports for heavy dependencies.
+#
+# Keep the real torch stack available during doctest builds so runnable
+# neighbor-list examples exercise the actual implementation instead of mocked
+# placeholders. The lightweight HTML/autodoc build can keep mocking them.
 autodoc_mock_imports = [
     'torch',
     'torch_scatter',
@@ -54,6 +58,12 @@ autodoc_mock_imports = [
     'matplotlib',
     'tqdm',
 ]
+
+if 'doctest' in sys.argv:
+    autodoc_mock_imports = [
+        name for name in autodoc_mock_imports
+        if name not in {'torch', 'torch_scatter', 'torch_cluster'}
+    ]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
