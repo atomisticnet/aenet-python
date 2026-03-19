@@ -62,79 +62,91 @@ TrnSet
 
          from aenet.trainset import TrnSet
 
-         # Load training set
-         trnset = TrnSet.from_file('features_with_neighbors.h5')
+         with TrnSet.from_file("features_with_neighbors.h5") as trnset:
+             if trnset.has_neighbor_info():
+                 struct = trnset.read_structure(
+                     0,
+                     read_coords=True,
+                     read_forces=True,
+                 )
 
-         # Check if neighbor info is available
-         if trnset.has_neighbor_info():
-             print("Can use for force training")
+                 if struct.has_neighbor_info:
+                     print(struct.neighbor_info["neighbor_counts"][0])
 
-             # Read structure with neighbor info
-             struct = trnset.read_structure(0, read_coords=True, read_forces=True)
+      Use ``trnset.has_neighbor_info()`` to check whether the file stores
+      neighbor-information tables at all, and ``struct.has_neighbor_info`` to
+      check whether a particular returned structure exposes per-atom neighbor
+      arrays.
 
-             # Access neighbor information
-             neighbor_info = struct.neighbor_info
-             print(f"Atom 0 has {neighbor_info['neighbor_counts'][0]} neighbors")
+Example Notebook
+----------------
+
+For the maintained end-to-end featurization workflows, including HDF5 export,
+PyTorch-backed HDF5 compatibility, optional GPU execution, and longer
+neighbor-information generation examples, see `example-01-featurization.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-01-featurization.ipynb>`_.
 
 Usage Examples
 --------------
 
-Reading Training Sets with Neighbor Information
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Inspecting an Existing Training Set
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When training with forces, you need HDF5 files that contain neighbor information:
+Keep this page focused on inspecting already-generated training sets. Prefer
+the notebook linked above for file-backed featurization or generation
+workflows.
 
 .. code-block:: python
 
    from aenet.trainset import TrnSet
 
-   # Load HDF5 file with neighbor information
-   trnset = TrnSet.from_file('features_with_neighbors.h5')
+   with TrnSet.from_file("sample.h5") as trnset:
+       print(trnset.num_structures)
+       print(trnset.atom_types)
 
-   # Verify neighbor info is available
-   assert trnset.has_neighbor_info(), "Neighbor info required for force training"
+       struct = trnset[0]
+       print(struct.num_atoms)
+       print(struct.atom_features.shape)
 
-   # Iterate through structures
-   for struct in trnset.iter_structures(read_coords=True, read_forces=True):
-       # Each structure now has neighbor information
-       if struct.has_neighbor_info:
-           neighbor_info = struct.neighbor_info
+Comparing HDF5 and ASCII Readers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-           # Access per-atom neighbor data
-           for i in range(struct.num_atoms):
-               n_neighbors = neighbor_info['neighbor_counts'][i]
-               neighbor_indices = neighbor_info['neighbor_lists'][i]
-               neighbor_vectors = neighbor_info['neighbor_vectors'][i]
-
-               print(f"Atom {i}: {n_neighbors} neighbors")
-
-Generating Training Sets with Neighbor Information
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Use the PyTorch featurizer to generate HDF5 files with neighbor information:
+Both backends expose the same high-level ``TrnSet`` API for inspection:
 
 .. code-block:: python
 
-   from aenet.torch_featurize import TorchAUCFeaturizer
+   from aenet.trainset import TrnSet
 
-   # Set up featurizer
-   featurizer = TorchAUCFeaturizer(
-       typenames=['Ti', 'O'],
-       rad_order=10,
-       rad_cutoff=4.0,
-       ang_order=3,
-       ang_cutoff=1.5,
-       device='cpu'
-   )
+   with TrnSet.from_file("sample.h5") as trnset_h5, \
+           TrnSet.from_file("sample.train.ascii") as trnset_ascii:
+       struct_h5 = trnset_h5.read_structure(0, read_coords=True, read_forces=True)
+       struct_ascii = trnset_ascii.read_structure(
+           0,
+           read_coords=True,
+           read_forces=True,
+       )
 
-   # Generate features WITH neighbor information
-   featurizer.run_aenet_generate(
-       xsf_files='structures/*.xsf',
-       hdf5_filename='features_with_neighbors.h5',
-       atomic_energies={'Ti': -1604.6, 'O': -432.5},
-       include_neighbor_info=True,  # KEY: Enable neighbor info extraction
-       output_file='generate.out'
-   )
+       assert trnset_h5.num_structures == trnset_ascii.num_structures
+       assert trnset_h5.atom_types == trnset_ascii.atom_types
+       assert struct_h5.atom_features.shape == struct_ascii.atom_features.shape
+       assert struct_h5.coords.shape == struct_ascii.coords.shape
+
+Checking Optional Neighbor Information
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use both the dataset-level and structure-level checks before consuming stored
+neighbor arrays:
+
+.. code-block:: python
+
+   from aenet.trainset import TrnSet
+
+   with TrnSet.from_file("features_with_neighbors.h5") as trnset:
+       if trnset.has_neighbor_info():
+           struct = trnset.read_structure(0, read_coords=True, read_forces=True)
+
+           if struct.has_neighbor_info:
+               print(struct.neighbor_info["neighbor_counts"][0])
 
 Backward Compatibility
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -145,20 +157,15 @@ The implementation maintains full backward compatibility:
 
    from aenet.trainset import TrnSet
 
-   # Old HDF5 files without neighbor info still work
-   trnset_old = TrnSet.from_file('features_old.h5')
-   assert not trnset_old.has_neighbor_info()
+   with TrnSet.from_file("sample.h5") as trnset_h5:
+       struct = trnset_h5.read_structure(0)
+       assert not struct.has_neighbor_info
+       assert struct.neighbor_info is None
 
-   # Structures from old files have neighbor_info=None
-   struct = trnset_old.read_structure(0)
-   assert not struct.has_neighbor_info
-   assert struct.neighbor_info is None
-
-   # ASCII format also works (neighbor_info not supported)
-   trnset_ascii = TrnSet.from_file('trainset.train.ascii')
-   assert not trnset_ascii.has_neighbor_info()
+   with TrnSet.from_file("sample.train.ascii") as trnset_ascii:
+       assert not trnset_ascii.has_neighbor_info()
 
 See Also
 --------
 
-* :doc:`torch_featurize` - PyTorch-based featurization with neighbor info extraction
+* :doc:`torch_featurization` - PyTorch-based featurization APIs

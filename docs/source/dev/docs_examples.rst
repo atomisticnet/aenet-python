@@ -79,6 +79,7 @@ The current docs-example rollout covers:
 - ``docs/source/usage/torch_datasets.rst``
 - ``docs/source/usage/torch_training.rst``
 - ``docs/source/usage/torch_inference.rst``
+- ``docs/source/api/trainset.rst``
 
 Reference page-level pytest coverage lives in:
 
@@ -88,6 +89,7 @@ Reference page-level pytest coverage lives in:
 - ``src/aenet/torch_training/tests/test_docs_torch_datasets.py``
 - ``src/aenet/torch_training/tests/test_docs_torch_training.py``
 - ``src/aenet/torch_training/tests/test_docs_torch_inference.py``
+- ``src/aenet/tests/test_docs_trainset.py``
 
 Use these pages and test modules as the reference patterns for future
 docs-example work.
