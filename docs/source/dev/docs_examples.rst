@@ -68,15 +68,20 @@ Keep an example narrative-only when it intentionally uses placeholders such as
 Prefer notebooks when the example is tutorial-shaped, file-heavy, or duplicates
 an existing maintained notebook workflow.
 
-Current Pilot
--------------
+Current Coverage
+----------------
 
-The first docs-testing pilot covers
-``docs/source/usage/transformations_basic.rst``.
+The current docs-example rollout covers:
 
-- doctest-backed examples live directly on the page
-- pytest-backed coverage lives in
-  ``src/aenet/geometry/tests/test_docs_transformations_basic.py``
+- ``docs/source/usage/transformations_basic.rst``
+- ``docs/source/dev/neighbor_lists.rst``
+- ``docs/source/usage/torch_featurization.rst``
 
-Use that page and test module as the reference pattern for future docs-example
-work.
+Reference page-level pytest coverage lives in:
+
+- ``src/aenet/geometry/tests/test_docs_transformations_basic.py``
+- ``src/aenet/torch_nblist/tests/test_docs_neighbor_lists.py``
+- ``src/aenet/torch_featurize/tests/test_docs_torch_featurization.py``
+
+Use these pages and test modules as the reference patterns for future
+docs-example work.
