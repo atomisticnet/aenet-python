@@ -44,7 +44,9 @@ jobs:
 
       - name: Run general pytest suite
         run: |
-          micromamba run -n "${ENV_NAME}" pytest -q -m "not docs_examples"
+          micromamba run -n "${ENV_NAME}" \
+            pytest -q -m "not docs_examples" \
+            --ignore=src/aenet/mlip/tests
 
   docs:
     name: Docs
@@ -94,14 +96,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - notebook: notebooks/example-01-featurization.ipynb
-            notebook_name: example-01-featurization
           - notebook: notebooks/example-04-torch-featurization.ipynb
             notebook_name: example-04-torch-featurization
           - notebook: notebooks/example-05-torch-training.ipynb
             notebook_name: example-05-torch-training
-          - notebook: notebooks/example-06-torch-inference.ipynb
-            notebook_name: example-06-torch-inference
           - notebook: notebooks/example-07-neighbor-list.ipynb
             notebook_name: example-07-neighbor-list
 

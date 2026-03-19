@@ -52,14 +52,12 @@ Run the maintained notebook-first examples without mutating tracked notebooks:
    mkdir -p /tmp/aenet-doc-notebooks
    /Users/aurban/.local/bin/micromamba run -n aenet-torch \
        python -m jupyter nbconvert --to notebook --execute \
-       notebooks/example-01-featurization.ipynb \
+       notebooks/example-04-torch-featurization.ipynb \
        --output-dir /tmp/aenet-doc-notebooks
 
 Repeat the same pattern for:
 
-- ``notebooks/example-04-torch-featurization.ipynb``
 - ``notebooks/example-05-torch-training.ipynb``
-- ``notebooks/example-06-torch-inference.ipynb``
 - ``notebooks/example-07-neighbor-list.ipynb``
 
 This avoids overwriting the source ``.ipynb`` files. Some notebooks still
@@ -67,12 +65,19 @@ write side-effect artifacts such as HDF5 files or checkpoints relative to the
 notebook directory, so use a disposable worktree or temporary copy when you
 need a perfectly clean checkout.
 
+The current base CI notebook set intentionally excludes
+``example-01-featurization.ipynb`` and ``example-06-torch-inference.ipynb``
+because they still include external Fortran / ASCII-potential workflows that
+are not available in the GitHub Actions environment.
+
 CI Coverage
 -----------
 
 The repository CI is split into three layers so failures are easy to localize:
 
 - general unit tests: ``pytest -q -m "not docs_examples"``
+  with ``src/aenet/mlip/tests`` excluded from the base CI environment because
+  those tests require a configured ``libaenet`` installation
 - docs checks: ``pytest -q -m docs_examples`` plus Sphinx doctest and
   warning-clean HTML builds
 - notebook checks: execution of the maintained notebook-first examples listed
