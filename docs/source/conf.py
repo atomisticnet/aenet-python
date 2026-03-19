@@ -12,7 +12,8 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../..'))
+
+sys.path.insert(0, os.path.abspath("../.."))
 
 
 # -- Project information -----------------------------------------------------
@@ -32,6 +33,7 @@ release = '1.0.0'
 # ones.
 extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.autosummary',
+              'sphinx.ext.doctest',
               'sphinx.ext.viewcode',
               'sphinx.ext.napoleon',
               'sphinx.ext.mathjax',
@@ -66,6 +68,10 @@ suppress_warnings = [
     'autodoc.mocked_object',
     'toc.not_included',
 ]
+
+# Keep doctest behavior predictable for short runnable examples.
+doctest_default_flags = 0
+doctest_test_doctest_blocks = ""
 
 
 # -- Options for HTML output -------------------------------------------------

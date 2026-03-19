@@ -24,29 +24,30 @@ Python's iterator protocol. All transformations work with
 Iterator-Based Design
 ---------------------
 
-All transformations return iterators, which provides memory efficiency and flexibility:
+All transformations return iterators, which provides memory efficiency and
+flexibility:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.geometry import AtomicStructure
-   from aenet.geometry.transformations import AtomDisplacementTransformation
-
-   structure = AtomicStructure.from_file('structure.xsf')
-   transform = AtomDisplacementTransformation(displacement=0.05)
-
-   # Get all structures at once
-   all_structures = list(transform.apply_transformation(structure))
-   print(f"Generated {len(all_structures)} structures")
-
-   # Or process lazily (memory-efficient)
-   for s in transform.apply_transformation(structure):
-       process(s)  # Process one structure at a time
-
-   # Or get first N structures
-   import itertools
-   first_10 = list(itertools.islice(
-       transform.apply_transformation(structure), 10
-   ))
+   >>> import itertools
+   >>> from aenet.geometry import AtomicStructure
+   >>> from aenet.geometry.transformations import AtomDisplacementTransformation
+   >>> structure = AtomicStructure(
+   ...     [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+   ...     ["Si", "O"],
+   ...     avec=[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]],
+   ... )
+   >>> transform = AtomDisplacementTransformation(displacement=0.05)
+   >>> all_structures = list(transform.apply_transformation(structure))
+   >>> len(all_structures)
+   6
+   >>> first_two = list(itertools.islice(
+   ...     transform.apply_transformation(structure), 2
+   ... ))
+   >>> len(first_two)
+   2
+   >>> first_two[0].coords[-1][0].tolist()
+   [0.05, 0.0, 0.0]
 
 The iterator pattern allows you to:
 
@@ -69,21 +70,21 @@ output structures.
 
 **Example:**
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.geometry.transformations import AtomDisplacementTransformation
-
-   # Create transformation with 0.05 Angstrom displacement
-   transform = AtomDisplacementTransformation(displacement=0.05)
-
-   # Get all 3N structures
-   displaced_structures = list(transform.apply_transformation(structure))
-   print(f"Generated {len(displaced_structures)} structures")
-   # Output: Generated 24 structures (for 8-atom structure)
-
-   # Or process one at a time
-   for i, s in enumerate(transform.apply_transformation(structure)):
-       s.to_file(f'displaced_{i:03d}.xsf')
+   >>> from aenet.geometry import AtomicStructure
+   >>> from aenet.geometry.transformations import AtomDisplacementTransformation
+   >>> structure = AtomicStructure(
+   ...     [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+   ...     ["Si", "O"],
+   ...     avec=[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]],
+   ... )
+   >>> transform = AtomDisplacementTransformation(displacement=0.05)
+   >>> displaced_structures = list(transform.apply_transformation(structure))
+   >>> len(displaced_structures)
+   6
+   >>> displaced_structures[3].coords[-1][1].tolist()
+   [1.05, 1.0, 1.0]
 
 The displacement magnitude is in Angstroms and should be small enough to
 remain in the harmonic regime for force calculations (typically 0.01-0.1 Å).
@@ -93,7 +94,8 @@ Cell Volume Scaling
 
 :class:`CellVolumeTransformation` uniformly scales the unit cell volume
 while preserving fractional coordinates. The scaling is controlled by
-percentage changes from the original volume.
+percentage changes in the lattice-vector scale factor, so the cell volume
+changes cubically with that scale.
 
 All transformations on this page that modify the unit cell preserve
 fractional coordinates. Since :class:`aenet.geometry.AtomicStructure`
@@ -127,9 +129,10 @@ the generated structures because they are stale after deformation.
        percent_change = 100 * (new_volume - original_volume) / original_volume
        print(f"Structure {i}: V = {new_volume:.2f} Å³ ({percent_change:+.1f}%)")
 
-**Physics:** The volume scales as :math:`V_{\text{new}} = V_{\text{old}} \times (1 + p/100)^3`
-where :math:`p` is the percentage change. Lattice vectors scale uniformly by
-:math:`s = (1 + p/100)`.
+**Physics:** The lattice vectors scale uniformly by
+:math:`s = (1 + p/100)`, where :math:`p` is the user-specified percentage.
+The resulting volume therefore follows
+:math:`V_{\text{new}} = V_{\text{old}} \times s^3`.
 
 Isovolumetric Strain
 --------------------
@@ -196,8 +199,10 @@ preserves volume (determinant = 1) but changes the cell shape.
        steps=5
    )
 
-   for s in transform.apply_transformation(structure):
-       process(s)
+   sheared_cells = [
+       s.avec[-1]
+       for s in transform.apply_transformation(structure)
+   ]
 
 **Physics:** The shear matrix for xy shear is:
 
