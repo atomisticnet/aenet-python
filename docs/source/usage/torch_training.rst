@@ -46,78 +46,114 @@ and dataset-backed prediction, see
 Energy-Only Training
 --------------------
 
-Here's a minimal example for training an energy-only potential:
+Here's a compact CPU-only example that keeps the full setup in memory. The
+notebook linked above remains the maintained home for the file-backed TiO2
+workflow, checkpoint rotation, explicit ``CachedStructureDataset`` usage,
+fixed train/test splits, dataset-backed prediction, and plotting.
 
 .. code-block:: python
 
+   import numpy as np
+   import torch
+
    from aenet.torch_featurize import ChebyshevDescriptor
-   from aenet.torch_training import TorchANNPotential, TorchTrainingConfig, Adam
-   import glob
+   from aenet.torch_training import (
+       Adam,
+       Structure,
+       TorchANNPotential,
+       TorchTrainingConfig,
+   )
 
-   # Load structures
-   structures = glob.glob("./xsf/*.xsf")
+   structures = [
+       Structure(
+           positions=np.array(
+               [
+                   [0.0, 0.0, 0.0],
+                   [0.9, 0.0, 0.0],
+                   [0.0, 0.9, 0.0],
+               ]
+           ),
+           species=["H", "H", "H"],
+           energy=0.0,
+       ),
+       Structure(
+           positions=np.array(
+               [
+                   [0.1, 0.0, 0.0],
+                   [1.0, 0.0, 0.0],
+                   [0.0, 1.0, 0.0],
+               ]
+           ),
+           species=["H", "H", "H"],
+           energy=0.5,
+       ),
+   ]
 
-   # Define network architecture
-   arch = {
-       'O': [(30, 'tanh'), (30, 'tanh')],
-       'H': [(20, 'tanh'), (20, 'tanh')]
-   }
-
-   # Define local atomic descriptor
-   descr = ChebyshevDescriptor(
-       species=["O", "H"],
-       rad_order=10,
-       rad_cutoff=6.0,
-       ang_order=3,
-       ang_cutoff=3.5,
-       min_cutoff=0.5,
+   descriptor = ChebyshevDescriptor(
+       species=["H"],
+       rad_order=1,
+       rad_cutoff=2.0,
+       ang_order=0,
+       ang_cutoff=2.0,
+       min_cutoff=0.1,
        device="cpu",
        dtype=torch.float64,
    )
+   arch = {"H": [(4, "tanh")]}
 
-   mlp = TorchANNPotential(arch, descriptor=descr)
+   mlp = TorchANNPotential(arch, descriptor=descriptor)
 
-   # Configure training
-   cfg = TorchTrainingConfig(
-       iterations=100,
-       method=Adam(mu=0.001, batchsize=32),
-       testpercent=10,
-       force_weight=0.0  # Energy-only
+   config = TorchTrainingConfig(
+       iterations=1,
+       method=Adam(mu=0.001, batchsize=1),
+       testpercent=50,
+       force_weight=0.0,
+       atomic_energies={"H": 0.0},
+       normalize_features=False,
+       normalize_energy=False,
+       memory_mode="cpu",
+       device="cpu",
+       checkpoint_dir=None,
+       checkpoint_interval=0,
+       max_checkpoints=None,
+       save_best=False,
+       use_scheduler=False,
    )
 
-   # Train model (returns TrainOut object)
-   results = mlp.train(
-       structures=structures,
-       config=cfg
-   )
+   results = mlp.train(structures=structures, config=config)
+   print(results.errors[["RMSE_train", "RMSE_test"]].tail(1))
 
-   # Access training statistics
-   print(results.stats)
-   # Or access specific values from the errors DataFrame:
-   print(f"Final train RMSE: {results.errors['RMSE_train'].iloc[-1]:.4f} eV/atom")
-   print(f"Final test RMSE: {results.errors['RMSE_test'].iloc[-1]:.4f} eV/atom")
-
-This trains a neural network potential using energies only, with 10% of
-structures held out for validation. The ``train_model()`` function returns
-a :class:`~aenet.io.train.TrainOut` object containing training history and
-statistics.
+This trains a neural network potential using energies only, with 50% of the
+structures held out for validation. The
+:meth:`~aenet.torch_training.TorchANNPotential.train` method returns a
+:class:`~aenet.io.train.TrainOut` object containing training history,
+statistics, and plotting helpers.
 
 
 Force Training
 --------------
 
-To include force supervision, set ``force_weight > 0.0``:
+To include force supervision, add force arrays to the structures and set
+``force_weight > 0.0``:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_training import TorchTrainingConfig, Adam
+   >>> from aenet.torch_training import Adam, TorchTrainingConfig
 
-   config = TorchTrainingConfig(
-       iterations=200,
-       method=Adam(mu=0.001, batchsize=16),  # Smaller batch for forces
-       testpercent=10,
-       force_weight=0.1  # 90% energy, 10% forces
-   )
+   >>> config = TorchTrainingConfig(
+   ...     iterations=2,
+   ...     method=Adam(mu=0.001, batchsize=1),
+   ...     testpercent=50,
+   ...     force_weight=0.1,
+   ...     force_fraction=0.5,
+   ...     force_sampling="fixed",
+   ... )
+   >>> config.force_weight
+   0.1
+   >>> config.force_fraction
+   0.5
+   >>> config.force_sampling
+   'fixed'
 
 The ``force_weight`` parameter (α) balances energy and force contributions:
 
@@ -137,13 +173,19 @@ Common values:
    Force training requires structures with force data. Structures without
    forces will only contribute to the energy loss term.
 
+The notebook linked above remains the maintained home for the longer
+force-training workflow, including checkpoint output and plotting.
+
 
 Dataset Options
 ---------------
 
-The PyTorch training workflow supports flexible dataset options, from simple structure lists to advanced HDF5-backed lazy-loading for large-scale training.
+The PyTorch training workflow supports flexible dataset options, from simple
+structure lists to advanced HDF5-backed lazy-loading for large-scale
+training.
 
-For detailed information about dataset classes, input formats, and performance optimization, see :doc:`torch_datasets`.
+For detailed information about dataset classes, input formats, and performance
+optimization, see :doc:`torch_datasets`.
 
 The longer file-backed dataset workflow is intentionally kept in the training
 notebook above so the ``torch_datasets`` page can stay focused on compact
@@ -154,32 +196,35 @@ Performance Optimization Tips
 
 **For Energy-Only Training**
 
-.. code-block:: python
+.. doctest::
 
-   # Maximum speed with cached features
-   config = TorchTrainingConfig(
-       force_weight=0.0,
-       cache_features=True,
-       num_workers=4,
-       prefetch_factor=4,
-       persistent_workers=True,
-   )
+   >>> from aenet.torch_training import TorchTrainingConfig
+   >>> config = TorchTrainingConfig(
+   ...     force_weight=0.0,
+   ...     cache_features=True,
+   ...     num_workers=4,
+   ...     prefetch_factor=4,
+   ...     persistent_workers=True,
+   ... )
+   >>> (config.cache_features, config.num_workers, config.prefetch_factor)
+   (True, 4, 4)
 
 **For Force Training**
 
-.. code-block:: python
+.. doctest::
 
-   # Optimize force training with caching and subsampling
-   config = TorchTrainingConfig(
-       force_weight=0.1,
-       force_fraction=0.3,
-       force_sampling='random',          # Better generalization
-       cache_features=True,              # Cache features for non-force structures
-       cache_force_neighbors=True,       # Reuse neighbor searches
-       cache_force_triplets=True,        # Vectorized operations
-       num_workers=4,
-       prefetch_factor=4,
-   )
+   >>> config = TorchTrainingConfig(
+   ...     force_weight=0.1,
+   ...     force_fraction=0.3,
+   ...     force_sampling="random",
+   ...     cache_features=True,
+   ...     cache_force_neighbors=True,
+   ...     cache_force_triplets=True,
+   ...     num_workers=4,
+   ...     prefetch_factor=4,
+   ... )
+   >>> (config.cache_force_neighbors, config.cache_force_triplets)
+   (True, True)
 
 **Caching Strategies**
 
@@ -205,42 +250,45 @@ control over the training process. Here are the most commonly used parameters:
 Basic Settings
 ~~~~~~~~~~~~~~
 
-.. code-block:: python
+.. doctest::
 
-   config = TorchTrainingConfig(
-       iterations=100,        # Number of training epochs
-       testpercent=10,        # % of data for validation
-       device='cuda',         # 'cpu', 'cuda', or 'cuda:0'
-       show_progress=True     # Display progress bar
-   )
+   >>> from aenet.torch_training import TorchTrainingConfig
+   >>> config = TorchTrainingConfig(
+   ...     iterations=100,
+   ...     testpercent=10,
+   ...     device="cpu",
+   ...     show_progress=True,
+   ... )
+   >>> (config.iterations, config.device, config.show_progress)
+   (100, 'cpu', True)
 
 Optimizer Selection
 ~~~~~~~~~~~~~~~~~~~
 
 Choose and configure the optimization algorithm:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_training import Adam, SGD
+   >>> from aenet.torch_training import Adam, SGD, TorchTrainingConfig
 
-   # Adam optimizer (recommended)
-   method = Adam(
-       mu=0.001,           # Learning rate
-       batchsize=32,       # Structures per batch
-       beta1=0.9,          # First moment decay
-       beta2=0.999,        # Second moment decay
-       weight_decay=0.0    # L2 regularization
-   )
+   >>> method = Adam(
+   ...     mu=0.001,
+   ...     batchsize=32,
+   ...     beta1=0.9,
+   ...     beta2=0.999,
+   ...     weight_decay=0.0,
+   ... )
+   >>> (method.method_name, method.batchsize)
+   ('adam', 32)
 
-   # SGD optimizer
-   method = SGD(
-       lr=0.01,            # Learning rate
-       batchsize=32,
-       momentum=0.9,
-       weight_decay=0.0
-   )
-
-   config = TorchTrainingConfig(iterations=100, method=method)
+   >>> method = SGD(
+   ...     lr=0.01,
+   ...     batchsize=32,
+   ...     momentum=0.9,
+   ...     weight_decay=0.0,
+   ... )
+   >>> TorchTrainingConfig(iterations=100, method=method).method.method_name
+   'sgd'
 
 **Adam** is recommended for most applications due to its adaptive learning rates
 and robust convergence properties.
@@ -336,16 +384,9 @@ Checkpointing & Model Saving
 
 **Resuming Training**
 
-To resume training from a checkpoint, pass the checkpoint path to ``train()``:
-
-.. code-block:: python
-
-   # Resume from a specific checkpoint
-   results = mlp.train(
-       structures=structures,
-       config=cfg,
-       resume_from="checkpoints/checkpoint_epoch_0050.pt"
-   )
+To resume training from a checkpoint, pass the checkpoint path to
+``train(..., resume_from="checkpoints/checkpoint_epoch_0050.pt")``. The
+notebook above contains the maintained checkpoint workflow.
 
 The trainer will automatically:
 
@@ -378,17 +419,20 @@ Learning Rate Scheduling
 
 **Example Usage**
 
-.. code-block:: python
+.. doctest::
 
-   config = TorchTrainingConfig(
-       iterations=200,
-       method=Adam(mu=0.001, batchsize=32),
-       testpercent=10,  # Required for scheduler
-       use_scheduler=True,
-       scheduler_patience=10,  # Reduce LR if no improvement for 10 epochs
-       scheduler_factor=0.5,   # Halve the learning rate
-       scheduler_min_lr=1e-6   # Stop at 1e-6
-   )
+   >>> from aenet.torch_training import Adam, TorchTrainingConfig
+   >>> config = TorchTrainingConfig(
+   ...     iterations=200,
+   ...     method=Adam(mu=0.001, batchsize=32),
+   ...     testpercent=10,
+   ...     use_scheduler=True,
+   ...     scheduler_patience=10,
+   ...     scheduler_factor=0.5,
+   ...     scheduler_min_lr=1e-6,
+   ... )
+   >>> (config.use_scheduler, config.scheduler_patience)
+   (True, 10)
 
 The scheduler helps training converge when progress stalls, automatically
 adjusting the learning rate for optimal performance.
@@ -485,15 +529,12 @@ Data Filtering & Quality Control
 Energy Configuration
 ~~~~~~~~~~~~~~~~~~~~
 
-**energy_target** : str (default: 'cohesive')
-   Energy reference space: ``'cohesive'`` (relative to atomic references) or
-   ``'total'`` (absolute energies). Cohesive energies improve training
-   stability by removing large atomic contributions.
-
 **atomic_energies** : dict (default: None)
-   Atomic reference energies for cohesive energy calculation.
+   Optional atomic reference energies used to convert total energies to
+   cohesive-energy targets during training.
    Format: ``{'H': -13.6, 'O': -432.0, ...}`` in eV.
-   Required when ``energy_target='cohesive'``.
+   If omitted, the training target remains the total energy because all atomic
+   reference energies default to 0.0.
 
 **normalize_features** : bool (default: True)
    Normalize features to zero mean and unit variance. Improves training
@@ -558,51 +599,19 @@ Monitoring Training Progress
 The :class:`~aenet.io.train.TrainOut` object returned by ``train()`` provides
 built-in visualization and analysis tools:
 
-**Using Built-in Plotting Methods**
+Common entry points are:
 
-.. code-block:: python
+* ``results.plot_training_summary(outfile="training_summary.png")`` for a
+  combined energy/force plot
+* ``results.plot_training_errors(outfile="energy_errors.png")`` for
+  energy-only training curves
+* ``results.plot_force_errors(outfile="force_errors.png")`` when force data
+  are present
+* ``results.errors`` for direct access to the underlying pandas DataFrame used
+  for custom plotting
 
-   # Use TrainOut's built-in methods (recommended)
-   results.plot_training_summary(outfile='training_summary.png')
-
-   # Or plot only energy errors
-   results.plot_training_errors(outfile='energy_errors.png')
-
-   # For force training, plot force errors separately
-   if results.has_force_data:
-       results.plot_force_errors(outfile='force_errors.png')
-
-**Manual Plotting with Full Control**
-
-For custom plots, access the underlying data through the ``errors`` DataFrame:
-
-.. code-block:: python
-
-   import matplotlib.pyplot as plt
-
-   # The errors DataFrame contains: RMSE_train, MAE_train, RMSE_test, MAE_test
-   # and optionally RMSE_force_train, RMSE_force_test
-   fig, axes = plt.subplots(1, 2 if results.has_force_data else 1,
-                            figsize=(12, 4))
-   if not results.has_force_data:
-       axes = [axes]
-
-   # Energy RMSE
-   results.errors.plot(y=['RMSE_train', 'RMSE_test'], ax=axes[0], logy=True)
-   axes[0].set_xlabel('Epoch')
-   axes[0].set_ylabel('Energy RMSE (eV/atom)')
-   axes[0].legend(['Train', 'Test'])
-
-   # Force RMSE (if available)
-   if results.has_force_data:
-       results.errors.plot(y=['RMSE_force_train', 'RMSE_force_test'],
-                          ax=axes[1], logy=True)
-       axes[1].set_xlabel('Epoch')
-       axes[1].set_ylabel('Force RMSE (eV/Å)')
-       axes[1].legend(['Train', 'Test'])
-
-   plt.tight_layout()
-   plt.savefig('training_curves.png')
+The notebook linked above demonstrates these plotting helpers in a full
+training workflow.
 
 Signs of good training:
 

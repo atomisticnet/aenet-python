@@ -77,6 +77,7 @@ The current docs-example rollout covers:
 - ``docs/source/dev/neighbor_lists.rst``
 - ``docs/source/usage/torch_featurization.rst``
 - ``docs/source/usage/torch_datasets.rst``
+- ``docs/source/usage/torch_training.rst``
 
 Reference page-level pytest coverage lives in:
 
@@ -84,6 +85,7 @@ Reference page-level pytest coverage lives in:
 - ``src/aenet/torch_nblist/tests/test_docs_neighbor_lists.py``
 - ``src/aenet/torch_featurize/tests/test_docs_torch_featurization.py``
 - ``src/aenet/torch_training/tests/test_docs_torch_datasets.py``
+- ``src/aenet/torch_training/tests/test_docs_torch_training.py``
 
 Use these pages and test modules as the reference patterns for future
 docs-example work.
