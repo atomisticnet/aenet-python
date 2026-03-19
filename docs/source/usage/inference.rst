@@ -78,6 +78,7 @@ inference. It accepts either file paths to XSF structures or
 
 .. code-block:: python
 
+    from aenet.geometry import AtomicStructure
     from aenet.mlip import ANNPotential, PredictionConfig
 
     # Load potential (format set at load time)
@@ -89,8 +90,7 @@ inference. It accepts either file paths to XSF structures or
     results = potential.predict(['structure1.xsf', 'structure2.xsf'])
 
     # Or from AtomicStructure objects
-    from aenet.io.structure import read as read_structure
-    structures = [read_structure(f) for f in xsf_files]
+    structures = [AtomicStructure.from_file(f) for f in xsf_files]
     results = potential.predict(structures)
 
 Evaluating Forces
@@ -264,4 +264,3 @@ potentials (e.g., from different training runs) and analyze the ensemble:
     # Get force uncertainties
     force_uncertainty = analyzer.force_uncertainty(0)  # per-atom
     print(f"Max force uncertainty: {force_uncertainty.max():.6f} eV/Å")
-

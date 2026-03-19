@@ -54,9 +54,9 @@ class TorchAUCFeaturizer(AtomicFeaturizer):
 
     Example
     -------
-        >>> import aenet.io.structure
+        >>> from aenet.geometry import AtomicStructure
         >>> from aenet.torch_featurize import TorchAUCFeaturizer
-        >>> struc = aenet.io.structure.read('water.xyz')
+        >>> struc = AtomicStructure.from_file('water.xyz')
         >>> descriptor = TorchAUCFeaturizer(
         ...     typenames=['O', 'H'],
         ...     rad_order=10,

@@ -24,7 +24,7 @@ The conversion between formats happens automatically, so you can use whichever i
 .. code-block:: python
 
    import glob
-   from aenet.io.structure import read
+   from aenet.geometry import AtomicStructure
    from aenet.torch_training.dataset import StructureDataset
 
    # Option 1: File paths (simplest - recommended)
@@ -32,12 +32,11 @@ The conversion between formats happens automatically, so you can use whichever i
    dataset = StructureDataset(structures=structures, descriptor=descr)
 
    # Option 2: AtomicStructure objects (if manipulation needed)
-   structures = [read(f) for f in glob.glob("data/*.xsf")]
+   structures = [AtomicStructure.from_file(f) for f in glob.glob("data/*.xsf")]
    dataset = StructureDataset(structures=structures, descriptor=descr)
 
    # Option 3: torch Structure objects (advanced)
-   from aenet.io.structure import read
-   atomic_structs = [read(f) for f in glob.glob("data/*.xsf")]
+   atomic_structs = [AtomicStructure.from_file(f) for f in glob.glob("data/*.xsf")]
    torch_structs = [s.to_TorchStructure()[0] for s in atomic_structs]
    dataset = StructureDataset(structures=torch_structs, descriptor=descr)
 
@@ -200,13 +199,13 @@ Building the Database
 .. code-block:: python
 
    from aenet.torch_training.dataset import HDF5StructureDataset
-   from aenet.io.structure import read
+   from aenet.geometry import AtomicStructure
    from glob import glob
 
    # Define a top-level parser function (required for multiprocessing)
    def parse_xsf(path: str):
        """Parse XSF file and return torch Structure(s)."""
-       atomic_struct = read(path)
+       atomic_struct = AtomicStructure.from_file(path)
        torch_structs = atomic_struct.to_TorchStructure()
        # to_TorchStructure() may return list of frames
        return torch_structs if isinstance(torch_structs, list) else [torch_structs]

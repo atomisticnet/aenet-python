@@ -125,3 +125,13 @@ def test_update_cell_rejects_invalid_cell_shape(
     """The new cell must be a 3x3 matrix."""
     with pytest.raises(ArgumentError, match="shape"):
         periodic_structure_with_labels.update_cell(np.eye(2))
+
+
+def test_to_file_roundtrip_xsf(periodic_structure_with_labels, tmp_path):
+    """Structures written with to_file() should round-trip via from_file()."""
+    path = str(tmp_path / "roundtrip.xsf")
+
+    periodic_structure_with_labels.to_file(path)
+    roundtripped = AtomicStructure.from_file(path)
+
+    assert roundtripped == periodic_structure_with_labels

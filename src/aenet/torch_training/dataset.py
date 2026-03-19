@@ -63,7 +63,7 @@ def convert_to_structures(
         - List[AtomicStructure]: aenet.geometry.AtomicStructure objects
           (converted via to_TorchStructure())
         - List[os.PathLike]: File paths to structure files (loaded with
-          aenet.io.structure.read() and converted)
+          AtomicStructure.from_file() and converted)
 
     Returns
     -------
@@ -76,8 +76,8 @@ def convert_to_structures(
     >>> structures = convert_to_structures(['file1.xsf', 'file2.xsf'])
 
     >>> # From AtomicStructure objects
-    >>> from aenet.io.structure import read
-    >>> atomic_structs = [read('file.xsf')]
+    >>> from aenet.geometry import AtomicStructure
+    >>> atomic_structs = [AtomicStructure.from_file('file.xsf')]
     >>> structures = convert_to_structures(atomic_structs)
 
     >>> # From torch Structures (no conversion needed)

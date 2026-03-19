@@ -147,6 +147,24 @@ class AtomicStructure(object):
         from ..io.structure import read_safely
         return read_safely(filename, **kwargs)
 
+    def to_file(self, filename=None, frmt=None, **kwargs):
+        """
+        Write the structure to a file.
+
+        Parameters
+        ----------
+        filename : str, optional
+            Output path. If omitted, the structure is written to standard
+            output by the backend writer.
+        frmt : str, optional
+            Explicit output format. If omitted, the format is inferred from
+            ``filename``.
+        **kwargs
+            Additional keyword arguments passed through to the backend writer.
+        """
+        from ..io.structure import write_safely
+        write_safely(self, filename=filename, frmt=frmt, **kwargs)
+
     @classmethod
     def from_pymatgen_structure(cls, structure, **kwargs):
         coords = structure.frac_coords[:]

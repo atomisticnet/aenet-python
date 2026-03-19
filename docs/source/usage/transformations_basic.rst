@@ -83,7 +83,7 @@ output structures.
 
    # Or process one at a time
    for i, s in enumerate(transform.apply_transformation(structure)):
-       s.write_to_file(f'displaced_{i:03d}.xsf')
+       s.to_file(f'displaced_{i:03d}.xsf')
 
 The displacement magnitude is in Angstroms and should be small enough to
 remain in the harmonic regime for force calculations (typically 0.01-0.1 Å).
@@ -251,7 +251,7 @@ Common Patterns
 .. code-block:: python
 
    for i, s in enumerate(transform.apply_transformation(structure)):
-       s.write_to_file(f'output_{i:04d}.xsf')
+       s.to_file(f'output_{i:04d}.xsf')
 
 **Filter structures:**
 

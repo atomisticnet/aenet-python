@@ -389,7 +389,7 @@ Generate training data for a machine learning potential:
 
    # Save for training
    for i, s in enumerate(training_structures):
-       s.write_to_file(f'training_data/struct_{i:04d}.xsf')
+       s.to_file(f'training_data/struct_{i:04d}.xsf')
 
    print("Training data generation complete")
 
@@ -460,7 +460,7 @@ Memory-Efficient Patterns
    for i, s in enumerate(chain.apply_transformation(structure)):
        if i >= 1000:
            break
-       s.write_to_file(f'output_{i:04d}.xsf')
+       s.to_file(f'output_{i:04d}.xsf')
 
 Combining Deterministic and Stochastic
 ---------------------------------------

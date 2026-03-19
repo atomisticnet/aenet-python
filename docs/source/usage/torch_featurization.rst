@@ -53,11 +53,11 @@ for most users as it works directly with ``AtomicStructure`` objects:
 
 .. code-block:: python
 
-   import aenet.io.structure
+   from aenet.geometry import AtomicStructure
    from aenet.torch_featurize import TorchAUCFeaturizer
 
    # Read structure from file
-   struc = aenet.io.structure.read('water.xyz')
+   struc = AtomicStructure.from_file('water.xyz')
 
    # Create descriptor
    descriptor = TorchAUCFeaturizer(

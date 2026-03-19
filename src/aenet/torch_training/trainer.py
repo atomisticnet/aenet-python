@@ -1087,8 +1087,8 @@ class TorchANNPotential:
         >>> print(results.total_energy)
 
         >>> # Use AtomicStructure objects
-        >>> from aenet.io.structure import read
-        >>> strucs = [read('file.xsf')]
+        >>> from aenet.geometry import AtomicStructure
+        >>> strucs = [AtomicStructure.from_file('file.xsf')]
         >>> results = pot.predict(strucs, eval_forces=True,
         ...                       config=PredictionConfig(timing=True))
         """
