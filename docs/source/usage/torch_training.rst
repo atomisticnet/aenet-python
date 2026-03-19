@@ -36,6 +36,12 @@ Jupyter notebooks with examples can be found in the `notebooks
 <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_
 directory within the repository.
 
+For the maintained PyTorch training walkthrough, including the file-backed TiO2
+workflow, explicit ``CachedStructureDataset`` usage, fixed train/test splits,
+and dataset-backed prediction, see
+`example-05-torch-training.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-05-torch-training.ipynb>`_.
+
 
 Energy-Only Training
 --------------------
@@ -138,6 +144,10 @@ Dataset Options
 The PyTorch training workflow supports flexible dataset options, from simple structure lists to advanced HDF5-backed lazy-loading for large-scale training.
 
 For detailed information about dataset classes, input formats, and performance optimization, see :doc:`torch_datasets`.
+
+The longer file-backed dataset workflow is intentionally kept in the training
+notebook above so the ``torch_datasets`` page can stay focused on compact
+API-facing examples.
 
 Performance Optimization Tips
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

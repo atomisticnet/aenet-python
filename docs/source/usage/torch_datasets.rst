@@ -10,6 +10,18 @@ This page covers all available dataset options and their usage.
    Datasets are used with :doc:`torch_training`. Make sure you understand
    the basic training workflow before diving into advanced dataset options.
 
+Example notebook
+----------------
+
+For a file-backed training walkthrough using the TiO2 example data, explicit
+``CachedStructureDataset`` objects, fixed train/test splits, and
+dataset-backed ``predict_dataset()`` calls, see
+`example-05-torch-training.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-05-torch-training.ipynb>`_.
+
+The ``.rst`` page below stays focused on compact API-facing examples, while the
+notebook remains the home for the longer training workflow.
+
 Structure Input Formats
 -----------------------
 
@@ -19,26 +31,39 @@ All dataset classes accept structures in three formats:
 2. **AtomicStructure objects** (``List[AtomicStructure]``): Use when you need to manipulate structures first
 3. **torch Structure objects** (``List[Structure]``): Advanced option, direct PyTorch format
 
-The conversion between formats happens automatically, so you can use whichever is most convenient:
+The conversion between formats happens automatically, so you can use whichever
+is most convenient. The notebook above shows the most realistic file-backed
+workflow; the compact page examples below use small in-memory structures.
 
 .. code-block:: python
 
-   import glob
+   from pathlib import Path
    from aenet.geometry import AtomicStructure
+   from aenet.torch_training import Structure
    from aenet.torch_training.dataset import StructureDataset
 
-   # Option 1: File paths (simplest - recommended)
-   structures = glob.glob("data/*.xsf")
-   dataset = StructureDataset(structures=structures, descriptor=descr)
+   descriptor = ...  # Reuse your configured ChebyshevDescriptor
 
-   # Option 2: AtomicStructure objects (if manipulation needed)
-   structures = [AtomicStructure.from_file(f) for f in glob.glob("data/*.xsf")]
-   dataset = StructureDataset(structures=structures, descriptor=descr)
+   # Option 1: file paths (simplest for real training runs)
+   structure_paths = sorted(Path("xsf-TiO2").glob("*.xsf"))
+   dataset = StructureDataset(structures=structure_paths, descriptor=descriptor)
 
-   # Option 3: torch Structure objects (advanced)
-   atomic_structs = [AtomicStructure.from_file(f) for f in glob.glob("data/*.xsf")]
-   torch_structs = [s.to_TorchStructure()[0] for s in atomic_structs]
-   dataset = StructureDataset(structures=torch_structs, descriptor=descr)
+   # Option 2: AtomicStructure objects (when you want to inspect or edit them)
+   atomic_structures = [
+       AtomicStructure.from_file(path) for path in structure_paths[:2]
+   ]
+   dataset = StructureDataset(
+       structures=atomic_structures,
+       descriptor=descriptor,
+   )
+
+   # Option 3: torch Structure objects (advanced / fully explicit)
+   torch_structures = [
+       structure
+       for atomic in atomic_structures
+       for structure in atomic.to_TorchStructure()
+   ]
+   dataset = StructureDataset(structures=torch_structures, descriptor=descriptor)
 
 **Recommendation**: Use file paths (Option 1) for simplicity unless you have specific needs.
 
@@ -62,18 +87,52 @@ computes features on-demand during training.
 Basic Usage
 ~~~~~~~~~~~
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_training.dataset import StructureDataset
-
-   dataset = StructureDataset(
-       structures=structures,
-       descriptor=descr,
-       force_fraction=1.0,           # Use all force-labeled structures
-       force_sampling='random',      # Resample each epoch
-       max_energy=None,              # No energy filtering
-       max_forces=None,              # No force filtering
-   )
+   >>> import numpy as np
+   >>> from aenet.torch_featurize import ChebyshevDescriptor
+   >>> from aenet.torch_training import Structure
+   >>> from aenet.torch_training.dataset import StructureDataset
+   >>> descriptor = ChebyshevDescriptor(
+   ...     species=["H"],
+   ...     rad_order=1,
+   ...     rad_cutoff=2.0,
+   ...     ang_order=0,
+   ...     ang_cutoff=2.0,
+   ...     min_cutoff=0.1,
+   ...     device="cpu",
+   ... )
+   >>> structures = [
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.0,
+   ...         forces=np.zeros((3, 3)),
+   ...     ),
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.5,
+   ...         forces=np.zeros((3, 3)),
+   ...     ),
+   ... ]
+   >>> dataset = StructureDataset(
+   ...     structures=structures,
+   ...     descriptor=descriptor,
+   ...     force_fraction=1.0,
+   ...     force_sampling="fixed",
+   ... )
+   >>> len(dataset)
+   2
+   >>> sample = dataset[0]
+   >>> sample["features"].shape
+   torch.Size([3, 3])
+   >>> sample["use_forces"]
+   True
 
 Force Training Options
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -82,9 +141,11 @@ For force training, several options control which structures are used:
 
 .. code-block:: python
 
+   from aenet.torch_training.dataset import StructureDataset
+
    dataset = StructureDataset(
        structures=structures,
-       descriptor=descr,
+       descriptor=descriptor,
        force_fraction=0.3,                  # Use 30% of force-labeled structures
        force_sampling='random',              # Resample each epoch
        cache_features=True,                 # Cache features for non-force entries
@@ -105,28 +166,51 @@ Manual Dataset Splitting
 
 For full control over train/test splits:
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_training.dataset import StructureDataset, train_test_split
+   >>> import numpy as np
+   >>> from aenet.torch_featurize import ChebyshevDescriptor
+   >>> from aenet.torch_training import Structure
+   >>> from aenet.torch_training.dataset import StructureDataset, train_test_split
+   >>> descriptor = ChebyshevDescriptor(
+   ...     species=["H"],
+   ...     rad_order=1,
+   ...     rad_cutoff=2.0,
+   ...     ang_order=0,
+   ...     ang_cutoff=2.0,
+   ...     min_cutoff=0.1,
+   ...     device="cpu",
+   ... )
+   >>> structures = [
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.0,
+   ...         forces=np.zeros((3, 3)),
+   ...     ),
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.5,
+   ...         forces=np.zeros((3, 3)),
+   ...     ),
+   ... ]
+   >>> dataset = StructureDataset(structures=structures, descriptor=descriptor)
+   >>> train_ds, test_ds = train_test_split(
+   ...     dataset,
+   ...     test_fraction=0.5,
+   ...     seed=42,
+   ... )
+   >>> (len(train_ds), len(test_ds))
+   (1, 1)
 
-   # Create full dataset
-   dataset = StructureDataset(structures=structures, descriptor=descr)
-
-   # Manual split
-   train_ds, test_ds = train_test_split(
-       dataset,
-       test_fraction=0.1,
-       seed=42
-   )
-
-   # Train with explicit datasets
-   from aenet.torch_training import TorchANNPotential
-   pot = TorchANNPotential(arch, descr)
-   results = pot.train(
-       train_dataset=train_ds,
-       test_dataset=test_ds,
-       config=cfg
-   )
+Pass ``train_dataset=...`` and ``test_dataset=...`` to
+``TorchANNPotential.train()`` when you want an explicit fixed split. The
+notebook example above keeps the full file-backed training workflow.
 
 
 CachedStructureDataset: Pre-Computed Features
@@ -134,16 +218,46 @@ CachedStructureDataset: Pre-Computed Features
 
 For energy-only training, features can be pre-computed once and cached for ~100Ã— speedup. This is ideal when you don't need forces and want maximum training speed.
 
-.. code-block:: python
+.. doctest::
 
-   from aenet.torch_training.dataset import CachedStructureDataset
-
-   dataset = CachedStructureDataset(
-       structures=structures,
-       descriptor=descr,
-       max_energy=None,
-       max_forces=None,
-   )
+   >>> import numpy as np
+   >>> from aenet.torch_featurize import ChebyshevDescriptor
+   >>> from aenet.torch_training import Structure
+   >>> from aenet.torch_training.dataset import CachedStructureDataset
+   >>> descriptor = ChebyshevDescriptor(
+   ...     species=["H"],
+   ...     rad_order=1,
+   ...     rad_cutoff=2.0,
+   ...     ang_order=0,
+   ...     ang_cutoff=2.0,
+   ...     min_cutoff=0.1,
+   ...     device="cpu",
+   ... )
+   >>> structures = [
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.0,
+   ...     ),
+   ...     Structure(
+   ...         positions=np.array(
+   ...             [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+   ...         ),
+   ...         species=["H", "H", "H"],
+   ...         energy=0.5,
+   ...     ),
+   ... ]
+   >>> dataset = CachedStructureDataset(
+   ...     structures=structures,
+   ...     descriptor=descriptor,
+   ...     show_progress=False,
+   ... )
+   >>> dataset[0]["features"].shape
+   torch.Size([3, 3])
+   >>> dataset[0]["use_forces"]
+   False
 
 **When to use:**
 
@@ -154,7 +268,8 @@ For energy-only training, features can be pre-computed once and cached for ~100Ã
 
 **Automatic usage:**
 
-The trainer automatically uses ``CachedStructureDataset`` when you pass ``structures`` with ``cached_features=True`` and ``force_weight=0.0``:
+The trainer automatically uses ``CachedStructureDataset`` when you pass
+``structures`` with ``cache_features=True`` and ``force_weight=0.0``:
 
 .. code-block:: python
 
@@ -163,29 +278,13 @@ The trainer automatically uses ``CachedStructureDataset`` when you pass ``struct
    config = TorchTrainingConfig(
        iterations=100,
        force_weight=0.0,         # Energy-only required
-       cache_features=True      # Triggers CachedStructureDataset
+       cache_features=True,      # Triggers CachedStructureDataset
    )
 
-   pot.train(structures=structures, config=config)
-
-Dataset-backed inference can reuse these cached features directly:
-
-.. code-block:: python
-
-   from aenet.mlip import PredictionConfig
-
-   dataset = CachedStructureDataset(
-       structures=structures,
-       descriptor=descr,
-       show_progress=False,
-   )
-
-   results = pot.predict_dataset(
-       dataset,
-       config=PredictionConfig(batch_size=32)
-   )
-
-This avoids recomputing descriptor features during energy-only inference.
+Pass this config to ``TorchANNPotential.train(structures=..., config=config)``
+to take the automatic cached-features path. For an explicit
+``CachedStructureDataset`` workflow with a fixed split and
+``predict_dataset()``, see the training notebook linked above.
 
 
 HDF5StructureDataset: Large-Scale Lazy-Loading
@@ -214,7 +313,7 @@ Building the Database
    file_list = glob("data/**/*.xsf", recursive=True)
 
    db = HDF5StructureDataset(
-       descriptor=descr,
+       descriptor=descriptor,
        database_file="datasets/training.h5",
        file_paths=file_list,
        parser=parse_xsf,
@@ -240,7 +339,7 @@ Training from HDF5 Database
 
    # Load existing database (read-only, lazy access)
    dataset = HDF5StructureDataset(
-       descriptor=descr,
+       descriptor=descriptor,
        database_file="datasets/training.h5",
        mode="load",                 # Read-only mode
        force_fraction=0.3,
@@ -331,7 +430,7 @@ For Large Datasets (HDF5)
 
    # Efficient large-scale training
    dataset = HDF5StructureDataset(
-       descriptor=descr,
+       descriptor=descriptor,
        database_file="large_dataset.h5",
        mode="load",
        force_fraction=0.3,
