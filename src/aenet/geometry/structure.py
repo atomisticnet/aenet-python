@@ -141,7 +141,7 @@ class AtomicStructure(object):
 
         Parameters
         ----------
-        filename : str
+        filename : str or os.PathLike
             Path to the structure file.
         """
         from ..io.structure import read_safely
@@ -153,7 +153,7 @@ class AtomicStructure(object):
 
         Parameters
         ----------
-        filename : str, optional
+        filename : str or os.PathLike, optional
             Output path. If omitted, the structure is written to standard
             output by the backend writer.
         frmt : str, optional

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from aenet.io import structure as structure_io
 from aenet.exceptions import ArgumentError
 from aenet.geometry import AtomicStructure
 
@@ -133,5 +134,44 @@ def test_to_file_roundtrip_xsf(periodic_structure_with_labels, tmp_path):
 
     periodic_structure_with_labels.to_file(path)
     roundtripped = AtomicStructure.from_file(path)
+
+    assert roundtripped == periodic_structure_with_labels
+
+
+def test_to_file_and_from_file_accept_path_objects(
+    periodic_structure_with_labels,
+    tmp_path,
+):
+    """The structure helpers should accept pathlib paths."""
+    path = tmp_path / "roundtrip_pathlike.xsf"
+
+    periodic_structure_with_labels.to_file(path)
+    roundtripped = AtomicStructure.from_file(path)
+
+    assert roundtripped == periodic_structure_with_labels
+
+
+def test_io_read_accepts_path_objects(
+    periodic_structure_with_labels,
+    tmp_path,
+):
+    """The generic read helper should accept pathlib paths."""
+    path = tmp_path / "generic_read.xsf"
+    periodic_structure_with_labels.to_file(path)
+
+    roundtripped = structure_io.read(path)
+
+    assert roundtripped == periodic_structure_with_labels
+
+
+def test_io_read_safely_accepts_path_objects(
+    periodic_structure_with_labels,
+    tmp_path,
+):
+    """The safe read helper should accept pathlib paths."""
+    path = tmp_path / "generic_read_safely.xsf"
+    periodic_structure_with_labels.to_file(path)
+
+    roundtripped = structure_io.read_safely(path)
 
     assert roundtripped == periodic_structure_with_labels

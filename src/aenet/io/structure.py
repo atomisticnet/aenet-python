@@ -7,7 +7,9 @@ This module provides generic read and write routines that interface the
 corresponding routines for the various file formats.
 """
 
+import os
 import sys
+
 import numpy as np
 
 from ..exceptions import ArgumentError
@@ -19,6 +21,17 @@ from ..formats import formats
 
 __author__ = "Alexander Urban"
 __date__ = "2013-03-25"
+
+
+def _normalize_filename(filename):
+    """Convert path-like inputs to strings while preserving other inputs."""
+    if filename is None:
+        return None
+
+    try:
+        return os.fspath(filename)
+    except TypeError:
+        return filename
 
 
 def print_supported_formats():
@@ -61,13 +74,15 @@ def read(filename, frmt=None, **kwargs):
     structure files.
 
     Input:
-      filename    name of the input file
+      filename    name or path-like object for the input file
       format      name of the file format
       kwargs      further keyword arguments are passed on to the backend
 
     Returns:
       instance of class AtomicStructure
     """
+
+    filename = _normalize_filename(filename)
 
     if not frmt:
         frmt = guess_format(filename)
@@ -105,12 +120,15 @@ def write(struc, filename=None, frmt=None, **kwargs):
 
     Input:
       struc     instance of the AtomicStructure class
-      filename  name of the output file; if None, the backend will
+      filename  name or path-like object for the output file; if None, the
+                backend will
                 write to stdout
       frmt      the name of the file format; if None, the format will
                 be guessed from the file extension
       kwargs    further keyword arguments are passed on to the backend
     """
+
+    filename = _normalize_filename(filename)
 
     if not frmt:
         frmt = guess_format(filename)
@@ -145,8 +163,12 @@ def guess_format(filename):
     Guess the file format from the file extension.
 
     Input:
-      filename   name of the file
+      filename   name or path-like object for the file
     """
+
+    filename = _normalize_filename(filename)
+    if not isinstance(filename, str):
+        raise FormatGuessError(filename)
 
     # first, try the default file names
     for f in formats:
