@@ -84,6 +84,14 @@ The repository CI is split into three layers so failures are easy to localize:
   above via ``nbconvert --execute`` from a disposable worktree with a
   temporary output directory
 
+The current base docs-testing environment explicitly supports the PyTorch /
+PyG-backed pages by installing ``torch`` plus the matching
+``torch-scatter`` and ``torch-cluster`` wheels.
+
+Examples that require ``pymatgen`` remain optional for now and are outside the
+current base docs-example CI slice. The same is true for Fortran-backed or
+``libaenet``-dependent workflows, including notebook examples ``01`` and ``06``.
+
 Repo-wide ``ruff check .`` is intentionally not a required CI gate yet because
 the repository still has a substantial backlog of pre-existing lint violations.
 Treat lint as a follow-up ratchet by directory or subsystem rather than
@@ -111,6 +119,10 @@ Keep an example narrative-only when it intentionally uses placeholders such as
 
 Prefer notebooks when the example is tutorial-shaped, file-heavy, or duplicates
 an existing maintained notebook workflow.
+
+If a pytest-backed docs example depends on optional PyG extensions, prefer a
+clear local skip such as ``pytest.importorskip(...)`` so contributors get an
+explicit dependency signal instead of an opaque import failure.
 
 Current Coverage
 ----------------
