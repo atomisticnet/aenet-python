@@ -286,6 +286,44 @@ to take the automatic cached-features path. For an explicit
 ``CachedStructureDataset`` workflow with a fixed split and
 ``predict_dataset()``, see the training notebook linked above.
 
+Explicit Fixed Splits with CachedStructureDataset
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you already know which structures belong in the training and test sets,
+build explicit cached datasets and pass them to ``train()`` directly:
+
+.. code-block:: python
+
+   from aenet.torch_training import Adam, TorchANNPotential, TorchTrainingConfig
+   from aenet.torch_training.dataset import CachedStructureDataset
+
+   train_ds = CachedStructureDataset(
+       structures=train_structures,
+       descriptor=descriptor,
+       show_progress=False,
+   )
+   test_ds = CachedStructureDataset(
+       structures=test_structures,
+       descriptor=descriptor,
+       show_progress=False,
+   )
+
+   config = TorchTrainingConfig(
+       iterations=100,
+       method=Adam(mu=0.001, batchsize=32),
+       force_weight=0.0,
+       testpercent=0,  # split is already explicit
+   )
+
+   pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+   pot.train(train_dataset=train_ds, test_dataset=test_ds, config=config)
+
+You can also wrap a cached dataset in ``torch.utils.data.Subset`` for manual
+index-based splits, and cached feature reuse still works in that case.
+However, ``CachedStructureDataset`` builds its cache for the full underlying
+dataset before any ``Subset`` is applied. If you already know the split,
+creating separate cached train/test datasets is usually more memory-efficient.
+
 
 HDF5StructureDataset: Large-Scale Lazy-Loading
 -----------------------------------------------
@@ -408,6 +446,10 @@ For full control over train/test splits:
 
    pot.train(train_dataset=train_ds, test_dataset=test_ds, config=config)
 
+This works for ``CachedStructureDataset`` and ``HDF5StructureDataset`` as
+well. When the split is already explicit, prefer ``testpercent=0`` in the
+training config to avoid implying that another automatic split will occur.
+
 Stratified or Custom Splits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -425,6 +467,10 @@ For advanced splitting strategies, manually create your datasets:
    test_ds = Subset(dataset, test_indices)
 
    pot.train(train_dataset=train_ds, test_dataset=test_ds, config=config)
+
+``Subset`` wrappers are supported for training and dataset-backed inference.
+For ``CachedStructureDataset``, the subset reuses cached samples from the
+base dataset; it does not build a separate smaller cache.
 
 
 Performance Optimization Tips

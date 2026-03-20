@@ -199,7 +199,7 @@ def test_structure_input_formats_and_split_examples(
 @pytest.mark.cpu
 @pytest.mark.docs_examples
 def test_cached_dataset_and_predict_dataset_examples(docs_training_structures):
-    """Cached dataset examples should keep their documented behavior."""
+    """Cached dataset split and inference examples should keep working."""
     descriptor = _make_descriptor()
     cached_dataset = CachedStructureDataset(
         structures=docs_training_structures,
@@ -237,13 +237,25 @@ def test_cached_dataset_and_predict_dataset_examples(docs_training_structures):
         save_best=False,
         use_scheduler=False,
     )
-    potential.train(structures=docs_training_structures, config=config)
+    potential.train(
+        train_dataset=train_ds,
+        test_dataset=test_ds,
+        config=config,
+    )
 
     prediction = potential.predict_dataset(
         test_ds,
         config=PredictionConfig(batch_size=1),
     )
     assert len(prediction.total_energy) == 1
+
+    manual_train_ds = Subset(cached_dataset, [0])
+    manual_test_ds = Subset(cached_dataset, [1])
+    potential.train(
+        train_dataset=manual_train_ds,
+        test_dataset=manual_test_ds,
+        config=config,
+    )
 
 
 @pytest.mark.cpu
