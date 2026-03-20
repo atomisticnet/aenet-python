@@ -2,16 +2,15 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
-import pytest
-
+from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
-    TorchTrainingConfig,
     Structure,
     TorchANNPotential,
+    TorchTrainingConfig,
 )
-from aenet.torch_featurize import ChebyshevDescriptor
 
 
 def make_simple_structures_H_two():
@@ -118,6 +117,77 @@ def test_energy_only_smoke(tmp_path: Path):
     files = {p.name for p in ckpt_dir.iterdir()}
     assert any(name.startswith("checkpoint_epoch_")
                and name.endswith(".pt") for name in files)
+
+
+@pytest.mark.cpu
+def test_warns_for_scheduler_with_tiny_validation_set():
+    structures = make_simple_structures_H_two()
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        method=None,
+        testpercent=50,
+        force_weight=0.0,
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=True,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match=r"use_scheduler=True with a validation set of only 1 structure",
+    ):
+        pot.train(
+            structures=structures,
+            config=cfg,
+        )
+
+
+@pytest.mark.cpu
+def test_warns_for_save_best_with_tiny_validation_set(tmp_path: Path):
+    structures = make_simple_structures_H_two()
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    ckpt_dir = tmp_path / "ckpts"
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        method=None,
+        testpercent=50,
+        force_weight=0.0,
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=False,
+        checkpoint_dir=str(ckpt_dir),
+        checkpoint_interval=1,
+        max_checkpoints=None,
+        save_best=True,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match=r"save_best=True with a validation set of only 1 structure",
+    ):
+        pot.train(
+            structures=structures,
+            config=cfg,
+        )
 
 
 @pytest.mark.cpu

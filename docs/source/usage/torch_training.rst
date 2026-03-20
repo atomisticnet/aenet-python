@@ -131,6 +131,14 @@ structures held out for validation. The
 :class:`~aenet.io.train.TrainOut` object containing training history,
 statistics, and plotting helpers.
 
+.. note::
+
+   Setting ``testpercent > 0`` does more than hold out structures. It also
+   enables any validation-driven controls in your configuration, such as
+   ``use_scheduler=True`` and ``save_best=True``. On very small validation
+   splits, these controls can react to noisy metrics and change the training
+   behavior qualitatively.
+
 
 Force Training
 --------------
@@ -384,6 +392,10 @@ Checkpointing & Model Saving
    Save the model with the best validation loss as ``best_model.pt``.
    Requires ``testpercent > 0`` to compute validation loss.
 
+   For very small validation sets, the selected checkpoint can be unstable.
+   In that case prefer ``save_best=False`` or supply a larger or explicit
+   validation split.
+
 **Resuming Training**
 
 To resume training from a checkpoint, pass the checkpoint path to
@@ -442,6 +454,9 @@ adjusting the learning rate for optimal performance.
 .. note::
 
    The scheduler requires ``testpercent > 0`` to monitor validation loss.
+   With only a few validation structures, the monitored loss can be too noisy
+   for stable plateau detection. In that case prefer ``use_scheduler=False``
+   or a larger or explicit validation split.
 
 
 Force Training Parameters

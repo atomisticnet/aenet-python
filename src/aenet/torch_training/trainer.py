@@ -57,6 +57,51 @@ def _resolve_device(config: TorchTrainingConfig) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+_SMALL_VALIDATION_WARNING_THRESHOLD = 10
+
+
+def _warn_on_small_validation_set(
+    *,
+    n_val: int,
+    use_scheduler: bool,
+    save_best: bool,
+) -> None:
+    """
+    Warn when validation-driven controls are enabled on a tiny split.
+
+    Parameters
+    ----------
+    n_val : int
+        Number of validation structures.
+    use_scheduler : bool
+        Whether ReduceLROnPlateau monitoring is enabled for this run.
+    save_best : bool
+        Whether best-checkpoint selection is enabled for this run.
+    """
+    if n_val <= 0 or n_val >= _SMALL_VALIDATION_WARNING_THRESHOLD:
+        return
+
+    noun = "structure" if n_val == 1 else "structures"
+
+    if use_scheduler:
+        warnings.warn(
+            "use_scheduler=True with a validation set of only "
+            f"{n_val} {noun} can make ReduceLROnPlateau react to noisy "
+            "metrics. Consider use_scheduler=False, a larger validation "
+            "split, or an explicit train/test split.",
+            UserWarning,
+        )
+
+    if save_best:
+        warnings.warn(
+            "save_best=True with a validation set of only "
+            f"{n_val} {noun} can select a checkpoint from a noisy "
+            "validation loss. Consider save_best=False, a larger "
+            "validation split, or an explicit train/test split.",
+            UserWarning,
+        )
+
+
 def _iter_progress(iterable, enable: bool, desc: str):
     """
     Wrap an iterable with tqdm progress bar if enabled and available.
@@ -786,6 +831,15 @@ class TorchANNPotential:
             )
             if test_ds is not None
             else None
+        )
+
+        n_val = int(len(test_ds)) if test_ds is not None else 0
+        _warn_on_small_validation_set(
+            n_val=n_val,
+            use_scheduler=bool(config.use_scheduler) and (test_loader is not None),
+            save_best=bool(config.save_best)
+            and (config.checkpoint_dir is not None)
+            and (test_loader is not None),
         )
 
         # Initialize normalization manager

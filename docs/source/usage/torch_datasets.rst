@@ -385,6 +385,13 @@ When providing a single ``dataset`` parameter to ``train()``, the trainer automa
    # Trainer handles split automatically
    pot.train(dataset=my_dataset, config=config)  # Uses testpercent
 
+.. note::
+
+   When ``testpercent > 0``, validation-driven features such as
+   ``use_scheduler=True`` and ``save_best=True`` become active. For very small
+   validation splits, prefer disabling those features or creating an explicit
+   train/test split with enough validation structures for stable monitoring.
+
 Manual Splitting
 ~~~~~~~~~~~~~~~~
 
