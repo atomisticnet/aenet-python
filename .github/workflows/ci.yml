@@ -89,6 +89,37 @@ jobs:
           micromamba run -n "${ENV_NAME}" \
             python -m sphinx -W --keep-going -b html docs/source docs/build/html
 
+  readthedocs-smoke:
+    name: ReadTheDocs Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: ${{ env.ENV_NAME }}
+          create-args: >-
+            python=${{ env.PYTHON_VERSION }}
+            pip
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+
+      - name: Install ReadTheDocs-like dependencies
+        run: |
+          micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
+          micromamba run -n "${ENV_NAME}" python -m pip install -r docs/requirements.txt
+          micromamba run -n "${ENV_NAME}" python -m pip install -e .
+
+      - name: Run warning-clean Sphinx HTML build
+        run: |
+          micromamba run -n "${ENV_NAME}" \
+            python -m sphinx -W --keep-going -b html \
+            docs/source docs/build/readthedocs-html
+
   notebooks:
     name: Notebook (${{ matrix.notebook_name }})
     runs-on: ubuntu-latest
