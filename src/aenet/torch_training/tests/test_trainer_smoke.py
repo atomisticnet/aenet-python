@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from aenet.geometry import AtomicStructure
 from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
     Structure,
@@ -49,6 +50,29 @@ def make_simple_structures_H_two():
     return [sA, sB]
 
 
+def make_simple_structures_H_many(n_structures=4):
+    structures = []
+    for idx in range(n_structures):
+        shift = 0.05 * idx
+        positions = np.array(
+            [
+                [shift, 0.0, 0.0],
+                [0.9 + shift, 0.0, 0.0],
+                [0.0, 0.9 + shift, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        structures.append(
+            Structure(
+                positions=positions,
+                species=["H", "H", "H"],
+                energy=0.5 * idx,
+                forces=np.zeros_like(positions),
+            )
+        )
+    return structures
+
+
 def make_descriptor_H(dtype=torch.float64):
     # Keep orders small to minimize compute; ensure within cutoffs
     return ChebyshevDescriptor(
@@ -76,6 +100,21 @@ def zero_model_weights(pot: TorchANNPotential):
         for p in seq.parameters():
             with torch.no_grad():
                 p.zero_()
+
+
+def write_xsf_structures(structures, directory: Path):
+    paths = []
+    for idx, structure in enumerate(structures):
+        atomic = AtomicStructure(
+            structure.positions,
+            structure.species,
+            energy=structure.energy,
+            forces=structure.forces,
+        )
+        path = directory / f"structure-{idx}.xsf"
+        atomic.to_file(path)
+        paths.append(path)
+    return paths
 
 
 @pytest.mark.cpu
@@ -397,3 +436,82 @@ def test_save_energies_uses_total_energy_columns_with_atomic_references(
     assert np.allclose(train_df["Ref(eV)"].values, 3.69)
     assert np.allclose(train_df["ANN(eV)"].values, 3.69)
     assert np.allclose(train_df["Ref-ANN(eV/atom)"].values, 0.0)
+
+
+@pytest.mark.cpu
+def test_save_energies_preserves_original_structure_indices_across_splits(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_many(n_structures=4)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=50,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    train_names = set(result.energies.energies_train["Path-of-input-file"])
+    test_names = set(result.energies.energies_test["Path-of-input-file"])
+    expected_names = {f"structure_{idx:06d}" for idx in range(4)}
+
+    assert train_names.isdisjoint(test_names)
+    assert train_names | test_names == expected_names
+
+
+@pytest.mark.cpu
+def test_save_energies_uses_input_paths_for_split_outputs(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_many(n_structures=4)
+    structure_paths = write_xsf_structures(structures, tmp_path)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    arch = make_arch_H(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=50,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        structures=structure_paths,
+        config=cfg,
+    )
+
+    train_paths = set(result.energies.energies_train["Path-of-input-file"])
+    test_paths = set(result.energies.energies_test["Path-of-input-file"])
+    expected_paths = {str(path) for path in structure_paths}
+
+    assert train_paths.isdisjoint(test_paths)
+    assert train_paths | test_paths == expected_paths

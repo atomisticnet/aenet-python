@@ -578,7 +578,10 @@ Output & Diagnostics
 ~~~~~~~~~~~~~~~~~~~~
 
 **save_energies** : bool (default: False)
-   Save predicted energies for train/test sets to disk.
+   Save predicted energies for train/test sets to disk. The
+   ``Path-of-input-file`` column preserves the original structure path or
+   name when available; otherwise it uses a stable ``structure_XXXXXX``
+   identifier from the pre-split input order.
 
 **save_forces** : bool (default: False)
    Save predicted forces for train/test sets to disk.

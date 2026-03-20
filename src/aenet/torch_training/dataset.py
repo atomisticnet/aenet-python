@@ -14,11 +14,12 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .config import Structure
 from aenet.torch_featurize.graph import (
     build_csr_from_neighborlist,
     build_triplets_from_csr,
 )
+
+from .config import Structure
 
 # Progress bar (match aenet.mlip behavior)
 try:
@@ -99,10 +100,16 @@ def convert_to_structures(
         for path in inputs:
             atomic = read(path)
             converted = atomic.to_TorchStructure()
+            path_str = os.fspath(path)
             # to_TorchStructure() may return list or single Structure
             if isinstance(converted, (list, tuple)):
+                for struct in converted:
+                    if getattr(struct, "name", None) in (None, ""):
+                        struct.name = path_str
                 torch_structs.extend(converted)
             else:
+                if getattr(converted, "name", None) in (None, ""):
+                    converted.name = path_str
                 torch_structs.append(converted)
         return torch_structs
 

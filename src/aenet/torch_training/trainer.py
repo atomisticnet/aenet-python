@@ -21,8 +21,9 @@ import os
 import time
 import warnings
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -33,14 +34,16 @@ try:
 except Exception:
     tqdm = None  # type: ignore
 
-from .config import TorchTrainingConfig, Structure
-from .dataset import (StructureDataset,
-                      train_test_split,
-                      train_test_split_dataset)
-from .model_adapter import EnergyModelAdapter
-
 # Refactored modules
 from .builders import NetworkBuilder, OptimizerBuilder
+from .config import Structure, TorchTrainingConfig
+from .dataset import (
+    StructureDataset,
+    train_test_split,
+    train_test_split_dataset,
+)
+from .inference import Predictor
+from .model_adapter import EnergyModelAdapter
 from .training import (
     CheckpointManager,
     MetricsTracker,
@@ -48,7 +51,6 @@ from .training import (
     TrainingLoop,
 )
 from .training import training_loop as training_loop_mod
-from .inference import Predictor
 
 
 def _resolve_device(config: TorchTrainingConfig) -> torch.device:
@@ -458,7 +460,20 @@ class TorchANNPotential:
         structures = getattr(dataset, "structures", None)
         if structures is None:
             return None
-        return list(structures)
+        return [
+            self._structure_with_identifier(struct, idx)
+            for idx, struct in enumerate(structures)
+        ]
+
+    @staticmethod
+    def _structure_with_identifier(
+        structure: Structure,
+        index: int,
+    ) -> Structure:
+        """Return a structure carrying a stable identifier for outputs."""
+        if getattr(structure, "name", None) not in (None, ""):
+            return structure
+        return replace(structure, name=f"structure_{index:06d}")
 
     def _write_energies_file(
         self,
@@ -667,6 +682,10 @@ class TorchANNPotential:
         if structures is not None and len(structures) > 0:
             from .dataset import convert_to_structures
             structures = convert_to_structures(structures)
+            structures = [
+                self._structure_with_identifier(structure, idx)
+                for idx, structure in enumerate(structures)
+            ]
 
         # Dataset and split
         # (priority: explicit train/test > dataset > structures)
@@ -1146,10 +1165,11 @@ class TorchANNPotential:
         >>> results = pot.predict(strucs, eval_forces=True,
         ...                       config=PredictionConfig(timing=True))
         """
-        from aenet.mlip import PredictionConfig as PC
-        from aenet.io.predict import PredictOut
         import os
         import warnings
+
+        from aenet.io.predict import PredictOut
+        from aenet.mlip import PredictionConfig as PC
 
         # Use default config if not provided
         if config is None:
@@ -1266,9 +1286,10 @@ class TorchANNPotential:
             Prediction results. This matches the structure-based ``predict()``
             return type.
         """
-        from aenet.mlip import PredictionConfig as PC
-        from aenet.io.predict import PredictOut
         import warnings
+
+        from aenet.io.predict import PredictOut
+        from aenet.mlip import PredictionConfig as PC
 
         if config is None:
             config = PC()
