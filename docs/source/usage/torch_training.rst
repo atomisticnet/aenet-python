@@ -229,21 +229,21 @@ Performance Optimization Tips
    ...     force_sampling="random",
    ...     cache_features=True,
    ...     cache_force_neighbors=True,
-   ...     cache_force_triplets=True,
    ...     num_workers=4,
    ...     prefetch_factor=4,
    ... )
    >>> (config.cache_force_neighbors, config.cache_force_triplets)
-   (True, True)
+   (True, False)
 
 **Caching Strategies**
 
 * **cache_features**: For energy-only training, pre-computes all features once. For
   force training, caches features for structures not selected for force supervision
   in the current epoch (useful with ``force_fraction < 1.0``)
-* **cache_force_neighbors**: Reuse neighbor search results (force training only)
-* **cache_force_triplets**: Precompute CSR graphs and triplets for vectorized
-  operations (force training only)
+* **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse
+  and legacy non-graph paths
+* **cache_force_triplets**: Cache CSR graphs and triplets for the default sparse
+  force-training path instead of rebuilding them on demand
 
 Common Pitfalls
 ~~~~~~~~~~~~~~~
@@ -363,7 +363,6 @@ Force Training with Optimizations
        force_weight=0.1,
        force_fraction=0.3,  # Use 30% of forces (3× faster)
        cache_force_neighbors=True,  # Cache neighbor lists
-       cache_force_triplets=True,   # Vectorized operations
        num_workers=4,
        device='cuda'
    )
@@ -506,13 +505,14 @@ Performance & Caching
 
 **cache_force_neighbors** : bool (default: False)
    Cache per-structure neighbor graphs (indices, displacement vectors) across
-   epochs. Avoids repeated neighbor searches for fixed geometries.
-   Only applicable for force training.
+   epochs. Avoids repeated neighbor searches for fixed geometries on
+   energy-view reuse and legacy non-graph paths. Supported force training
+   does not require this option.
 
 **cache_force_triplets** : bool (default: False)
-   Build CSR neighbor graphs and precompute angular triplet indices for
-   vectorized featurization. Removes Python enumeration loops.
-   Only applicable for force training.
+   Cache CSR neighbor graphs and precompute angular triplet indices for the
+   default sparse force-training path. Leaving this disabled still uses the
+   sparse graph/triplet path, but rebuilds those graph payloads on demand.
 
 **cache_persist_dir** : str (default: None)
    Directory for persisting graph/triplet caches to disk for reuse across runs.

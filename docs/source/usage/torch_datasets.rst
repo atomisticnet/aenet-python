@@ -150,7 +150,6 @@ For force training, several options control which structures are used:
        force_sampling='random',              # Resample each epoch
        cache_features=True,                 # Cache features for non-force entries
        cache_force_neighbors=True,          # Cache neighbor lists
-       cache_force_triplets=True,           # Enable vectorized operations
    )
 
 **Parameters:**
@@ -158,8 +157,8 @@ For force training, several options control which structures are used:
 - **force_fraction** (float, 0.0-1.0): Fraction of force structures to use. Using a subset (e.g., 0.3) can speed up training 3× while maintaining accuracy.
 - **force_sampling** (str): ``'random'`` (resample each epoch) or ``'fixed'`` (static subset). Random provides better generalization.
 - **cache_features** (bool): Cache features for structures not selected for force supervision in current epoch. Useful with ``force_fraction < 1.0``.
-- **cache_force_neighbors** (bool): Cache neighbor graphs to avoid repeated searches. Saves ~50% compute for forces. Only applicable for force training.
-- **cache_force_triplets** (bool): Precompute CSR graphs and triplets for vectorized operations. Removes Python-level loops. Only applicable for force training.
+- **cache_force_neighbors** (bool): Cache neighbor graphs to avoid repeated searches for energy-view reuse and legacy non-graph paths. Supported force training does not require this.
+- **cache_force_triplets** (bool): Cache CSR graphs and triplets instead of rebuilding them on demand. Supported force training uses the sparse graph/triplet path even when this option is left at its default.
 
 Manual Dataset Splitting
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -359,7 +358,6 @@ Building the Database
        force_fraction=0.3,
        force_sampling="random",
        cache_force_neighbors=True,
-       cache_force_triplets=True,
        in_memory_cache_size=2048,   # LRU cache for unpickled structures
        compression="zlib",
        compression_level=5,
@@ -384,7 +382,6 @@ Training from HDF5 Database
        force_sampling="random",
        cache_features=True,
        cache_force_neighbors=True,
-       cache_force_triplets=True,
    )
 
    # Train with automatic splitting
@@ -503,8 +500,8 @@ Caching Strategies
 * **cache_features**: For energy-only training, pre-computes all features once. For
   force training, caches features for structures not selected for force supervision
   in current epoch (useful with ``force_fraction < 1.0``)
-* **cache_force_neighbors**: Reuse neighbor search results (saves ~50% compute for forces, force training only)
-* **cache_force_triplets**: Precompute CSR graphs and triplets for vectorized operations (force training only)
+* **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse and legacy non-graph paths
+* **cache_force_triplets**: Cache CSR graphs and triplets instead of rebuilding them for the default sparse force-training path
 
 
 Common Pitfalls

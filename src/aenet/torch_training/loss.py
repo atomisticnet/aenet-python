@@ -7,7 +7,7 @@ to work with an energy-model adapter that provides per-atom energies from
 flat features and per-atom species indices.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -122,6 +122,169 @@ def _contract_forces(
     return forces_pred
 
 
+def _feature_derivative_scales(
+    feature_std: Optional[torch.Tensor],
+    *,
+    descriptor,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> dict[str, torch.Tensor]:
+    """
+    Build per-block derivative scaling factors for normalized features.
+
+    If features are normalized as ``G_norm = (G - mean) / std``, the
+    descriptor derivatives must be scaled by ``1/std`` before contraction.
+    The returned tensors are shaped for direct broadcasting over local
+    derivative blocks.
+    """
+    n_rad = descriptor.rad_order + 1
+    n_ang = descriptor.ang_order + 1
+
+    one_rad = torch.ones(1, n_rad, 1, dtype=dtype, device=device)
+    one_ang = torch.ones(1, n_ang, 1, dtype=dtype, device=device)
+
+    if feature_std is None:
+        return {
+            "radial": one_rad,
+            "angular": one_ang,
+            "radial_weighted": one_rad,
+            "angular_weighted": one_ang,
+        }
+
+    eps = 1e-12
+    fs = torch.clamp(
+        feature_std.to(device=device, dtype=dtype),
+        min=float(eps),
+    )
+
+    if descriptor.multi:
+        return {
+            "radial": (1.0 / fs[:n_rad]).view(1, n_rad, 1),
+            "angular": (1.0 / fs[n_rad:n_rad + n_ang]).view(1, n_ang, 1),
+            "radial_weighted": (
+                1.0 / fs[n_rad + n_ang:2 * n_rad + n_ang]
+            ).view(1, n_rad, 1),
+            "angular_weighted": (
+                1.0 / fs[2 * n_rad + n_ang:]
+            ).view(1, n_ang, 1),
+        }
+
+    return {
+        "radial": (1.0 / fs[:n_rad]).view(1, n_rad, 1),
+        "angular": (1.0 / fs[n_rad:]).view(1, n_ang, 1),
+        "radial_weighted": one_rad,
+        "angular_weighted": one_ang,
+    }
+
+
+def _contract_forces_sparse(
+    grad_E_wrt_features: torch.Tensor,
+    local_derivatives: dict[str, dict[str, Optional[torch.Tensor]]],
+    *,
+    descriptor,
+    feature_std: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Contract forces from sparse local derivative blocks.
+
+    Parameters
+    ----------
+    grad_E_wrt_features : torch.Tensor
+        ``(N, F)`` gradients of the total energy with respect to features.
+    local_derivatives : dict
+        Sparse local derivative representation produced by the descriptor.
+    descriptor : ChebyshevDescriptor
+        Descriptor instance providing feature layout metadata.
+    feature_std : torch.Tensor, optional
+        Feature standard deviations used for normalization. When provided,
+        local derivative blocks are scaled by ``1/std`` to match the
+        normalized feature space.
+
+    Returns
+    -------
+    torch.Tensor
+        Predicted forces with shape ``(N, 3)`` in normalized energy units.
+    """
+    device = grad_E_wrt_features.device
+    dtype = grad_E_wrt_features.dtype
+    n_atoms = grad_E_wrt_features.shape[0]
+    n_rad = descriptor.rad_order + 1
+    n_ang = descriptor.ang_order + 1
+    scales = _feature_derivative_scales(
+        feature_std,
+        descriptor=descriptor,
+        device=device,
+        dtype=dtype,
+    )
+
+    forces_pred = torch.zeros(n_atoms, 3, dtype=dtype, device=device)
+
+    radial = local_derivatives["radial"]
+    center_idx = radial["center_idx"]
+    if center_idx.numel() > 0:
+        neighbor_idx = radial["neighbor_idx"]
+        dG_drij_raw = radial["dG_drij"].to(device=device, dtype=dtype)
+        dG_drij = dG_drij_raw * scales["radial"]
+
+        coeff_rad = grad_E_wrt_features.index_select(0, center_idx)[:, :n_rad]
+        contrib = torch.einsum("ef,efk->ek", coeff_rad, dG_drij)
+        forces_pred.index_add_(0, center_idx, contrib)
+        forces_pred.index_add_(0, neighbor_idx, -contrib)
+
+        if descriptor.multi:
+            coeff_rad_w = grad_E_wrt_features.index_select(
+                0, center_idx
+            )[:, n_rad + n_ang:2 * n_rad + n_ang]
+            tspin_j = radial["neighbor_typespin"].to(
+                device=device, dtype=dtype
+            ).view(-1, 1, 1)
+            dG_drij_w = dG_drij_raw * tspin_j * scales["radial_weighted"]
+            contrib_w = torch.einsum("ef,efk->ek", coeff_rad_w, dG_drij_w)
+            forces_pred.index_add_(0, center_idx, contrib_w)
+            forces_pred.index_add_(0, neighbor_idx, -contrib_w)
+
+    angular = local_derivatives["angular"]
+    tri_i = angular["center_idx"]
+    if tri_i.numel() > 0 and n_ang > 0:
+        tri_j = angular["neighbor_j_idx"]
+        tri_k = angular["neighbor_k_idx"]
+        grads_i = angular["grads_i"].to(device=device, dtype=dtype)
+        grads_j = angular["grads_j"].to(device=device, dtype=dtype)
+        grads_k = angular["grads_k"].to(device=device, dtype=dtype)
+
+        coeff_ang = grad_E_wrt_features.index_select(0, tri_i)[
+            :, n_rad:n_rad + n_ang
+        ]
+        grads_i_unw = grads_i * scales["angular"]
+        grads_j_unw = grads_j * scales["angular"]
+        grads_k_unw = grads_k * scales["angular"]
+        contrib_i = -torch.einsum("tf,tfk->tk", coeff_ang, grads_i_unw)
+        contrib_j = -torch.einsum("tf,tfk->tk", coeff_ang, grads_j_unw)
+        contrib_k = -torch.einsum("tf,tfk->tk", coeff_ang, grads_k_unw)
+        forces_pred.index_add_(0, tri_i, contrib_i)
+        forces_pred.index_add_(0, tri_j, contrib_j)
+        forces_pred.index_add_(0, tri_k, contrib_k)
+
+        if descriptor.multi:
+            coeff_ang_w = grad_E_wrt_features.index_select(0, tri_i)[
+                :, 2 * n_rad + n_ang:
+            ]
+            tsp = angular["triplet_typespin"].to(
+                device=device, dtype=dtype
+            ).view(-1, 1, 1)
+            grads_i_w = grads_i * tsp * scales["angular_weighted"]
+            grads_j_w = grads_j * tsp * scales["angular_weighted"]
+            grads_k_w = grads_k * tsp * scales["angular_weighted"]
+            contrib_i_w = -torch.einsum("tf,tfk->tk", coeff_ang_w, grads_i_w)
+            contrib_j_w = -torch.einsum("tf,tfk->tk", coeff_ang_w, grads_j_w)
+            contrib_k_w = -torch.einsum("tf,tfk->tk", coeff_ang_w, grads_k_w)
+            forces_pred.index_add_(0, tri_i, contrib_i_w)
+            forces_pred.index_add_(0, tri_j, contrib_j_w)
+            forces_pred.index_add_(0, tri_k, contrib_k_w)
+
+    return forces_pred
+
+
 def compute_force_loss(
     positions: torch.Tensor,
     species: list,
@@ -132,13 +295,14 @@ def compute_force_loss(
     cell: Optional[torch.Tensor] = None,
     pbc: Optional[torch.Tensor] = None,
     E_scaling: float = 1.0,
-    neighbor_info: Optional[Dict] = None,
+    neighbor_info: Optional[dict] = None,
     chunk_size: Optional[int] = None,
     feature_mean: Optional[torch.Tensor] = None,
     feature_std: Optional[torch.Tensor] = None,
-    graph: Optional[Dict] = None,
-    triplets: Optional[Dict] = None,
+    graph: Optional[dict] = None,
+    triplets: Optional[dict] = None,
     center_indices: Optional[torch.Tensor] = None,
+    use_dense_path: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute force loss (RMSE) using semi-analytical gradients.
@@ -170,14 +334,14 @@ def compute_force_loss(
         Precomputed neighbor information with keys:
           - 'neighbor_lists': list of length N with (nnb_i,) arrays
           - 'neighbor_vectors': list of length N with (nnb_i, 3) arrays
-        If provided, avoids recomputing neighbors.
+        If provided, avoids recomputing neighbors on legacy non-graph paths.
     graph : dict, optional
         Batched CSR neighbor graph for the current force view with keys:
           - 'center_ptr': (Nf+1,) int32 CSR row pointers
           - 'nbr_idx': (E,) int32 neighbor indices (offset to force view)
           - 'r_ij': (E, 3) dtype displacement vectors
           - 'd_ij': (E,) dtype distances
-        If provided, enables fully vectorized feature/gradient computation.
+        If provided, enables the graph-based force-training path.
     triplets : dict, optional
         Batched TripletIndex with keys:
           - 'tri_i','tri_j','tri_k': (T,) int32
@@ -189,6 +353,10 @@ def compute_force_loss(
     chunk_size : int, optional
         If set, contract forces in chunks along i-dimension to reduce
         peak memory usage.
+    use_dense_path : bool, optional
+        Force the legacy dense ``(N, F, N, 3)`` contraction path even when
+        sparse local derivative blocks are available. Intended only for
+        regression testing and validation.
 
     Returns
     -------
@@ -197,31 +365,66 @@ def compute_force_loss(
     forces_pred : torch.Tensor
         (N, 3) predicted forces (denormalized)
     """
-    # Ensure positions require grad if we fallback to autograd anywhere
-    positions = positions.clone().detach().requires_grad_(True)
+    positions = positions.clone().detach()
+    grad_features = None
+    local_derivatives = None
 
-    # Compute features and their gradients w.r.t. positions
-    if graph is not None and hasattr(
-        descriptor, "compute_feature_gradients_with_graph"
-    ):
-        # Use CSR/Triplets vectorized path
-        (features, grad_features
-         ) = descriptor.compute_feature_gradients_with_graph(
-            positions=positions,
-            species_indices=species_indices.to(device=positions.device),
-            graph={k: (v.to(positions.device)
-                       if isinstance(v, torch.Tensor) else v)
-                   for k, v in graph.items()},
-            triplets=({k: (v.to(positions.device)
-                           if isinstance(v, torch.Tensor) else v)
-                       for k, v in triplets.items()}
-                      if triplets is not None else None),
-            center_indices=center_indices.to(device=positions.device)
-            if center_indices is not None else None,
+    # Compute features and derivative information.
+    if graph is not None:
+        graph_dev = {
+            k: (v.to(positions.device) if isinstance(v, torch.Tensor) else v)
+            for k, v in graph.items()
+        }
+        triplets_dev = (
+            {
+                k: (v.to(positions.device)
+                    if isinstance(v, torch.Tensor) else v)
+                for k, v in triplets.items()
+            }
+            if triplets is not None else None
         )
+        center_indices_dev = (
+            center_indices.to(device=positions.device)
+            if center_indices is not None else None
+        )
+        if use_dense_path:
+            if not hasattr(descriptor, "compute_feature_gradients_with_graph"):
+                raise RuntimeError(
+                    "Dense graph reference path requested, but the "
+                    "descriptor does not implement "
+                    "'compute_feature_gradients_with_graph()'."
+                )
+            positions = positions.requires_grad_(True)
+            (features, grad_features
+             ) = descriptor.compute_feature_gradients_with_graph(
+                positions=positions,
+                species_indices=species_indices.to(device=positions.device),
+                graph=graph_dev,
+                triplets=triplets_dev,
+                center_indices=center_indices_dev,
+            )
+        else:
+            if not hasattr(
+                descriptor,
+                "compute_features_and_local_derivatives_with_graph",
+            ):
+                raise RuntimeError(
+                    "Graph-based force training now requires sparse local "
+                    "derivative support. Use 'use_dense_path=True' only for "
+                    "regression or debugging."
+                )
+            (features, local_derivatives
+             ) = descriptor.compute_features_and_local_derivatives_with_graph(
+                positions=positions,
+                species_indices=species_indices.to(device=positions.device),
+                graph=graph_dev,
+                triplets=triplets_dev,
+                center_indices=center_indices_dev,
+            )
     elif neighbor_info is not None and hasattr(
         descriptor, "compute_feature_gradients_from_neighbor_info"
     ):
+        positions = positions.requires_grad_(True)
         # Convert neighbor_info lists to tensors on
         # same device/dtype as positions
         nb_idx_list_t: list[torch.Tensor] = []
@@ -245,6 +448,7 @@ def compute_force_loss(
             neighbor_vectors=nb_vec_list_t,
         )
     else:
+        positions = positions.requires_grad_(True)
         # Fallback: recompute neighbor information (slower)
         features, grad_features = descriptor.compute_feature_gradients(
             positions, species, cell, pbc
@@ -281,11 +485,19 @@ def compute_force_loss(
     )[0]
 
     # Contract to forces: F = - dE/dr
-    forces_pred = _contract_forces(
-        grad_E_wrt_features=grad_E_wrt_features,
-        grad_features=grad_features,
-        chunk_size=chunk_size,
-    )
+    if local_derivatives is not None:
+        forces_pred = _contract_forces_sparse(
+            grad_E_wrt_features=grad_E_wrt_features,
+            local_derivatives=local_derivatives,
+            descriptor=descriptor,
+            feature_std=feature_std,
+        )
+    else:
+        forces_pred = _contract_forces(
+            grad_E_wrt_features=grad_E_wrt_features,
+            grad_features=grad_features,
+            chunk_size=chunk_size,
+        )
 
     # Denormalize forces if energies were normalized by E_scaling
     forces_pred = forces_pred / E_scaling
@@ -318,11 +530,11 @@ def compute_combined_loss(
     E_scaling: float = 1.0,
     use_forces: bool = False,
     # Optional acceleration / memory
-    neighbor_info: Optional[Dict] = None,
+    neighbor_info: Optional[dict] = None,
     chunk_size: Optional[int] = None,
     feature_mean: Optional[torch.Tensor] = None,
     feature_std: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, Dict[str, Optional[torch.Tensor]]]:
+) -> Tuple[torch.Tensor, dict[str, Optional[torch.Tensor]]]:
     """
     Compute combined energy and force loss.
 

@@ -291,14 +291,15 @@ class TorchTrainingConfig:
     cache_force_neighbors : bool, optional
         Cache per-structure neighbor graphs (indices and displacement vectors)
         for force training to avoid repeated neighbor searches across epochs
-        when geometries are fixed. When True, neighbor graphs are computed
-        once per structure and reused for both energy and force paths.
-        Only relevant for force training. Default: False
+        when geometries are fixed. This is no longer required for the
+        supported sparse force-training path, but it can still help reuse
+        neighbor information for energy-view feature generation and legacy
+        non-graph paths. Default: False
     cache_force_triplets : bool, optional
-        Build and cache CSR neighbor graphs and precomputed angular triplet
-        indices per structure to enable vectorized featurization and gradient
-        paths for force training (removes Python-level enumeration loops).
-        Only relevant for force training. Default: False
+        Cache CSR neighbor graphs and precomputed angular triplet indices per
+        structure for force training. Supported force training always uses the
+        graph/triplet sparse path; enabling this option keeps those graph
+        payloads cached instead of rebuilding them on demand. Default: False
     cache_persist_dir : str, optional
         Optional root directory for persisted graph/triplet caches
         (planned follow-up). When provided, caches may be serialized to disk
@@ -346,8 +347,7 @@ class TorchTrainingConfig:
     # searches across epochs (indices and displacement vectors)
     # Only relevant for force training
     cache_force_neighbors: bool = False
-    # CSR + Triplet caching/vectorization (Issue 5 Phase 2 / Issue 7)
-    # Only relevant for force training
+    # Cache graph/triplet payloads for the sparse force-training path.
     cache_force_triplets: bool = False
     # Optional on-disk persistence root (Phase 4 follow-up may enable writing)
     cache_persist_dir: Optional[str] = None

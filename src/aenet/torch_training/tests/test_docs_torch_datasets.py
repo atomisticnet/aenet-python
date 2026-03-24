@@ -168,6 +168,8 @@ def test_structure_input_formats_and_split_examples(
     sample = dataset_from_torch[0]
     assert sample["features"].shape == (3, 3)
     assert sample["use_forces"] is True
+    assert sample["graph"] is not None
+    assert sample["triplets"] is not None
 
     force_dataset = StructureDataset(
         structures=docs_training_structures,
@@ -176,7 +178,6 @@ def test_structure_input_formats_and_split_examples(
         force_sampling="fixed",
         cache_features=True,
         cache_force_neighbors=True,
-        cache_force_triplets=True,
         seed=7,
     )
     assert force_dataset.get_statistics()["n_force_selected"] == 1
@@ -278,15 +279,17 @@ def test_hdf5_build_load_and_generic_split_examples(
         force_fraction=0.5,
         force_sampling="fixed",
         cache_force_neighbors=True,
-        cache_force_triplets=True,
         compression="zlib",
         compression_level=5,
     )
     build_dataset.build_database(show_progress=False)
 
-    sample = build_dataset[0]
+    selected_build_idx = build_dataset.selected_force_indices[0]
+    sample = build_dataset[selected_build_idx]
     assert len(build_dataset) == 2
     assert sample["features"].shape == (3, 3)
+    assert sample["graph"] is not None
+    assert sample["triplets"] is not None
 
     load_dataset = HDF5StructureDataset(
         descriptor=descriptor,
@@ -296,8 +299,9 @@ def test_hdf5_build_load_and_generic_split_examples(
         force_sampling="fixed",
         cache_features=True,
         cache_force_neighbors=True,
-        cache_force_triplets=True,
     )
+    selected_load_idx = load_dataset.selected_force_indices[0]
+    loaded_sample = load_dataset[selected_load_idx]
     train_ds, test_ds = train_test_split_dataset(
         load_dataset,
         test_fraction=0.5,
@@ -309,6 +313,8 @@ def test_hdf5_build_load_and_generic_split_examples(
     assert isinstance(test_ds, Subset)
     assert len(train_ds) == 1
     assert len(test_ds) == 1
+    assert loaded_sample["graph"] is not None
+    assert loaded_sample["triplets"] is not None
 
     load_dataset._close_handle()
     build_dataset._close_handle()

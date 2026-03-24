@@ -208,7 +208,12 @@ class TrainingLoop:
                 forces_ref_f = batch["forces_ref_f"].to(self.device)
                 species_indices_f = batch["species_indices_f"].to(self.device)
                 species_f = batch["species_f"]
-                neighbor_info_f = batch["neighbor_info_f"]
+                graph_f = batch.get("graph_f", None)
+                if graph_f is None:
+                    raise RuntimeError(
+                        "Force-training batches must include graph data for "
+                        "the sparse force path."
+                    )
 
                 # dtype
                 if self.dtype == torch.float64:
@@ -228,7 +233,7 @@ class TrainingLoop:
                     cell=None,
                     pbc=None,
                     E_scaling=float(E_scaling),
-                    neighbor_info=neighbor_info_f,
+                    neighbor_info=None,
                     chunk_size=None,
                     feature_mean=(
                         self.normalizer.feature_mean
@@ -240,7 +245,7 @@ class TrainingLoop:
                         if self.normalizer.normalize_features
                         else None
                     ),
-                    graph=batch.get("graph_f", None),
+                    graph=graph_f,
                     triplets=batch.get("triplets_f", None),
                     center_indices=None,
                 )

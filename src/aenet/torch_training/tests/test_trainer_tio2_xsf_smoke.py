@@ -1,27 +1,25 @@
 import math
 from pathlib import Path
-from typing import List
 
 import numpy as np
 import pytest
 import torch
 
+from aenet.formats.xsf import XSFParser
+from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
+    Structure,
     TorchANNPotential,
     TorchTrainingConfig,
-    Structure,
 )
-from aenet.torch_featurize import ChebyshevDescriptor
-from aenet.formats.xsf import XSFParser
 
 
-def load_tio2_structures(n_structs: int = 3) -> List[Structure]:
+def load_tio2_structures(n_structs: int = 3) -> list[Structure]:
     """
-    Load a few TiO2 XSF structures from repo data and convert
-    to Torch Structures.
+    Load a few TiO2 XSF fixtures and convert them to torch Structures.
 
-    Energies and forces are not guaranteed in these XSFs, so we
-    set energy=0.0.
+    The repository fixtures include total energies and per-atom forces, so
+    the returned structures preserve those labels when present.
     """
     # test file is at: src/aenet/torch_training/tests/this_file.py
     # xsf dir is at:  src/aenet/tests/data/xsf-TiO2
@@ -33,7 +31,7 @@ def load_tio2_structures(n_structs: int = 3) -> List[Structure]:
     assert len(files) > 0, f"No XSF files found in {xsf_dir}"
 
     parser = XSFParser()
-    out: List[Structure] = []
+    out: list[Structure] = []
     for p in files:
         s = parser.read(str(p))
         positions = np.array(s.coords[-1], dtype=np.float64)
@@ -44,7 +42,11 @@ def load_tio2_structures(n_structs: int = 3) -> List[Structure]:
             if (s.energy and s.energy[-1] is not None)
             else 0.0
         )
-        forces = None
+        forces = (
+            np.array(s.forces[-1], dtype=np.float64)
+            if (s.forces and s.forces[-1] is not None)
+            else None
+        )
         cell = np.array(s.avec[-1]) if s.pbc else None
         pbc = np.array([True, True, True]) if s.pbc else None
         out.append(
@@ -127,3 +129,46 @@ def test_energy_only_tio2_xsf_smoke(tmp_path: Path):
         )
         or "best_model.pt" in names
     )
+
+
+@pytest.mark.cpu
+def test_force_training_tio2_xsf_sparse_smoke(tmp_path: Path):
+    """
+    Periodic TiO2 force training should work with the default sparse path.
+    """
+    structures = load_tio2_structures(n_structs=3)
+    assert all(structure.forces is not None for structure in structures)
+    assert any(
+        np.linalg.norm(structure.forces) > 0.0
+        for structure in structures
+        if structure.forces is not None
+    )
+    descriptor = make_descriptor_tio2(dtype=torch.float64)
+    arch = make_arch_tio2()
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        cache_force_neighbors=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(
+        structures=structures,
+        config=cfg,
+    )
+
+    assert "RMSE_force_train" in result.errors.columns
+    assert len(result.errors) == 1
+    force_rmse = result.errors["RMSE_force_train"].iloc[0]
+    assert not math.isnan(force_rmse)
+    assert force_rmse >= 0.0

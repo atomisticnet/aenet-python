@@ -42,16 +42,64 @@ import tables  # PyTables
 import torch
 from torch.utils.data import Dataset, Subset
 
-from .config import Structure  # Torch Structure dataclass
 from aenet.torch_featurize.graph import (
     build_csr_from_neighborlist,
     build_triplets_from_csr,
 )
 
+from .config import Structure  # Torch Structure dataclass
+
 __all__ = [
     "HDF5StructureDataset",
     "train_test_split_dataset",
 ]
+
+
+def _build_force_graph_triplets(
+    descriptor,
+    positions: torch.Tensor,
+    cell: Optional[torch.Tensor],
+    pbc: Optional[torch.Tensor],
+) -> dict:
+    """Build the graph/triplet payload used by the sparse force path."""
+    max_cut = float(max(descriptor.rad_cutoff, descriptor.ang_cutoff))
+    graph = build_csr_from_neighborlist(
+        positions=positions,
+        cell=cell,
+        pbc=pbc,
+        nbl=descriptor.nbl,
+        min_cutoff=float(descriptor.min_cutoff),
+        max_cutoff=max_cut,
+        device=positions.device,
+        dtype=descriptor.dtype,
+    )
+    triplets = build_triplets_from_csr(
+        csr=graph,
+        ang_cutoff=float(descriptor.ang_cutoff),
+        min_cutoff=float(descriptor.min_cutoff),
+    )
+    return {"graph": graph, "triplets": triplets}
+
+
+def _forward_force_features_with_graph(
+    descriptor,
+    positions: torch.Tensor,
+    species_indices: torch.Tensor,
+    graph: dict,
+    triplets: Optional[dict],
+) -> torch.Tensor:
+    """Compute force-training features from the graph-based descriptor path."""
+    if not hasattr(descriptor, "forward_with_graph"):
+        raise RuntimeError(
+            "Force training now requires graph-based descriptor support via "
+            "'forward_with_graph()'."
+        )
+    return descriptor.forward_with_graph(
+        positions=positions,
+        species_indices=species_indices.to(device=positions.device),
+        graph=graph,
+        triplets=triplets,
+    )
 
 
 @dataclass
@@ -123,8 +171,10 @@ class HDF5StructureDataset(Dataset):
         Cache per-structure neighbor_info for reuse. Only relevant for force
         training. Default: False
     cache_force_triplets : bool, optional
-        Cache per-structure CSR graphs + triplets for vectorized paths.
-        Only relevant for force training.
+        Cache per-structure CSR graphs and angular triplets for
+        force-supervised structures. Supported force training always uses the
+        graph/triplet sparse path; enabling this option keeps those graph
+        payloads in memory instead of rebuilding them on demand.
         Default: False
     cache_persist_dir : str, optional
         Placeholder for future on-disk persistence of caches. Default: None
@@ -423,62 +473,41 @@ class HDF5StructureDataset(Dataset):
         )
         pbc = torch.from_numpy(struct.pbc) if struct.pbc is not None else None
 
+        # Species indices tensor
+        species_indices = torch.tensor(
+            [self.descriptor.species_to_idx[s]
+             for s in struct.species], dtype=torch.long
+        )
+
         # Determine whether to use forces for this index
         use_forces = self._should_use_forces(
             idx, struct_has_forces=struct.has_forces())
 
-        # Compute features and neighbor information paths
-        # (mirror StructureDataset)
-        if use_forces:
-            # Force-supervised path requires neighbor info
-            if self.cache_force_neighbors and (idx in self._neighbor_cache):
-                neighbor_info = self._neighbor_cache[idx]
-                nb_idx_list_t = [
-                    torch.as_tensor(arr, dtype=torch.long)
-                    for arr in neighbor_info["neighbor_lists"]
-                ]
-                nb_vec_list_t = [
-                    torch.as_tensor(vec, dtype=self.descriptor.dtype)
-                    for vec in neighbor_info["neighbor_vectors"]
-                ]
-                features = self.descriptor.forward(
-                    positions, struct.species, nb_idx_list_t, nb_vec_list_t)
-            else:
-                (features, neighbor_info
-                 ) = self.descriptor.featurize_with_neighbor_info(
-                    positions, struct.species, cell, pbc
-                )
-                if self.cache_force_neighbors:
-                    self._neighbor_cache[idx] = neighbor_info
+        graph = None
+        triplets = None
 
-            # Optional CSR/Triplet vectorization cache
-            graph = None
-            triplets = None
-            if self.cache_force_triplets:
-                if idx in self._graph_cache:
-                    g_trip = self._graph_cache[idx]
-                else:
-                    max_cut = float(max(self.descriptor.rad_cutoff,
-                                        self.descriptor.ang_cutoff))
-                    csr = build_csr_from_neighborlist(
-                        positions=positions,
-                        cell=cell,
-                        pbc=pbc,
-                        nbl=self.descriptor.nbl,
-                        min_cutoff=float(self.descriptor.min_cutoff),
-                        max_cutoff=max_cut,
-                        device=positions.device,
-                        dtype=self.descriptor.dtype,
-                    )
-                    trip = build_triplets_from_csr(
-                        csr=csr,
-                        ang_cutoff=float(self.descriptor.ang_cutoff),
-                        min_cutoff=float(self.descriptor.min_cutoff),
-                    )
-                    g_trip = {"graph": csr, "triplets": trip}
+        # Compute features and training payload paths (mirror StructureDataset)
+        if use_forces:
+            neighbor_info = None
+            g_trip = self._graph_cache.get(idx)
+            if g_trip is None:
+                g_trip = _build_force_graph_triplets(
+                    descriptor=self.descriptor,
+                    positions=positions,
+                    cell=cell,
+                    pbc=pbc,
+                )
+                if self.cache_force_triplets:
                     self._graph_cache[idx] = g_trip
-                graph = g_trip["graph"]
-                triplets = g_trip["triplets"]
+            graph = g_trip["graph"]
+            triplets = g_trip["triplets"]
+            features = _forward_force_features_with_graph(
+                descriptor=self.descriptor,
+                positions=positions,
+                species_indices=species_indices,
+                graph=graph,
+                triplets=triplets,
+            )
         else:
             # Energy-only forward path
             neighbor_info = None
@@ -512,14 +541,6 @@ class HDF5StructureDataset(Dataset):
                         features = feats
                 if self.cache_features:
                     self._feature_cache[idx] = features
-            graph = None
-            triplets = None
-
-        # Species indices tensor
-        species_indices = torch.tensor(
-            [self.descriptor.species_to_idx[s]
-             for s in struct.species], dtype=torch.long
-        )
 
         # Forces, when supervised
         forces = None

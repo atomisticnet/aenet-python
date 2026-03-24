@@ -8,15 +8,16 @@ import math
 from pathlib import Path
 
 import numpy as np
-import torch
 import pytest
+import torch
 
+import aenet.torch_training.training.training_loop as training_loop_module
+from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
-    TorchTrainingConfig,
     Structure,
     TorchANNPotential,
+    TorchTrainingConfig,
 )
-from aenet.torch_featurize import ChebyshevDescriptor
 
 
 def make_structures_with_forces(n_structures=10, n_atoms=5):
@@ -351,6 +352,56 @@ def test_force_training_with_caching(tmp_path: Path):
         force_rmse = result.errors["RMSE_force_train"].iloc[idx]
         assert not math.isnan(force_rmse)
         assert force_rmse > 0
+
+
+@pytest.mark.cpu
+def test_force_training_uses_graph_path_by_default(monkeypatch):
+    """Default force training should pass graph payloads into the loss path."""
+    structures = make_structures_with_forces(n_structures=6, n_atoms=4)
+    descriptor = make_descriptor(dtype=torch.float64)
+    arch = make_arch(descriptor)
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    calls = []
+    original_compute_force_loss = training_loop_module.compute_force_loss
+
+    def _wrapped_compute_force_loss(*args, **kwargs):
+        calls.append(
+            {
+                "graph": kwargs.get("graph"),
+                "triplets": kwargs.get("triplets"),
+                "neighbor_info": kwargs.get("neighbor_info"),
+            }
+        )
+        return original_compute_force_loss(*args, **kwargs)
+
+    monkeypatch.setattr(
+        training_loop_module,
+        "compute_force_loss",
+        _wrapped_compute_force_loss,
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        cache_force_neighbors=False,
+        cache_force_triplets=False,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(structures=structures, config=cfg)
+
+    assert "RMSE_force_train" in result.errors.columns
+    assert calls, "compute_force_loss() was not reached during force training"
+    assert all(call["graph"] is not None for call in calls)
+    assert all(call["neighbor_info"] is None for call in calls)
 
 
 @pytest.mark.cpu

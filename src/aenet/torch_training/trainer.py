@@ -128,7 +128,6 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
       - force view (only selected structures):
           positions_f: (Nf,3), species_f (list[str]),
           species_indices_f: (Nf,), forces_ref_f: (Nf,3),
-          neighbor_info_f: dict (lists length Nf),
           graph_f: Optional[dict] batched CSR neighbor graph for the
               force view (keys: center_ptr[int32 Nf+1], nbr_idx[int32 E],
               r_ij[E,3], d_ij[E]),
@@ -152,8 +151,6 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     species_f_names: List[str] = []
     species_idx_f_list: List[torch.Tensor] = []
     forces_f_list: List[torch.Tensor] = []
-    nb_lists_f: List[Any] = []          # list of numpy arrays (indices)
-    nb_vectors_f: List[Any] = []        # list of numpy arrays (vectors)
     # Optional batched CSR/Triplets parts for force view
     deg_parts: List[torch.Tensor] = []  # degrees per center (concat later)
     nbr_idx_parts: List[torch.Tensor] = []
@@ -165,8 +162,6 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     tri_j_local_parts: List[torch.Tensor] = []
     tri_k_local_parts: List[torch.Tensor] = []
 
-    # We also need neighbor_info for the full batch of force-selected atoms
-    # We will offset neighbor indices when concatenating.
     base_atom_idx_force = 0
     # Track total atoms with available force labels in this batch
     n_atoms_force_total: int = 0
@@ -201,50 +196,38 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         frc = sample["forces"]
         species_idx = sample["species_indices"]
         species_names = sample["species"]
-        nb_info = sample["neighbor_info"]  # numpy arrays
 
         positions_f_list.append(pos)
         forces_f_list.append(frc)
         species_idx_f_list.append(species_idx)
         species_f_names.extend(species_names)
 
-        # Accumulate CSR/Triplets parts if present on sample
-        try:
-            g = sample.get("graph", None)
-            if g is not None:
-                cp = torch.as_tensor(g["center_ptr"])
-                # degrees for this structure
-                deg_parts.append((cp[1:] - cp[:-1]).to(torch.int64))
-                # neighbor arrays with atom index offset
-                nbr_idx_parts.append(torch.as_tensor(g["nbr_idx"]).to(
-                    torch.int64) + base_atom_idx_force)
-                r_ij_parts.append(torch.as_tensor(g["r_ij"]))
-                d_ij_parts.append(torch.as_tensor(g["d_ij"]))
-                # optional triplets
-                t = sample.get("triplets", None)
-                if t is not None:
-                    tri_i_parts.append(torch.as_tensor(t["tri_i"]).to(
-                        torch.int64) + base_atom_idx_force)
-                    tri_j_parts.append(torch.as_tensor(t["tri_j"]).to(
-                        torch.int64) + base_atom_idx_force)
-                    tri_k_parts.append(torch.as_tensor(t["tri_k"]).to(
-                        torch.int64) + base_atom_idx_force)
-                    tri_j_local_parts.append(
-                        torch.as_tensor(t["tri_j_local"]).to(torch.int64))
-                    tri_k_local_parts.append(
-                        torch.as_tensor(t["tri_k_local"]).to(torch.int64))
-        except Exception:
-            # If graph pieces are missing or malformed, skip silently
-            pass
+        g = sample.get("graph", None)
+        if g is None:
+            raise RuntimeError(
+                "Force-supervised training samples must provide a graph "
+                "payload for the sparse force path."
+            )
 
-        # Offset neighbor indices by base_atom_idx_force
-        for arr in nb_info["neighbor_lists"]:
-            if arr is None or len(arr) == 0:
-                nb_lists_f.append(arr)
-            else:
-                nb_lists_f.append(arr + base_atom_idx_force)
-        for vec in nb_info["neighbor_vectors"]:
-            nb_vectors_f.append(vec)
+        cp = torch.as_tensor(g["center_ptr"])
+        deg_parts.append((cp[1:] - cp[:-1]).to(torch.int64))
+        nbr_idx_parts.append(torch.as_tensor(g["nbr_idx"]).to(
+            torch.int64) + base_atom_idx_force)
+        r_ij_parts.append(torch.as_tensor(g["r_ij"]))
+        d_ij_parts.append(torch.as_tensor(g["d_ij"]))
+
+        t = sample.get("triplets", None)
+        if t is not None:
+            tri_i_parts.append(torch.as_tensor(t["tri_i"]).to(
+                torch.int64) + base_atom_idx_force)
+            tri_j_parts.append(torch.as_tensor(t["tri_j"]).to(
+                torch.int64) + base_atom_idx_force)
+            tri_k_parts.append(torch.as_tensor(t["tri_k"]).to(
+                torch.int64) + base_atom_idx_force)
+            tri_j_local_parts.append(
+                torch.as_tensor(t["tri_j_local"]).to(torch.int64))
+            tri_k_local_parts.append(
+                torch.as_tensor(t["tri_k_local"]).to(torch.int64))
 
         base_atom_idx_force += int(pos.shape[0])
 
@@ -256,48 +239,40 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     )
     forces_ref_f = (torch.cat(forces_f_list, dim=0)
                     if force_view_present else None)
-    neighbor_info_f = (
-        {"neighbor_lists": nb_lists_f, "neighbor_vectors": nb_vectors_f}
-        if force_view_present
-        else None
-    )
 
     # Build batched CSR/Triplets for force view if any parts were collected
     graph_f = None
     triplets_f = None
     if force_view_present and len(deg_parts) > 0:
-        try:
-            total_centers = int(positions_f.shape[0])
-            deg_cat = (torch.cat(deg_parts) if len(deg_parts) > 0
-                       else torch.empty(0, dtype=torch.int64))
-            center_ptr = torch.zeros(total_centers + 1, dtype=torch.int64)
-            if deg_cat.numel() == total_centers:
-                center_ptr[1:] = torch.cumsum(deg_cat, dim=0)
-            # Concatenate edge arrays
-            if len(nbr_idx_parts) > 0:
-                nbr_idx_b = torch.cat(nbr_idx_parts).to(torch.int32)
-                r_ij_b = torch.cat(r_ij_parts)
-                d_ij_b = torch.cat(d_ij_parts)
-                graph_f = {
-                    "center_ptr": center_ptr.to(torch.int32),
-                    "nbr_idx": nbr_idx_b,
-                    "r_ij": r_ij_b,
-                    "d_ij": d_ij_b,
-                }
-            # Concatenate triplets if present
-            if len(tri_i_parts) > 0:
-                triplets_f = {
-                    "tri_i": torch.cat(tri_i_parts).to(torch.int32),
-                    "tri_j": torch.cat(tri_j_parts).to(torch.int32),
-                    "tri_k": torch.cat(tri_k_parts).to(torch.int32),
-                    "tri_j_local": torch.cat(
-                        tri_j_local_parts).to(torch.int32),
-                    "tri_k_local": torch.cat(
-                        tri_k_local_parts).to(torch.int32),
-                }
-        except Exception:
-            graph_f = None
-            triplets_f = None
+        total_centers = int(positions_f.shape[0])
+        deg_cat = (torch.cat(deg_parts) if len(deg_parts) > 0
+                   else torch.empty(0, dtype=torch.int64))
+        center_ptr = torch.zeros(total_centers + 1, dtype=torch.int64)
+        if deg_cat.numel() != total_centers:
+            raise RuntimeError(
+                "Malformed force-training graph payload: CSR degrees do not "
+                "match the batched force view."
+            )
+        center_ptr[1:] = torch.cumsum(deg_cat, dim=0)
+        nbr_idx_b = torch.cat(nbr_idx_parts).to(torch.int32)
+        r_ij_b = torch.cat(r_ij_parts)
+        d_ij_b = torch.cat(d_ij_parts)
+        graph_f = {
+            "center_ptr": center_ptr.to(torch.int32),
+            "nbr_idx": nbr_idx_b,
+            "r_ij": r_ij_b,
+            "d_ij": d_ij_b,
+        }
+        if len(tri_i_parts) > 0:
+            triplets_f = {
+                "tri_i": torch.cat(tri_i_parts).to(torch.int32),
+                "tri_j": torch.cat(tri_j_parts).to(torch.int32),
+                "tri_k": torch.cat(tri_k_parts).to(torch.int32),
+                "tri_j_local": torch.cat(
+                    tri_j_local_parts).to(torch.int32),
+                "tri_k_local": torch.cat(
+                    tri_k_local_parts).to(torch.int32),
+            }
 
     return {
         # Energy view
@@ -310,7 +285,6 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         "species_f": species_f_names if force_view_present else None,
         "species_indices_f": species_indices_f,
         "forces_ref_f": forces_ref_f,
-        "neighbor_info_f": neighbor_info_f,
         "graph_f": graph_f,
         "triplets_f": triplets_f,
         # Bookkeeping for unbiased scaling / diagnostics
@@ -781,8 +755,9 @@ class TorchANNPotential:
                     cache_force_neighbors=bool(
                         getattr(config, "cache_force_neighbors", False)
                     ),
-                    cache_force_triplets=bool(
-                        getattr(config, "cache_force_triplets", False)
+                    cache_force_triplets=(
+                        bool(getattr(config, "cache_force_triplets", False))
+                        or float(getattr(config, "force_weight", 0.0)) > 0.0
                     ),
                     cache_persist_dir=getattr(
                         config, "cache_persist_dir", None),

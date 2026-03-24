@@ -10,6 +10,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from aenet.torch_featurize import ChebyshevDescriptor
+from aenet.torch_featurize.graph import (
+    build_csr_from_neighborlist,
+    build_triplets_from_csr,
+)
+
 from ..loss import (
     compute_combined_loss,
     compute_energy_loss,
@@ -211,6 +217,60 @@ class TestForceLoss:
             net.functions[1][0].bias.zero_()
         return EnergyModelAdapter(net, n_species=2)
 
+    def _make_graph_descriptor(self):
+        dtype = torch.float64
+        descriptor = ChebyshevDescriptor(
+            species=["A", "B"],
+            rad_order=2,
+            rad_cutoff=2.6,
+            ang_order=1,
+            ang_cutoff=2.6,
+            min_cutoff=0.1,
+            device="cpu",
+            dtype=dtype,
+        )
+        positions = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [1.1, 0.0, 0.1],
+                [0.3, 1.0, 0.0],
+                [0.8, 0.7, 0.9],
+            ],
+            dtype=dtype,
+        )
+        species = ["A", "B", "A", "B"]
+        species_indices = torch.tensor([0, 1, 0, 1], dtype=torch.long)
+        max_cutoff = float(max(descriptor.rad_cutoff, descriptor.ang_cutoff))
+        graph = build_csr_from_neighborlist(
+            positions=positions,
+            cell=None,
+            pbc=None,
+            nbl=descriptor.nbl,
+            min_cutoff=float(descriptor.min_cutoff),
+            max_cutoff=max_cutoff,
+            device=positions.device,
+            dtype=dtype,
+        )
+        triplets = build_triplets_from_csr(
+            csr=graph,
+            ang_cutoff=float(descriptor.ang_cutoff),
+            min_cutoff=float(descriptor.min_cutoff),
+        )
+        return descriptor, positions, species, species_indices, graph, triplets
+
+    def _make_graph_adapter(self, F):
+        dtype = torch.float64
+        device = "cpu"
+        net = DummyNetAtom([F, F], device=device, dtype=dtype)
+        with torch.no_grad():
+            w0 = torch.linspace(0.05, 0.05 * F, F, dtype=dtype).view(1, F)
+            w1 = torch.linspace(-0.04, 0.03, F, dtype=dtype).view(1, F)
+            net.functions[0][0].weight.copy_(w0)
+            net.functions[0][0].bias.copy_(torch.tensor([0.15], dtype=dtype))
+            net.functions[1][0].weight.copy_(w1)
+            net.functions[1][0].bias.copy_(torch.tensor([-0.05], dtype=dtype))
+        return EnergyModelAdapter(net, n_species=2)
+
     def test_compute_force_loss_neighbor_info_and_chunking(self):
         """
         Validate force loss path using dummy descriptor with synthetic
@@ -283,6 +343,58 @@ class TestForceLoss:
 
         assert torch.allclose(forces1, forces3, atol=1e-12)
         assert torch.allclose(loss1, loss3, atol=1e-12)
+
+    def test_compute_force_loss_sparse_graph_matches_dense_graph(self):
+        """
+        Sparse graph/triplet contraction should match the dense reference path.
+        """
+        (descriptor,
+         positions,
+         species,
+         species_indices,
+         graph,
+         triplets) = self._make_graph_descriptor()
+        adapter = self._make_graph_adapter(descriptor.get_n_features())
+        forces_ref = torch.zeros_like(positions)
+        feature_mean = torch.linspace(
+            -0.2, 0.2, descriptor.get_n_features(), dtype=torch.float64
+        )
+        feature_std = torch.linspace(
+            0.8, 1.4, descriptor.get_n_features(), dtype=torch.float64
+        )
+
+        loss_sparse, forces_sparse = compute_force_loss(
+            positions=positions,
+            species=species,
+            forces_ref=forces_ref,
+            descriptor=descriptor,
+            network=adapter,
+            species_indices=species_indices,
+            E_scaling=1.0,
+            graph=graph,
+            triplets=triplets,
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+            use_dense_path=False,
+        )
+
+        loss_dense, forces_dense = compute_force_loss(
+            positions=positions,
+            species=species,
+            forces_ref=forces_ref,
+            descriptor=descriptor,
+            network=adapter,
+            species_indices=species_indices,
+            E_scaling=1.0,
+            graph=graph,
+            triplets=triplets,
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+            use_dense_path=True,
+        )
+
+        assert torch.allclose(forces_sparse, forces_dense, atol=1e-10, rtol=1e-10)
+        assert torch.allclose(loss_sparse, loss_dense, atol=1e-10, rtol=1e-10)
 
 
 class TestCombinedLoss:

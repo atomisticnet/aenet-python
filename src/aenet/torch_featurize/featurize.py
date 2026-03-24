@@ -1173,6 +1173,172 @@ class ChebyshevDescriptor(nn.Module):
                                   ang_unw[:, :n_ang]], dim=1)
         return features
 
+    def compute_features_and_local_derivatives_with_graph(
+        self,
+        positions: torch.Tensor,
+        species_indices: torch.Tensor,
+        graph,
+        triplets,
+        center_indices: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, dict[str, dict[str, Optional[torch.Tensor]]]]:
+        """
+        Compute features plus sparse local derivative blocks from graph data.
+
+        The returned derivative representation avoids any dense
+        ``(N, F, N, 3)`` expansion. Radial contributions are expressed per
+        neighbor edge, while angular contributions are expressed per triplet.
+        This representation is intended for direct force contraction and for
+        later serialization into HDF5-backed derivative caches.
+
+        Parameters
+        ----------
+        positions : torch.Tensor
+            Atomic positions with shape ``(N, 3)``.
+        species_indices : torch.Tensor
+            Species indices with shape ``(N,)``.
+        graph : dict
+            CSR neighbor graph with ``center_ptr``, ``nbr_idx``, ``r_ij``,
+            and ``d_ij`` entries.
+        triplets : dict or None
+            Optional triplet index dictionary.
+        center_indices : torch.Tensor, optional
+            Reserved for future center filtering. The current implementation
+            matches :meth:`forward_with_graph` and does not filter centers.
+
+        Returns
+        -------
+        tuple
+            ``(features, local_derivatives)`` where ``features`` has shape
+            ``(N, F)`` and ``local_derivatives`` is a nested dictionary with
+            ``radial`` and ``angular`` blocks.
+        """
+        del center_indices
+
+        device = self.device
+        dtype = self.dtype
+        positions = positions.to(device=device, dtype=dtype)
+        species_indices = species_indices.to(device=device)
+
+        features = self.forward_with_graph(
+            positions=positions,
+            species_indices=species_indices,
+            graph=graph,
+            triplets=triplets,
+            center_indices=None,
+        )
+
+        # Edge-level local radial derivatives.
+        nbr_idx = graph["nbr_idx"].to(device=device, dtype=torch.int64)
+        r_edges = graph["r_ij"].to(device=device, dtype=dtype)
+        d_edges = graph["d_ij"].to(device=device, dtype=dtype).clamp_min(1e-20)
+        u_edges = r_edges / (d_edges.unsqueeze(-1) + 1e-12)
+        center_of_edge = _center_ids_of_edge(graph).to(
+            device=device, dtype=torch.int64
+        )
+        _, dG_dr = self.rad_basis.forward_with_derivatives(d_edges)
+        dG_drij = dG_dr.unsqueeze(-1) * u_edges.unsqueeze(1)
+
+        radial_block: dict[str, Optional[torch.Tensor]] = {
+            "center_idx": center_of_edge,
+            "neighbor_idx": nbr_idx,
+            "dG_drij": dG_drij,
+            "neighbor_typespin": (
+                self.typespin[species_indices[nbr_idx]]
+                if self.multi else None
+            ),
+        }
+
+        # Triplet-level local angular derivatives.
+        n_ang = self.ang_order + 1
+        if triplets is not None and n_ang > 0:
+            center_ptr = graph["center_ptr"].to(device=device, dtype=torch.int64)
+            tri_i = triplets["tri_i"].to(device=device, dtype=torch.int64)
+            tri_j = triplets["tri_j"].to(device=device, dtype=torch.int64)
+            tri_k = triplets["tri_k"].to(device=device, dtype=torch.int64)
+            tri_j_local = triplets["tri_j_local"].to(
+                device=device, dtype=torch.int64
+            )
+            tri_k_local = triplets["tri_k_local"].to(
+                device=device, dtype=torch.int64
+            )
+
+            start_i = center_ptr[tri_i]
+            edge_j_idx = start_i + tri_j_local
+            edge_k_idx = start_i + tri_k_local
+
+            r_ij = r_edges[edge_j_idx]
+            r_ik = r_edges[edge_k_idx]
+
+            eps = 1e-20
+            d_ij = torch.sqrt((r_ij * r_ij).sum(dim=-1) + eps)
+            d_ik = torch.sqrt((r_ik * r_ik).sum(dim=-1) + eps)
+            u_ij = r_ij / (d_ij.unsqueeze(-1) + 1e-12)
+            u_ik = r_ik / (d_ik.unsqueeze(-1) + 1e-12)
+            cos_theta = (u_ij * u_ik).sum(dim=-1).clamp(-1.0, 1.0)
+
+            (_, dG_dcos, dG_drij_ang, dG_drik_ang
+             ) = self.ang_basis.forward_with_derivatives(d_ij, d_ik, cos_theta)
+
+            dcos_drj = (
+                u_ik - cos_theta.unsqueeze(-1) * u_ij
+            ) / (d_ij.unsqueeze(-1) + 1e-12)
+            dcos_drk = (
+                u_ij - cos_theta.unsqueeze(-1) * u_ik
+            ) / (d_ik.unsqueeze(-1) + 1e-12)
+            dcos_dri = -(dcos_drj + dcos_drk)
+
+            dG_dcos_e = dG_dcos.unsqueeze(-1)
+            dG_drij_e = dG_drij_ang.unsqueeze(-1)
+            dG_drik_e = dG_drik_ang.unsqueeze(-1)
+            u_ij_e = u_ij.unsqueeze(1)
+            u_ik_e = u_ik.unsqueeze(1)
+            dcos_drj_e = dcos_drj.unsqueeze(1)
+            dcos_drk_e = dcos_drk.unsqueeze(1)
+            dcos_dri_e = dcos_dri.unsqueeze(1)
+
+            grads_j = dG_dcos_e * dcos_drj_e + dG_drij_e * u_ij_e
+            grads_k = dG_dcos_e * dcos_drk_e + dG_drik_e * u_ik_e
+            grads_i = (
+                dG_dcos_e * dcos_dri_e
+                - dG_drij_e * u_ij_e
+                - dG_drik_e * u_ik_e
+            )
+
+            angular_block: dict[str, Optional[torch.Tensor]] = {
+                "center_idx": tri_i,
+                "neighbor_j_idx": tri_j,
+                "neighbor_k_idx": tri_k,
+                "grads_i": grads_i,
+                "grads_j": grads_j,
+                "grads_k": grads_k,
+                "triplet_typespin": (
+                    self.typespin[species_indices[tri_j]]
+                    * self.typespin[species_indices[tri_k]]
+                    if self.multi else None
+                ),
+            }
+        else:
+            empty_idx = torch.empty(0, dtype=torch.int64, device=device)
+            empty_grad = torch.empty(0, n_ang, 3, dtype=dtype, device=device)
+            angular_block = {
+                "center_idx": empty_idx,
+                "neighbor_j_idx": empty_idx,
+                "neighbor_k_idx": empty_idx,
+                "grads_i": empty_grad,
+                "grads_j": empty_grad,
+                "grads_k": empty_grad,
+                "triplet_typespin": (
+                    torch.empty(0, dtype=dtype, device=device)
+                    if self.multi else None
+                ),
+            }
+
+        local_derivatives = {
+            "radial": radial_block,
+            "angular": angular_block,
+        }
+        return features, local_derivatives
+
     def compute_feature_gradients_with_graph(
         self,
         positions: torch.Tensor,
@@ -1198,50 +1364,43 @@ class ChebyshevDescriptor(nn.Module):
         n_rad = self.rad_order + 1
         n_ang = self.ang_order + 1
 
-        # Forward pass via graph
-        features = self.forward_with_graph(
-            positions=positions,
-            species_indices=species_indices,
-            graph=graph,
-            triplets=triplets,
-            center_indices=center_indices,
+        features, local_derivatives = (
+            self.compute_features_and_local_derivatives_with_graph(
+                positions=positions,
+                species_indices=species_indices,
+                graph=graph,
+                triplets=triplets,
+                center_indices=center_indices,
+            )
         )
+
+        radial_block = local_derivatives["radial"]
+        angular_block = local_derivatives["angular"]
 
         # Prepare output gradients
         n_features = self.get_n_features()
-        gradients = torch.zeros(N, n_features, N, 3,
-                                dtype=dtype, device=device)
+        gradients = torch.zeros(
+            N, n_features, N, 3, dtype=dtype, device=device
+        )
 
-        # Edge-level data for radial gradients
-        nbr_idx = graph["nbr_idx"].to(device=device, dtype=torch.int64)
-        r_edges = graph["r_ij"].to(device=device, dtype=dtype)
-        d_edges = torch.norm(r_edges, dim=-1).clamp_min(1e-20)
-        u_edges = r_edges / (d_edges.unsqueeze(-1) + 1e-12)
-        center_of_edge = _center_ids_of_edge(graph).to(
-            device=device, dtype=torch.int64)
-
-        # dG/dr for radial basis
-        _, dG_dr = self.rad_basis.forward_with_derivatives(
-            d_edges)  # (E, n_rad)
-        dG_drij = dG_dr.unsqueeze(-1) * u_edges.unsqueeze(1)  # (E, n_rad, 3)
-
-        # Accumulate unweighted radial gradients
+        # Reconstruct dense radial gradients from edge-local blocks.
+        center_of_edge = radial_block["center_idx"]
+        nbr_idx = radial_block["neighbor_idx"]
+        dG_drij = radial_block["dG_drij"]
         flat_size = N * N
-        idx_cc = (center_of_edge * N + center_of_edge)  # (E,)
-        idx_cj = (center_of_edge * N + nbr_idx)         # (E,)
+        idx_cc = center_of_edge * N + center_of_edge
+        idx_cj = center_of_edge * N + nbr_idx
 
         for k in range(n_rad):
             accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
-            gk = dG_drij[:, k, :]  # (E,3)
+            gk = dG_drij[:, k, :]
             accum.index_add_(0, idx_cc, -gk)
             accum.index_add_(0, idx_cj, gk)
             gradients[:, k, :, :] = accum.view(N, N, 3)
 
         if self.multi:
-            # Weighted radial with typespin(j)
-            # (E,1,1) broadcast over (n_rad,3)
-            tspin_j = self.typespin[species_indices[nbr_idx]].view(-1, 1, 1)
-            dG_w = dG_drij * tspin_j  # (E, n_rad, 3)
+            tspin_j = radial_block["neighbor_typespin"].view(-1, 1, 1)
+            dG_w = dG_drij * tspin_j
             for k in range(n_rad):
                 accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
                 gk = dG_w[:, k, :]
@@ -1249,93 +1408,36 @@ class ChebyshevDescriptor(nn.Module):
                 accum.index_add_(0, idx_cj, gk)
                 gradients[:, n_rad + n_ang + k, :, :] = accum.view(N, N, 3)
 
-        # Angular gradients via triplets
-        if triplets is not None and n_ang > 0:
-            center_ptr = graph["center_ptr"].to(
-                device=device, dtype=torch.int64)
+        # Reconstruct dense angular gradients from triplet-local blocks.
+        tri_i = angular_block["center_idx"]
+        if tri_i.numel() > 0 and n_ang > 0:
+            tri_j = angular_block["neighbor_j_idx"]
+            tri_k = angular_block["neighbor_k_idx"]
+            grads_i = angular_block["grads_i"]
+            grads_j = angular_block["grads_j"]
+            grads_k = angular_block["grads_k"]
 
-            tri_i = triplets["tri_i"].to(device=device, dtype=torch.int64)
-            tri_j = triplets["tri_j"].to(device=device, dtype=torch.int64)
-            tri_k = triplets["tri_k"].to(device=device, dtype=torch.int64)
-            tri_j_local = triplets["tri_j_local"].to(
-                device=device, dtype=torch.int64)
-            tri_k_local = triplets["tri_k_local"].to(
-                device=device, dtype=torch.int64)
-
-            start_i = center_ptr[tri_i]
-            edge_j_idx = start_i + tri_j_local
-            edge_k_idx = start_i + tri_k_local
-
-            r_ij = r_edges[edge_j_idx]
-            r_ik = r_edges[edge_k_idx]
-
-            eps = 1e-20
-            d_ij = torch.sqrt((r_ij * r_ij).sum(dim=-1) + eps)
-            d_ik = torch.sqrt((r_ik * r_ik).sum(dim=-1) + eps)
-            u_ij = r_ij / (d_ij.unsqueeze(-1) + 1e-12)
-            u_ik = r_ik / (d_ik.unsqueeze(-1) + 1e-12)
-
-            # Angular basis derivatives
-            (_, dG_dcos, dG_drij, dG_drik
-             ) = self.ang_basis.forward_with_derivatives(
-                d_ij, d_ik, (u_ij * u_ik).sum(dim=-1).clamp(-1.0, 1.0)
-            )  # (T, n_ang) each
-
-            # Geometry derivatives of cos(theta)
-            cos_theta = (u_ij * u_ik).sum(dim=-1)
-            dcos_drj = (u_ik - cos_theta.unsqueeze(-1) * u_ij
-                        ) / (d_ij.unsqueeze(-1) + 1e-12)
-            dcos_drk = (u_ij - cos_theta.unsqueeze(-1) * u_ik
-                        ) / (d_ik.unsqueeze(-1) + 1e-12)
-            dcos_dri = -(dcos_drj + dcos_drk)
-
-            dG_dcos_e = dG_dcos.unsqueeze(-1)   # (T, n_ang, 1)
-            dG_drij_e = dG_drij.unsqueeze(-1)   # (T, n_ang, 1)
-            dG_drik_e = dG_drik.unsqueeze(-1)   # (T, n_ang, 1)
-            u_ij_e = u_ij.unsqueeze(1)          # (T, 1, 3)
-            u_ik_e = u_ik.unsqueeze(1)          # (T, 1, 3)
-            dcos_drj_e = dcos_drj.unsqueeze(1)  # (T, 1, 3)
-            dcos_drk_e = dcos_drk.unsqueeze(1)  # (T, 1, 3)
-            dcos_dri_e = dcos_dri.unsqueeze(1)  # (T, 1, 3)
-
-            grads_j = (dG_dcos_e * dcos_drj_e
-                       + dG_drij_e * u_ij_e)  # (T,n_ang,3)
-            grads_k = (dG_dcos_e * dcos_drk_e
-                       + dG_drik_e * u_ik_e)  # (T,n_ang,3)
-            grads_i = (dG_dcos_e * dcos_dri_e
-                       - dG_drij_e * u_ij_e
-                       - dG_drik_e * u_ik_e)
-
-            flat_size = N * N
             idx_cc = tri_i * N + tri_i
             idx_cj = tri_i * N + tri_j
             idx_ck = tri_i * N + tri_k
 
-            # Unweighted
             for a in range(n_ang):
                 accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
-                gi = grads_i[:, a, :]
-                gj = grads_j[:, a, :]
-                gk = grads_k[:, a, :]
-                accum.index_add_(0, idx_cc, gi)
-                accum.index_add_(0, idx_cj, gj)
-                accum.index_add_(0, idx_ck, gk)
+                accum.index_add_(0, idx_cc, grads_i[:, a, :])
+                accum.index_add_(0, idx_cj, grads_j[:, a, :])
+                accum.index_add_(0, idx_ck, grads_k[:, a, :])
                 gradients[:, n_rad + a, :, :] = accum.view(N, N, 3)
 
             if self.multi:
-                tsp = (self.typespin[species_indices[tri_j]] *
-                       self.typespin[species_indices[tri_k]]).unsqueeze(-1)
+                tsp = angular_block["triplet_typespin"].unsqueeze(-1)
                 for a in range(n_ang):
-                    accum = torch.zeros(flat_size, 3,
-                                        dtype=dtype, device=device)
-                    gi = grads_i[:, a, :] * tsp
-                    gj = grads_j[:, a, :] * tsp
-                    gk = grads_k[:, a, :] * tsp
-                    accum.index_add_(0, idx_cc, gi)
-                    accum.index_add_(0, idx_cj, gj)
-                    accum.index_add_(0, idx_ck, gk)
-                    gradients[:, 2 * n_rad + n_ang + a, :, :
-                              ] = accum.view(N, N, 3)
+                    accum = torch.zeros(flat_size, 3, dtype=dtype, device=device)
+                    accum.index_add_(0, idx_cc, grads_i[:, a, :] * tsp)
+                    accum.index_add_(0, idx_cj, grads_j[:, a, :] * tsp)
+                    accum.index_add_(0, idx_ck, grads_k[:, a, :] * tsp)
+                    gradients[:, 2 * n_rad + n_ang + a, :, :] = (
+                        accum.view(N, N, 3)
+                    )
 
         return features, gradients
 
