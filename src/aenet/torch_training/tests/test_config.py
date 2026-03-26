@@ -162,6 +162,7 @@ class TestTorchTrainingConfig:
             force_weight=0.5,
             force_fraction=0.8,
             force_sampling='fixed',
+            cache_neighbors=True,
             memory_mode='cpu'
         )
 
@@ -171,6 +172,7 @@ class TestTorchTrainingConfig:
         assert config.force_weight == 0.5
         assert config.force_fraction == 0.8
         assert config.force_sampling == 'fixed'
+        assert config.cache_neighbors is True
         assert config.memory_mode == 'cpu'
 
     def test_alpha_property(self):

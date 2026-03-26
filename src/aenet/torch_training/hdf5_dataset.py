@@ -1545,7 +1545,7 @@ class HDF5StructureDataset(Dataset):
         use_forces: bool,
         cache_state=None,
         cache_features: bool = False,
-        cache_force_neighbors: bool = False,
+        cache_neighbors: bool = False,
         cache_force_triplets: bool = False,
         load_local_derivatives: bool = False,
     ) -> dict:
@@ -1565,7 +1565,7 @@ class HDF5StructureDataset(Dataset):
             Whether to cache energy-view features in ``cache_state``. When
             enabled, the runtime cache takes precedence over persisted HDF5
             features for repeated energy-view accesses.
-        cache_force_neighbors : bool, optional
+        cache_neighbors : bool, optional
             Whether to cache neighbor payloads in ``cache_state``.
         cache_force_triplets : bool, optional
             Whether to cache graph/triplet payloads in ``cache_state``.
@@ -1627,7 +1627,7 @@ class HDF5StructureDataset(Dataset):
                 feature_cache=feature_cache,
                 cache_features=cache_features,
                 neighbor_cache=neighbor_cache,
-                cache_force_neighbors=cache_force_neighbors,
+                cache_neighbors=cache_neighbors,
                 load_persisted_features=(
                     lambda entry_idx: self._load_runtime_or_persisted_features(
                         entry_idx,

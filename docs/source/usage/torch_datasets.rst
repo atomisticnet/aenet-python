@@ -147,7 +147,7 @@ cache behavior live in ``TorchTrainingConfig``:
        force_fraction=0.3,           # Use 30% of force-labeled structures
        force_sampling="random",      # Resample each epoch
        cache_features=True,          # Cache energy-view features
-       cache_force_neighbors=True,   # Cache neighbor data when helpful
+       cache_neighbors=True,         # Cache neighbor data when helpful
    )
 
 **Parameters:**
@@ -155,7 +155,7 @@ cache behavior live in ``TorchTrainingConfig``:
 - **force_fraction** (float, 0.0-1.0): Fraction of force structures to use. Using a subset (e.g., 0.3) can speed up training 3× while maintaining accuracy.
 - **force_sampling** (str): ``'random'`` (resample each epoch) or ``'fixed'`` (static subset). Random provides better generalization.
 - **cache_features** (bool): Cache features for structures not selected for force supervision in the current epoch. Useful with ``force_fraction < 1.0``.
-- **cache_force_neighbors** (bool): Cache neighbor graphs to avoid repeated searches for energy-view reuse and legacy non-graph paths. Supported force training does not require this.
+- **cache_neighbors** (bool): Cache neighbor graphs to avoid repeated searches for energy-view reuse and legacy non-graph paths. Supported force training does not require this.
 - **cache_force_triplets** (bool): Cache CSR graphs and triplets instead of rebuilding them on demand.
 
 Manual Dataset Splitting
@@ -456,7 +456,7 @@ Training from HDF5 Database
        force_fraction=0.3,
        force_sampling="random",
        cache_features=True,
-       cache_force_neighbors=True,
+       cache_neighbors=True,
        num_workers=8,               # Parallel workers (each opens own handle)
        prefetch_factor=4,
        persistent_workers=True,
@@ -468,7 +468,7 @@ Training from HDF5 Database
 
    Prebuilt ``dataset=...`` objects are passive data sources. Runtime controls
    such as ``force_fraction``, ``force_sampling``, ``cache_features``,
-   ``cache_force_neighbors``, and ``cache_force_triplets`` belong on
+   ``cache_neighbors``, and ``cache_force_triplets`` belong on
    ``TorchTrainingConfig`` and can be changed between runs over the same
    dataset object.
 
@@ -568,7 +568,7 @@ For Large Datasets (HDF5)
 
    config = TorchTrainingConfig(
        force_fraction=0.3,
-       cache_force_neighbors=True,
+       cache_neighbors=True,
        num_workers=16,              # More workers for I/O
        prefetch_factor=8,           # More prefetching
        persistent_workers=True,     # Keep workers alive
@@ -584,7 +584,7 @@ Set these on ``TorchTrainingConfig``:
   features for structures not selected for force supervision in the current
   epoch. On HDF5 datasets, this runtime cache sits above compatible persisted
   HDF5 features and does not write back to disk.
-* **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse and legacy non-graph paths
+* **cache_neighbors**: Reuse neighbor search results for energy-view reuse and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets instead of rebuilding them for the default sparse force-training path
 
 For repeated fixed-geometry HDF5 workflows, prefer build-time

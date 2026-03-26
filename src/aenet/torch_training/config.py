@@ -288,13 +288,13 @@ class TorchTrainingConfig:
         caches features for structures not selected for force supervision
         in the current epoch-window, reusing cached features and skipping
         neighbor_info computation. Default: False
-    cache_force_neighbors : bool, optional
+    cache_neighbors : bool, optional
         Cache per-structure neighbor graphs (indices and displacement vectors)
-        for force training to avoid repeated neighbor searches across epochs
-        when geometries are fixed. This is no longer required for the
-        supported sparse force-training path, but it can still help reuse
-        neighbor information for energy-view feature generation and legacy
-        non-graph paths. Default: False
+        to avoid repeated neighbor searches across epochs when geometries are
+        fixed. This is no longer required for the supported sparse
+        force-training path, but it can still help reuse neighbor information
+        for energy-view feature generation and legacy non-graph paths.
+        Default: False
     cache_force_triplets : bool, optional
         Cache CSR neighbor graphs and precomputed angular triplet indices per
         structure for force training. Supported force training always uses the
@@ -344,9 +344,8 @@ class TorchTrainingConfig:
     # in current window
     cache_features: bool = False
     # Cache per-structure neighbor graphs to avoid repeated neighbor
-    # searches across epochs (indices and displacement vectors)
-    # Only relevant for force training
-    cache_force_neighbors: bool = False
+    # searches across epochs (indices and displacement vectors).
+    cache_neighbors: bool = False
     # Cache graph/triplet payloads for the sparse force-training path.
     cache_force_triplets: bool = False
     # Optional on-disk persistence root (Phase 4 follow-up may enable writing)

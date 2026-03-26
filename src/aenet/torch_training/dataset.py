@@ -249,7 +249,7 @@ class StructureDataset(Dataset):
         use_forces: bool,
         cache_state=None,
         cache_features: bool = False,
-        cache_force_neighbors: bool = False,
+        cache_neighbors: bool = False,
         cache_force_triplets: bool = False,
         load_local_derivatives: bool = False,
     ) -> dict:
@@ -267,7 +267,7 @@ class StructureDataset(Dataset):
             ``neighbor_cache``, and ``graph_cache`` dictionaries.
         cache_features : bool, optional
             Whether to cache energy-view features in ``cache_state``.
-        cache_force_neighbors : bool, optional
+        cache_neighbors : bool, optional
             Whether to cache neighbor payloads in ``cache_state``.
         cache_force_triplets : bool, optional
             Whether to cache graph/triplet payloads in ``cache_state``.
@@ -326,7 +326,7 @@ class StructureDataset(Dataset):
                 feature_cache=feature_cache,
                 cache_features=cache_features,
                 neighbor_cache=neighbor_cache,
-                cache_force_neighbors=cache_force_neighbors,
+                cache_neighbors=cache_neighbors,
             )
 
         return build_sample_dict(
@@ -481,7 +481,7 @@ class CachedStructureDataset(Dataset):
                     feature_cache=None,
                     cache_features=False,
                     neighbor_cache=None,
-                    cache_force_neighbors=False,
+                    cache_neighbors=False,
                 )
                 sample = {
                     'features': features,

@@ -801,7 +801,7 @@ def test_hdf5_energy_materialization_uses_single_neighbor_build_on_cache_miss(
         0,
         use_forces=False,
         cache_state=cache_state,
-        cache_force_neighbors=True,
+        cache_neighbors=True,
     )
 
     assert sample["features"] is not None
@@ -844,14 +844,14 @@ def test_structure_and_hdf5_materialize_sample_match_without_persisted_payloads(
         use_forces=False,
         cache_state=energy_state_a,
         cache_features=True,
-        cache_force_neighbors=True,
+        cache_neighbors=True,
     )
     energy_hdf5 = hdf5_ds.materialize_sample(
         0,
         use_forces=False,
         cache_state=energy_state_b,
         cache_features=True,
-        cache_force_neighbors=True,
+        cache_neighbors=True,
     )
 
     assert torch.allclose(energy_sample["features"], energy_hdf5["features"])

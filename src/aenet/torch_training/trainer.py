@@ -153,8 +153,8 @@ class _TrainingPolicyDataset(Dataset):
             or (cache_scope == "val" and split == "val")
         )
         self.cache_features = bool(config.cache_features) and cache_enabled
-        self.cache_force_neighbors = (
-            bool(config.cache_force_neighbors) and cache_enabled
+        self.cache_neighbors = (
+            bool(config.cache_neighbors) and cache_enabled
         )
         self.cache_force_triplets = (
             bool(config.cache_force_triplets) and cache_enabled
@@ -253,7 +253,7 @@ class _TrainingPolicyDataset(Dataset):
         """Pre-populate split-local runtime caches for the current policy."""
         if not (
             self.cache_features
-            or self.cache_force_neighbors
+            or self.cache_neighbors
             or self.cache_force_triplets
         ):
             return
@@ -279,7 +279,7 @@ class _TrainingPolicyDataset(Dataset):
             use_forces=use_forces,
             cache_state=self._cache_state,
             cache_features=self.cache_features,
-            cache_force_neighbors=self.cache_force_neighbors,
+            cache_neighbors=self.cache_neighbors,
             cache_force_triplets=self.cache_force_triplets,
             load_local_derivatives=use_forces,
         )

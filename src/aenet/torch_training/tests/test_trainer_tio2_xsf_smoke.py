@@ -154,7 +154,7 @@ def test_force_training_tio2_xsf_sparse_smoke(tmp_path: Path):
         force_weight=0.5,
         force_fraction=1.0,
         force_sampling="fixed",
-        cache_force_neighbors=True,
+        cache_neighbors=True,
         memory_mode="cpu",
         device="cpu",
         checkpoint_dir=None,

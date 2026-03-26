@@ -228,11 +228,11 @@ Performance Optimization Tips
    ...     force_fraction=0.3,
    ...     force_sampling="random",
    ...     cache_features=True,
-   ...     cache_force_neighbors=True,
+   ...     cache_neighbors=True,
    ...     num_workers=4,
    ...     prefetch_factor=4,
    ... )
-   >>> (config.cache_force_neighbors, config.cache_force_triplets)
+   >>> (config.cache_neighbors, config.cache_force_triplets)
    (True, False)
 
 **Caching Strategies**
@@ -241,7 +241,7 @@ Performance Optimization Tips
   precompute features eagerly. For force training, it caches energy-view
   features for structures not selected for force supervision in the current
   epoch.
-* **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse
+* **cache_neighbors**: Reuse neighbor search results for energy-view reuse
   and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets for the default sparse
   force-training path instead of rebuilding them on demand
@@ -371,7 +371,7 @@ Force Training with Optimizations
        testpercent=10,
        force_weight=0.1,
        force_fraction=0.3,  # Use 30% of forces (3× faster)
-       cache_force_neighbors=True,  # Cache neighbor lists
+       cache_neighbors=True,  # Cache neighbor lists
        num_workers=4,
        device='cuda'
    )
@@ -512,7 +512,7 @@ Performance & Caching
    * For force training (``force_weight > 0``): Caches features for structures not
      selected for force supervision in current epoch (useful with ``force_fraction < 1.0``)
 
-**cache_force_neighbors** : bool (default: False)
+**cache_neighbors** : bool (default: False)
    Cache per-structure neighbor graphs (indices, displacement vectors) across
    epochs. Avoids repeated neighbor searches for fixed geometries on
    energy-view reuse and legacy non-graph paths. Supported force training

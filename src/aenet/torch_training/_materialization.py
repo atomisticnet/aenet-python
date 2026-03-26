@@ -174,7 +174,7 @@ def load_energy_view_features(
     feature_cache: dict | None,
     cache_features: bool,
     neighbor_cache: dict | None,
-    cache_force_neighbors: bool,
+    cache_neighbors: bool,
     load_persisted_features: Callable[[int], torch.Tensor | None] | None = None,
 ) -> torch.Tensor:
     """
@@ -193,7 +193,7 @@ def load_energy_view_features(
                 feature_cache[idx] = features
             return features
 
-    if cache_force_neighbors and neighbor_cache is not None:
+    if cache_neighbors and neighbor_cache is not None:
         neighbor_info_cached = neighbor_cache.get(idx)
         if neighbor_info_cached is not None:
             nb_idx_list_t = [
