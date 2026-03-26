@@ -14,10 +14,13 @@ import torch
 import aenet.torch_training.training.training_loop as training_loop_module
 from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
+    Adam,
+    HDF5StructureDataset,
     Structure,
     TorchANNPotential,
     TorchTrainingConfig,
 )
+from aenet.torch_training.dataset import StructureDataset
 
 
 def make_structures_with_forces(n_structures=10, n_atoms=5):
@@ -402,6 +405,305 @@ def test_force_training_uses_graph_path_by_default(monkeypatch):
     assert calls, "compute_force_loss() was not reached during force training"
     assert all(call["graph"] is not None for call in calls)
     assert all(call["neighbor_info"] is None for call in calls)
+
+
+@pytest.mark.cpu
+def test_force_training_uses_persisted_hdf5_derivatives_when_available(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """HDF5 training should pass persisted features and derivatives into the loss path."""
+    structures = make_structures_with_forces(n_structures=6, n_atoms=4)
+    file_paths = [str(tmp_path / f"s_{i}") for i in range(len(structures))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    def _parser(path: str) -> Structure:
+        idx = int(Path(path).name.split("_")[-1])
+        return structures[idx]
+
+    descriptor = make_descriptor(dtype=torch.float64)
+    dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(tmp_path / "force_training_cached.h5"),
+        file_paths=file_paths,
+        parser=_parser,
+        mode="build",
+    )
+    dataset.build_database(
+        show_progress=False,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+
+    arch = make_arch(descriptor)
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    calls = []
+    original_compute_force_loss = training_loop_module.compute_force_loss
+
+    def _wrapped_compute_force_loss(*args, **kwargs):
+        calls.append(
+            {
+                "features": kwargs.get("features"),
+                "local_derivatives": kwargs.get("local_derivatives"),
+                "graph": kwargs.get("graph"),
+            }
+        )
+        return original_compute_force_loss(*args, **kwargs)
+
+    monkeypatch.setattr(
+        training_loop_module,
+        "compute_force_loss",
+        _wrapped_compute_force_loss,
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        memory_mode="cpu",
+        device="cpu",
+        num_workers=0,
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(dataset=dataset, config=cfg)
+
+    assert "RMSE_force_train" in result.errors.columns
+    assert calls, "compute_force_loss() was not reached during HDF5 training"
+    assert any(call["local_derivatives"] is not None for call in calls)
+    assert any(call["features"] is not None for call in calls)
+    assert all(call["graph"] is None for call in calls)
+
+
+@pytest.mark.cpu
+def test_hdf5_force_training_random_sampling_initializes_force_selection(
+    tmp_path: Path,
+):
+    """HDF5 training should initialize random force selection before epoch 0."""
+    structures = make_structures_with_forces(n_structures=8, n_atoms=4)
+    file_paths = [str(tmp_path / f"s_{i}") for i in range(len(structures))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    def _parser(path: str) -> Structure:
+        idx = int(Path(path).name.split("_")[-1])
+        return structures[idx]
+
+    descriptor = make_descriptor(dtype=torch.float64)
+    dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(tmp_path / "force_training_random.h5"),
+        file_paths=file_paths,
+        parser=_parser,
+        mode="build",
+    )
+    dataset.build_database(
+        show_progress=False,
+        persist_force_derivatives=True,
+    )
+
+    assert not hasattr(dataset, "selected_force_indices")
+
+    pot = TorchANNPotential(arch=make_arch(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=0.5,
+        force_sampling="random",
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 0.0},
+        num_workers=0,
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(dataset=dataset, config=cfg)
+
+    force_rmse = result.errors["RMSE_force_train"].iloc[0]
+    assert not math.isnan(force_rmse)
+    assert force_rmse > 0
+
+
+@pytest.mark.cpu
+def test_prebuilt_hdf5_dataset_uses_config_owned_runtime_policy(
+    tmp_path: Path,
+):
+    """Prebuilt datasets should accept runtime policy only from the config."""
+    structures = make_structures_with_forces(n_structures=4, n_atoms=3)
+    file_paths = [str(tmp_path / f"s_{i}") for i in range(len(structures))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    def _parser(path: str) -> Structure:
+        idx = int(Path(path).name.split("_")[-1])
+        return structures[idx]
+
+    descriptor = make_descriptor(dtype=torch.float64)
+    dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(tmp_path / "force_training_mismatch.h5"),
+        file_paths=file_paths,
+        parser=_parser,
+        mode="build",
+    )
+    dataset.build_database(show_progress=False)
+
+    pot = TorchANNPotential(arch=make_arch(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="random",
+        cache_force_triplets=True,
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 0.0},
+        num_workers=0,
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(dataset=dataset, config=cfg)
+    force_rmse = result.errors["RMSE_force_train"].iloc[0]
+    assert not math.isnan(force_rmse)
+    assert force_rmse > 0
+
+
+@pytest.mark.cpu
+def test_persisted_hdf5_force_training_matches_on_the_fly_training(
+    tmp_path: Path,
+):
+    """Persisted-derivative HDF5 training should match the on-the-fly path."""
+    structures = make_structures_with_forces(n_structures=8, n_atoms=4)
+    train_structs = structures[:6]
+    test_structs = structures[6:]
+
+    descriptor_struct = make_descriptor(dtype=torch.float64)
+    train_dataset = StructureDataset(
+        structures=train_structs,
+        descriptor=descriptor_struct,
+    )
+    test_dataset = StructureDataset(
+        structures=test_structs,
+        descriptor=descriptor_struct,
+    )
+
+    def _build_hdf5_dataset(
+        subset_structures: list[Structure],
+        database_name: str,
+        descriptor: ChebyshevDescriptor,
+    ) -> HDF5StructureDataset:
+        file_paths = [
+            str(tmp_path / f"{database_name}_{idx}.xsf")
+            for idx in range(len(subset_structures))
+        ]
+        for path in file_paths:
+            Path(path).write_text("placeholder", encoding="utf-8")
+
+        def _parser(path: str) -> Structure:
+            idx = int(Path(path).stem.split("_")[-1])
+            return subset_structures[idx]
+
+        dataset = HDF5StructureDataset(
+            descriptor=descriptor,
+            database_file=str(tmp_path / f"{database_name}.h5"),
+            file_paths=file_paths,
+            parser=_parser,
+            mode="build",
+        )
+        dataset.build_database(
+            show_progress=False,
+            persist_force_derivatives=True,
+        )
+        return dataset
+
+    descriptor_hdf5 = make_descriptor(dtype=torch.float64)
+    hdf5_train_dataset = _build_hdf5_dataset(
+        train_structs,
+        "equiv_train",
+        descriptor_hdf5,
+    )
+    hdf5_test_dataset = _build_hdf5_dataset(
+        test_structs,
+        "equiv_test",
+        descriptor_hdf5,
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=3,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        cache_force_triplets=False,
+        method=Adam(mu=0.001, batchsize=2),
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 0.0},
+        num_workers=0,
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    torch.manual_seed(17)
+    pot_struct = TorchANNPotential(
+        arch=make_arch(descriptor_struct),
+        descriptor=descriptor_struct,
+    )
+    struct_result = pot_struct.train(
+        train_dataset=train_dataset,
+        test_dataset=test_dataset,
+        config=cfg,
+    )
+
+    torch.manual_seed(17)
+    pot_hdf5 = TorchANNPotential(
+        arch=make_arch(descriptor_hdf5),
+        descriptor=descriptor_hdf5,
+    )
+    hdf5_result = pot_hdf5.train(
+        train_dataset=hdf5_train_dataset,
+        test_dataset=hdf5_test_dataset,
+        config=cfg,
+    )
+
+    metrics = [
+        "MAE_train",
+        "RMSE_train",
+        "MAE_test",
+        "RMSE_test",
+        "RMSE_force_train",
+        "RMSE_force_test",
+    ]
+    np.testing.assert_allclose(
+        struct_result.errors[metrics].to_numpy(),
+        hdf5_result.errors[metrics].to_numpy(),
+        rtol=1e-10,
+        atol=1e-10,
+    )
+
+    struct_state = pot_struct.model.state_dict()
+    hdf5_state = pot_hdf5.model.state_dict()
+    assert struct_state.keys() == hdf5_state.keys()
+    for key in struct_state:
+        assert torch.allclose(
+            struct_state[key],
+            hdf5_state[key],
+            rtol=1e-10,
+            atol=1e-10,
+        ), key
 
 
 @pytest.mark.cpu

@@ -285,6 +285,33 @@ def _contract_forces_sparse(
     return forces_pred
 
 
+def _local_derivatives_to_device(
+    local_derivatives: dict[str, dict[str, Optional[torch.Tensor]]],
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> dict[str, dict[str, Optional[torch.Tensor]]]:
+    """Move a sparse local-derivative payload onto the requested device."""
+    index_keys = {
+        "center_idx",
+        "neighbor_idx",
+        "neighbor_j_idx",
+        "neighbor_k_idx",
+    }
+    moved: dict[str, dict[str, Optional[torch.Tensor]]] = {}
+    for block_name, block in local_derivatives.items():
+        moved_block: dict[str, Optional[torch.Tensor]] = {}
+        for key, value in block.items():
+            if value is None:
+                moved_block[key] = None
+            elif key in index_keys:
+                moved_block[key] = value.to(device=device, dtype=torch.int64)
+            else:
+                moved_block[key] = value.to(device=device, dtype=dtype)
+        moved[block_name] = moved_block
+    return moved
+
+
 def compute_force_loss(
     positions: torch.Tensor,
     species: list,
@@ -299,6 +326,10 @@ def compute_force_loss(
     chunk_size: Optional[int] = None,
     feature_mean: Optional[torch.Tensor] = None,
     feature_std: Optional[torch.Tensor] = None,
+    features: Optional[torch.Tensor] = None,
+    local_derivatives: Optional[
+        dict[str, dict[str, Optional[torch.Tensor]]]
+    ] = None,
     graph: Optional[dict] = None,
     triplets: Optional[dict] = None,
     center_indices: Optional[torch.Tensor] = None,
@@ -335,6 +366,14 @@ def compute_force_loss(
           - 'neighbor_lists': list of length N with (nnb_i,) arrays
           - 'neighbor_vectors': list of length N with (nnb_i, 3) arrays
         If provided, avoids recomputing neighbors on legacy non-graph paths.
+    features : torch.Tensor, optional
+        Precomputed force-view features with shape ``(N, F)``. When provided,
+        the network forward pass reuses these features instead of recomputing
+        them inside ``compute_force_loss()``.
+    local_derivatives : dict, optional
+        Precomputed sparse local derivative payload aligned with ``features``.
+        When provided, this payload is preferred over on-the-fly sparse
+        derivative recomputation.
     graph : dict, optional
         Batched CSR neighbor graph for the current force view with keys:
           - 'center_ptr': (Nf+1,) int32 CSR row pointers
@@ -367,10 +406,18 @@ def compute_force_loss(
     """
     positions = positions.clone().detach()
     grad_features = None
-    local_derivatives = None
+    sparse_local_derivatives = None
+    if local_derivatives is not None:
+        sparse_local_derivatives = _local_derivatives_to_device(
+            local_derivatives,
+            device=positions.device,
+            dtype=positions.dtype,
+        )
 
     # Compute features and derivative information.
-    if graph is not None:
+    if features is not None:
+        features = features.to(device=positions.device, dtype=positions.dtype)
+    elif graph is not None:
         graph_dev = {
             k: (v.to(positions.device) if isinstance(v, torch.Tensor) else v)
             for k, v in graph.items()
@@ -404,23 +451,38 @@ def compute_force_loss(
                 center_indices=center_indices_dev,
             )
         else:
-            if not hasattr(
-                descriptor,
-                "compute_features_and_local_derivatives_with_graph",
-            ):
-                raise RuntimeError(
-                    "Graph-based force training now requires sparse local "
-                    "derivative support. Use 'use_dense_path=True' only for "
-                    "regression or debugging."
+            if sparse_local_derivatives is not None:
+                if not hasattr(descriptor, "forward_with_graph"):
+                    raise RuntimeError(
+                        "Graph-based force training now requires graph-based "
+                        "descriptor support via 'forward_with_graph()'."
+                    )
+                features = descriptor.forward_with_graph(
+                    positions=positions,
+                    species_indices=species_indices.to(device=positions.device),
+                    graph=graph_dev,
+                    triplets=triplets_dev,
                 )
-            (features, local_derivatives
-             ) = descriptor.compute_features_and_local_derivatives_with_graph(
-                positions=positions,
-                species_indices=species_indices.to(device=positions.device),
-                graph=graph_dev,
-                triplets=triplets_dev,
-                center_indices=center_indices_dev,
-            )
+            else:
+                if not hasattr(
+                    descriptor,
+                    "compute_features_and_local_derivatives_with_graph",
+                ):
+                    raise RuntimeError(
+                        "Graph-based force training now requires sparse local "
+                        "derivative support. Use 'use_dense_path=True' only "
+                        "for regression or debugging."
+                    )
+                (features, sparse_local_derivatives
+                 ) = descriptor.compute_features_and_local_derivatives_with_graph(
+                    positions=positions,
+                    species_indices=species_indices.to(
+                        device=positions.device
+                    ),
+                    graph=graph_dev,
+                    triplets=triplets_dev,
+                    center_indices=center_indices_dev,
+                )
     elif neighbor_info is not None and hasattr(
         descriptor, "compute_feature_gradients_from_neighbor_info"
     ):
@@ -485,14 +547,19 @@ def compute_force_loss(
     )[0]
 
     # Contract to forces: F = - dE/dr
-    if local_derivatives is not None:
+    if sparse_local_derivatives is not None and not use_dense_path:
         forces_pred = _contract_forces_sparse(
             grad_E_wrt_features=grad_E_wrt_features,
-            local_derivatives=local_derivatives,
+            local_derivatives=sparse_local_derivatives,
             descriptor=descriptor,
             feature_std=feature_std,
         )
     else:
+        if grad_features is None:
+            raise RuntimeError(
+                "Force loss requires either precomputed sparse local "
+                "derivatives or dense feature gradients."
+            )
         forces_pred = _contract_forces(
             grad_E_wrt_features=grad_E_wrt_features,
             grad_features=grad_features,

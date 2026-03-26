@@ -9,18 +9,21 @@ This module provides:
 
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import csv
-import json
 import torch
 
-from .trainer import TorchANNPotential
 from .config import TorchTrainingConfig
-from aenet.torch_featurize import ChebyshevDescriptor
+from .descriptor_manifest import (
+    descriptor_config_from_object,
+    descriptor_from_config,
+)
+from .trainer import TorchANNPotential
 
 Payload = Dict[str, Any]
 PathLike = Union[str, Path]
@@ -32,46 +35,12 @@ def _ensure_parent(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _dtype_from_str(s: str) -> torch.dtype:
-    s = s.lower().replace("torch.", "")
-    if s == "float64" or s == "double":
-        return torch.float64
-    if s == "float32" or s == "float":
-        return torch.float32
-    # Default to float64 for scientific reproducibility
-    return torch.float64
+def _descriptor_to_config(desc) -> Dict[str, Any]:
+    return descriptor_config_from_object(desc)
 
 
-def _descriptor_to_config(desc: ChebyshevDescriptor) -> Dict[str, Any]:
-    return {
-        "species": list(desc.species),
-        "rad_order": int(desc.rad_order),
-        "rad_cutoff": float(desc.rad_cutoff),
-        "ang_order": int(desc.ang_order),
-        "ang_cutoff": float(desc.ang_cutoff),
-        "min_cutoff": float(desc.min_cutoff),
-        "dtype": str(desc.dtype).replace("torch.", ""),
-        "device": str(desc.device),
-        "n_features": int(desc.get_n_features()),
-    }
-
-
-def _descriptor_from_config(cfg: Dict[str, Any]) -> ChebyshevDescriptor:
-    dtype = _dtype_from_str(str(cfg.get("dtype", "float64")))
-    device = str(cfg.get("device", "cpu"))
-    # If saved device is CUDA but not available, fall back to CPU
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        device = "cpu"
-    return ChebyshevDescriptor(
-        species=list(cfg["species"]),
-        rad_order=int(cfg["rad_order"]),
-        rad_cutoff=float(cfg["rad_cutoff"]),
-        ang_order=int(cfg["ang_order"]),
-        ang_cutoff=float(cfg["ang_cutoff"]),
-        min_cutoff=float(cfg.get("min_cutoff", 0.55)),
-        device=device,
-        dtype=dtype,
-    )
+def _descriptor_from_config(cfg: Dict[str, Any]):
+    return descriptor_from_config(cfg)
 
 
 def _serialize_training_config(

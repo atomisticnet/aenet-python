@@ -396,6 +396,71 @@ class TestForceLoss:
         assert torch.allclose(forces_sparse, forces_dense, atol=1e-10, rtol=1e-10)
         assert torch.allclose(loss_sparse, loss_dense, atol=1e-10, rtol=1e-10)
 
+    def test_compute_force_loss_precomputed_derivatives_match_graph_path(self):
+        """
+        Precomputed sparse local derivatives should match the graph path.
+        """
+        (descriptor,
+         positions,
+         species,
+         species_indices,
+         graph,
+         triplets) = self._make_graph_descriptor()
+        adapter = self._make_graph_adapter(descriptor.get_n_features())
+        forces_ref = torch.zeros_like(positions)
+        feature_mean = torch.linspace(
+            -0.1, 0.1, descriptor.get_n_features(), dtype=torch.float64
+        )
+        feature_std = torch.linspace(
+            0.9, 1.3, descriptor.get_n_features(), dtype=torch.float64
+        )
+
+        features, local_derivatives = (
+            descriptor.compute_features_and_local_derivatives_with_graph(
+                positions=positions,
+                species_indices=species_indices,
+                graph=graph,
+                triplets=triplets,
+                center_indices=None,
+            )
+        )
+
+        loss_graph, forces_graph = compute_force_loss(
+            positions=positions,
+            species=species,
+            forces_ref=forces_ref,
+            descriptor=descriptor,
+            network=adapter,
+            species_indices=species_indices,
+            E_scaling=1.0,
+            graph=graph,
+            triplets=triplets,
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+            use_dense_path=False,
+        )
+
+        loss_cached, forces_cached = compute_force_loss(
+            positions=positions,
+            species=species,
+            forces_ref=forces_ref,
+            descriptor=descriptor,
+            network=adapter,
+            species_indices=species_indices,
+            E_scaling=1.0,
+            features=features,
+            local_derivatives=local_derivatives,
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+        )
+
+        assert torch.allclose(
+            forces_graph, forces_cached, atol=1e-10, rtol=1e-10
+        )
+        assert torch.allclose(
+            loss_graph, loss_cached, atol=1e-10, rtol=1e-10
+        )
+
 
 class TestCombinedLoss:
     def test_combined_loss_alpha_weighting(self):

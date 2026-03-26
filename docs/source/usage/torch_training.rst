@@ -237,13 +237,22 @@ Performance Optimization Tips
 
 **Caching Strategies**
 
-* **cache_features**: For energy-only training, pre-computes all features once. For
-  force training, caches features for structures not selected for force supervision
-  in the current epoch (useful with ``force_fraction < 1.0``)
+* **cache_features**: For energy-only structure-list workflows, this can
+  precompute features eagerly. For force training, it caches energy-view
+  features for structures not selected for force supervision in the current
+  epoch.
 * **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse
   and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets for the default sparse
   force-training path instead of rebuilding them on demand
+
+These runtime caches are distinct from the on-disk HDF5 persisted cache
+sections created with ``HDF5StructureDataset.build_database(...)``. For HDF5
+datasets, ``cache_features=True`` is still only a per-run in-memory layer; it
+does not replace ``persist_features=True`` or
+``persist_force_derivatives=True``, which are the build-time options for
+reusing raw features or sparse local derivatives across sessions. See
+:doc:`torch_datasets` for the full cache-precedence workflow.
 
 Common Pitfalls
 ~~~~~~~~~~~~~~~
@@ -332,7 +341,7 @@ Large Dataset (> 500 structures)
        force_weight=0.1,
        device='cuda',  # Use GPU for speedup
        # Performance optimizations
-       cache_features=True,  # If energy-only
+       cache_features=True,  # Runtime in-memory feature cache
        num_workers=8,         # Parallel data loading
        prefetch_factor=4
    )
@@ -347,7 +356,7 @@ Energy-Only with Maximum Speed
        method=Adam(mu=0.001, batchsize=32),
        testpercent=10,
        force_weight=0.0,  # Energy-only
-       cache_features=True,  # 100× speedup for energy-only
+       cache_features=True,  # Eager/runtime feature cache for this run
        device='cuda'
    )
 
@@ -529,6 +538,9 @@ Performance & Caching
 
 **persistent_workers** : bool (default: True)
    Keep DataLoader workers alive between epochs for faster iteration.
+   During training, this is disabled automatically when
+   ``force_sampling='random'`` uses epoch-level resampling, because worker
+   copies would otherwise keep a stale force-supervision subset.
 
 
 Data Filtering & Quality Control

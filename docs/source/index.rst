@@ -125,6 +125,7 @@ Developer Documentation
    dev/commandline
    dev/docs_examples
    dev/analytical_gradients
+   dev/torch_force_hdf5_cache
 
 API Reference
 -------------

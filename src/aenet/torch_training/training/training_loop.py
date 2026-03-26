@@ -204,22 +204,28 @@ class TrainingLoop:
             # Optional force loss
             force_loss_t: Optional[torch.Tensor] = None
             if alpha > 0.0 and batch["positions_f"] is not None:
+                features_f = batch.get("features_f", None)
                 positions_f = batch["positions_f"].to(self.device)
                 forces_ref_f = batch["forces_ref_f"].to(self.device)
                 species_indices_f = batch["species_indices_f"].to(self.device)
                 species_f = batch["species_f"]
+                local_derivatives_f = batch.get("local_derivatives_f", None)
                 graph_f = batch.get("graph_f", None)
-                if graph_f is None:
+                if local_derivatives_f is None and graph_f is None:
                     raise RuntimeError(
-                        "Force-training batches must include graph data for "
-                        "the sparse force path."
+                        "Force-training batches must include either "
+                        "precomputed local derivatives or graph data."
                     )
 
                 # dtype
                 if self.dtype == torch.float64:
+                    if features_f is not None:
+                        features_f = features_f.to(self.device).double()
                     positions_f = positions_f.double()
                     forces_ref_f = forces_ref_f.double()
                 else:
+                    if features_f is not None:
+                        features_f = features_f.to(self.device).float()
                     positions_f = positions_f.float()
                     forces_ref_f = forces_ref_f.float()
 
@@ -245,6 +251,12 @@ class TrainingLoop:
                         if self.normalizer.normalize_features
                         else None
                     ),
+                    features=(
+                        features_f
+                        if local_derivatives_f is not None
+                        else None
+                    ),
+                    local_derivatives=local_derivatives_f,
                     graph=graph_f,
                     triplets=batch.get("triplets_f", None),
                     center_indices=None,

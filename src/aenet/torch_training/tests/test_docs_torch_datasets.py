@@ -1,6 +1,7 @@
 """Docs-backed smoke tests for ``docs/source/usage/torch_datasets.rst``."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -145,20 +146,14 @@ def test_structure_input_formats_and_split_examples(
     dataset_from_paths = StructureDataset(
         structures=file_paths,
         descriptor=descriptor,
-        force_fraction=1.0,
-        force_sampling="fixed",
     )
     dataset_from_atomic = StructureDataset(
         structures=docs_atomic_structures,
         descriptor=descriptor,
-        force_fraction=1.0,
-        force_sampling="fixed",
     )
     dataset_from_torch = StructureDataset(
         structures=docs_training_structures,
         descriptor=descriptor,
-        force_fraction=1.0,
-        force_sampling="fixed",
     )
 
     assert len(dataset_from_paths) == 2
@@ -170,23 +165,6 @@ def test_structure_input_formats_and_split_examples(
     assert sample["use_forces"] is True
     assert sample["graph"] is not None
     assert sample["triplets"] is not None
-
-    force_dataset = StructureDataset(
-        structures=docs_training_structures,
-        descriptor=descriptor,
-        force_fraction=0.5,
-        force_sampling="fixed",
-        cache_features=True,
-        cache_force_neighbors=True,
-        seed=7,
-    )
-    assert force_dataset.get_statistics()["n_force_selected"] == 1
-
-    selected_idx = force_dataset.selected_force_indices[0]
-    selected_sample = force_dataset[selected_idx]
-    assert selected_sample["use_forces"] is True
-    assert selected_sample["graph"] is not None
-    assert selected_sample["triplets"] is not None
 
     train_ds, test_ds = train_test_split(
         dataset_from_torch,
@@ -264,6 +242,7 @@ def test_cached_dataset_and_predict_dataset_examples(docs_training_structures):
 def test_hdf5_build_load_and_generic_split_examples(
     docs_atomic_structures,
     tmp_path,
+    monkeypatch,
 ):
     """The HDF5 docs workflow should remain valid on a tiny dataset."""
     descriptor = _make_descriptor()
@@ -276,32 +255,68 @@ def test_hdf5_build_load_and_generic_split_examples(
         file_paths=[str(path) for path in file_paths],
         parser=_parse_xsf,
         mode="build",
-        force_fraction=0.5,
-        force_sampling="fixed",
-        cache_force_neighbors=True,
         compression="zlib",
         compression_level=5,
     )
-    build_dataset.build_database(show_progress=False)
+    build_dataset.build_database(
+        show_progress=False,
+        persist_descriptor=True,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+    assert build_dataset._h5 is not None
+    assert build_dataset.has_persisted_features() is True
+    assert build_dataset.has_persisted_force_derivatives() is True
 
-    selected_build_idx = build_dataset.selected_force_indices[0]
-    sample = build_dataset[selected_build_idx]
+    sample = build_dataset[0]
     assert len(build_dataset) == 2
     assert sample["features"].shape == (3, 3)
-    assert sample["graph"] is not None
-    assert sample["triplets"] is not None
+    assert sample["local_derivatives"] is not None
+    assert sample["graph"] is None
+    assert sample["triplets"] is None
 
     load_dataset = HDF5StructureDataset(
-        descriptor=descriptor,
+        descriptor=None,
         database_file=str(database_file),
         mode="load",
-        force_fraction=0.5,
-        force_sampling="fixed",
-        cache_features=True,
-        cache_force_neighbors=True,
     )
-    selected_load_idx = load_dataset.selected_force_indices[0]
-    loaded_sample = load_dataset[selected_load_idx]
+    loaded_sample = load_dataset[0]
+    assert load_dataset.has_persisted_features() is True
+    assert load_dataset.has_persisted_force_derivatives() is True
+    assert load_dataset.get_persisted_feature_cache_info() is not None
+    assert load_dataset.get_force_derivative_cache_info() is not None
+
+    cache_state = SimpleNamespace(
+        feature_cache={0: torch.full((3, 3), 7.0, dtype=descriptor.dtype)},
+        neighbor_cache={},
+        graph_cache={},
+    )
+
+    def _fail_persisted_feature_load(_idx: int):
+        raise AssertionError("runtime cache should take precedence")
+
+    monkeypatch.setattr(
+        load_dataset,
+        "load_persisted_features",
+        _fail_persisted_feature_load,
+    )
+    cached_sample = load_dataset.materialize_sample(
+        0,
+        use_forces=False,
+        cache_state=cache_state,
+        cache_features=True,
+    )
+    assert torch.allclose(
+        cached_sample["features"],
+        cache_state.feature_cache[0],
+    )
+
+    monkeypatch.undo()
+    force_sample = load_dataset.materialize_sample(
+        0,
+        use_forces=True,
+        load_local_derivatives=True,
+    )
     train_ds, test_ds = train_test_split_dataset(
         load_dataset,
         test_fraction=0.5,
@@ -313,8 +328,14 @@ def test_hdf5_build_load_and_generic_split_examples(
     assert isinstance(test_ds, Subset)
     assert len(train_ds) == 1
     assert len(test_ds) == 1
-    assert loaded_sample["graph"] is not None
-    assert loaded_sample["triplets"] is not None
+    assert loaded_sample["local_derivatives"] is not None
+    assert loaded_sample["graph"] is None
+    assert loaded_sample["triplets"] is None
+    assert force_sample["local_derivatives"] is not None
+    assert force_sample["graph"] is None
+    assert force_sample["triplets"] is None
 
-    load_dataset._close_handle()
-    build_dataset._close_handle()
+    load_dataset.close()
+    build_dataset.close()
+    assert load_dataset._h5 is None
+    assert build_dataset._h5 is None

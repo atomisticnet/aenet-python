@@ -1,15 +1,18 @@
 import numpy as np
-import torch
 import pytest
+import torch
 from torch.utils.data import Subset
 
+from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
-    TorchTrainingConfig,
     Structure,
     TorchANNPotential,
+    TorchTrainingConfig,
 )
-from aenet.torch_featurize import ChebyshevDescriptor
-from aenet.torch_training.dataset import CachedStructureDataset
+from aenet.torch_training.dataset import (
+    CachedStructureDataset,
+    StructureDataset,
+)
 
 
 def _make_descriptor(dtype=torch.float64):
@@ -250,3 +253,49 @@ def test_predict_dataset_supports_subset():
     assert len(results.total_energy) == 1
     assert results.paths == ["s2.xsf"]
     assert results.atom_types[0] == ["H", "H", "H"]
+
+
+@pytest.mark.cpu
+def test_cached_dataset_matches_structure_dataset_energy_materialization():
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+            [0.0, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    structures = [
+        Structure(
+            positions=positions,
+            species=["H", "H", "H"],
+            energy=1.0,
+            forces=None,
+            name="s1.xsf",
+        ),
+        Structure(
+            positions=positions + 0.05,
+            species=["H", "H", "H"],
+            energy=1.5,
+            forces=None,
+            name="s2.xsf",
+        ),
+    ]
+
+    descriptor = _make_descriptor(dtype=torch.float64)
+    structure_ds = StructureDataset(structures=structures, descriptor=descriptor)
+    cached_ds = CachedStructureDataset(
+        structures=structures,
+        descriptor=descriptor,
+        show_progress=False,
+    )
+
+    expected = structure_ds.materialize_sample(0, use_forces=False)
+    cached = cached_ds[0]
+
+    assert torch.allclose(expected["features"], cached["features"])
+    assert torch.equal(expected["species_indices"], cached["species_indices"])
+    assert expected["n_atoms"] == cached["n_atoms"]
+    assert expected["energy"] == cached["energy"]
+    assert cached["use_forces"] is False
+    assert cached["positions"] is None

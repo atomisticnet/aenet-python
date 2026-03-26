@@ -123,8 +123,6 @@ Basic Usage
    >>> dataset = StructureDataset(
    ...     structures=structures,
    ...     descriptor=descriptor,
-   ...     force_fraction=1.0,
-   ...     force_sampling="fixed",
    ... )
    >>> len(dataset)
    2
@@ -134,31 +132,31 @@ Basic Usage
    >>> sample["use_forces"]
    True
 
-Force Training Options
-~~~~~~~~~~~~~~~~~~~~~~
+Runtime Training Options
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-For force training, several options control which structures are used:
+``StructureDataset`` is now a passive data source. Force sampling and runtime
+cache behavior live in ``TorchTrainingConfig``:
 
 .. code-block:: python
 
-   from aenet.torch_training.dataset import StructureDataset
+   from aenet.torch_training import TorchTrainingConfig
 
-   dataset = StructureDataset(
-       structures=structures,
-       descriptor=descriptor,
-       force_fraction=0.3,                  # Use 30% of force-labeled structures
-       force_sampling='random',              # Resample each epoch
-       cache_features=True,                 # Cache features for non-force entries
-       cache_force_neighbors=True,          # Cache neighbor lists
+   config = TorchTrainingConfig(
+       force_weight=0.1,
+       force_fraction=0.3,           # Use 30% of force-labeled structures
+       force_sampling="random",      # Resample each epoch
+       cache_features=True,          # Cache energy-view features
+       cache_force_neighbors=True,   # Cache neighbor data when helpful
    )
 
 **Parameters:**
 
 - **force_fraction** (float, 0.0-1.0): Fraction of force structures to use. Using a subset (e.g., 0.3) can speed up training 3× while maintaining accuracy.
 - **force_sampling** (str): ``'random'`` (resample each epoch) or ``'fixed'`` (static subset). Random provides better generalization.
-- **cache_features** (bool): Cache features for structures not selected for force supervision in current epoch. Useful with ``force_fraction < 1.0``.
+- **cache_features** (bool): Cache features for structures not selected for force supervision in the current epoch. Useful with ``force_fraction < 1.0``.
 - **cache_force_neighbors** (bool): Cache neighbor graphs to avoid repeated searches for energy-view reuse and legacy non-graph paths. Supported force training does not require this.
-- **cache_force_triplets** (bool): Cache CSR graphs and triplets instead of rebuilding them on demand. Supported force training uses the sparse graph/triplet path even when this option is left at its default.
+- **cache_force_triplets** (bool): Cache CSR graphs and triplets instead of rebuilding them on demand.
 
 Manual Dataset Splitting
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -355,15 +353,83 @@ Building the Database
        file_paths=file_list,
        parser=parse_xsf,
        mode="build",                # Build mode
-       force_fraction=0.3,
-       force_sampling="random",
-       cache_force_neighbors=True,
        in_memory_cache_size=2048,   # LRU cache for unpickled structures
        compression="zlib",
        compression_level=5,
    )
 
-   db.build_database(show_progress=True)
+   db.build_database(
+       show_progress=True,
+       persist_descriptor=True,         # optional descriptor recovery step
+       persist_features=True,           # optional persisted raw features
+       persist_force_derivatives=True,  # optional sparse derivative cache
+   )
+
+   # ``db`` is immediately reusable after build_database(); reopening the
+   # file is only needed in a later session or when you want a separate handle.
+
+.. note::
+
+   ``persist_descriptor=True`` stores a small versioned descriptor manifest
+   alongside the HDF5 training data so later ``mode="load"`` sessions can
+   recover supported descriptor objects automatically. This is enabled
+   automatically when ``persist_features=True`` or
+   ``persist_force_derivatives=True``.
+
+.. note::
+
+   ``persist_features=True`` stores raw unnormalized ``(N, F)`` descriptor
+   features in the HDF5 cache. During later HDF5-backed training runs,
+   ``HDF5StructureDataset`` will reuse those persisted features lazily when
+   they are descriptor-compatible. This sits between the trainer-owned
+   ``cache_features=True`` runtime cache and full feature recomputation.
+
+.. note::
+
+   ``persist_force_derivatives=True`` stores the sparse local derivative
+   payload for force-labeled structures in the HDF5 file under a documented,
+   versioned schema. This is useful when preparing derivative caches for
+   repeated fixed-geometry training workflows. During HDF5-based force
+   training, the trainer now loads that payload lazily per sample and prefers
+   it over on-the-fly sparse derivative recomputation when the cache is
+   present and descriptor-compatible. When a force-labeled entry also has
+   persisted raw features, the force path can reuse both persisted payloads
+   directly. This is distinct from ``cache_force_triplets=True`` and
+   ``cache_features=True``, which cache in-memory runtime data within a
+   dataset instance and do not write those payloads to the HDF5 file. The
+   schema is documented in
+   :doc:`../dev/torch_force_hdf5_cache`.
+
+Persisted Cache Semantics
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``HDF5StructureDataset`` now has three distinct cache layers that serve
+different purposes:
+
+* ``persist_features=True`` writes raw unnormalized ``(N, F)`` descriptor
+  tensors to ``/torch_cache/features`` so later compatible HDF5-backed runs
+  can reuse them across sessions
+* ``persist_force_derivatives=True`` writes sparse local derivative payloads
+  for force-labeled entries to ``/torch_cache/force_derivatives``
+* ``cache_features=True`` is a trainer-owned in-memory runtime cache attached
+  to the current dataset instance; it speeds up repeated accesses within a run
+  but does not modify the HDF5 file
+
+Runtime precedence is explicit:
+
+* energy-view sample materialization prefers the runtime
+  ``cache_features=True`` cache first, then compatible persisted HDF5
+  features, then on-the-fly featurization
+* force-view sample materialization reuses compatible persisted raw features
+  when they exist
+* when both persisted raw features and persisted local derivatives exist for a
+  force-supervised entry, the force path can serve that sample without
+  rebuilding graph or triplet payloads
+
+This is separate from ``CachedStructureDataset``, which is an eager in-memory
+energy-only cache for structure-list workflows rather than an on-disk HDF5
+cache for reuse across runs. The developer-facing schema layout and metadata
+contract are documented in :doc:`../dev/torch_force_hdf5_cache`.
 
 Training from HDF5 Database
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -373,15 +439,12 @@ Training from HDF5 Database
    from aenet.torch_training.dataset import HDF5StructureDataset
    from aenet.torch_training import TorchTrainingConfig, Adam
 
-   # Load existing database (read-only, lazy access)
+   # Load existing database later (read-only, lazy access)
+   # Reopening is optional if you still have the build-time ``db`` instance.
    dataset = HDF5StructureDataset(
-       descriptor=descriptor,
+       descriptor=None,                # recover from persisted manifest
        database_file="datasets/training.h5",
        mode="load",                 # Read-only mode
-       force_fraction=0.3,
-       force_sampling="random",
-       cache_features=True,
-       cache_force_neighbors=True,
    )
 
    # Train with automatic splitting
@@ -390,12 +453,24 @@ Training from HDF5 Database
        method=Adam(mu=0.001, batchsize=32),
        testpercent=10,
        force_weight=0.1,
+       force_fraction=0.3,
+       force_sampling="random",
+       cache_features=True,
+       cache_force_neighbors=True,
        num_workers=8,               # Parallel workers (each opens own handle)
        prefetch_factor=4,
        persistent_workers=True,
    )
 
    pot.train(dataset=dataset, config=config)
+
+.. note::
+
+   Prebuilt ``dataset=...`` objects are passive data sources. Runtime controls
+   such as ``force_fraction``, ``force_sampling``, ``cache_features``,
+   ``cache_force_neighbors``, and ``cache_force_triplets`` belong on
+   ``TorchTrainingConfig`` and can be changed between runs over the same
+   dataset object.
 
 Key HDF5 Features
 ~~~~~~~~~~~~~~~~~
@@ -405,6 +480,11 @@ Key HDF5 Features
 * **Compression**: Built-in HDF5 compression (zlib, blosc) reduces disk usage
 * **LRU caching**: Configurable in-memory cache per worker for frequently accessed entries
 * **Parser requirements**: Must be a top-level function (pickleable) when using ``num_workers > 0``
+* **Unified persisted cache**: Optional ``/torch_cache/features`` and
+  ``/torch_cache/force_derivatives`` sections can be written once and reused
+  lazily across later HDF5-backed runs
+* **Deterministic handle cleanup**: Call ``dataset.close()`` or use
+  ``with HDF5StructureDataset(...) as dataset:``
 
 
 Dataset Splitting Strategies
@@ -483,12 +563,12 @@ For Large Datasets (HDF5)
        descriptor=descriptor,
        database_file="large_dataset.h5",
        mode="load",
-       force_fraction=0.3,
-       cache_force_neighbors=True,
        in_memory_cache_size=4096,   # Larger cache for workers
    )
 
    config = TorchTrainingConfig(
+       force_fraction=0.3,
+       cache_force_neighbors=True,
        num_workers=16,              # More workers for I/O
        prefetch_factor=8,           # More prefetching
        persistent_workers=True,     # Keep workers alive
@@ -497,11 +577,21 @@ For Large Datasets (HDF5)
 Caching Strategies
 ~~~~~~~~~~~~~~~~~~
 
-* **cache_features**: For energy-only training, pre-computes all features once. For
-  force training, caches features for structures not selected for force supervision
-  in current epoch (useful with ``force_fraction < 1.0``)
+Set these on ``TorchTrainingConfig``:
+
+* **cache_features**: For energy-only structure-list workflows, this can
+  trigger eager feature caching. For force training, it caches energy-view
+  features for structures not selected for force supervision in the current
+  epoch. On HDF5 datasets, this runtime cache sits above compatible persisted
+  HDF5 features and does not write back to disk.
 * **cache_force_neighbors**: Reuse neighbor search results for energy-view reuse and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets instead of rebuilding them for the default sparse force-training path
+
+For repeated fixed-geometry HDF5 workflows, prefer build-time
+``persist_features=True`` and ``persist_force_derivatives=True`` when you want
+cache reuse across separate training sessions. Use
+``CachedStructureDataset`` when you want a one-process eager in-memory cache
+for energy-only structure-list training.
 
 
 Common Pitfalls

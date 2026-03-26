@@ -18,6 +18,7 @@ Notes
 from __future__ import annotations
 
 import os
+import random
 import time
 import warnings
 from collections import Counter
@@ -104,6 +105,222 @@ def _warn_on_small_validation_set(
         )
 
 
+class _RuntimeCacheState:
+    """Split-local runtime caches owned by the trainer policy wrapper."""
+
+    def __init__(self) -> None:
+        self.feature_cache: Dict[int, torch.Tensor] = {}
+        self.neighbor_cache: Dict[int, dict] = {}
+        self.graph_cache: Dict[int, dict] = {}
+
+
+def _flatten_subset_indices(dataset: Dataset) -> Tuple[Dataset, Optional[List[int]]]:
+    """Resolve nested ``Subset`` wrappers to a root dataset plus root indices."""
+    current: Dataset = dataset
+    index_map: Optional[List[int]] = None
+
+    while isinstance(current, Subset):
+        current_indices = list(current.indices)
+        if index_map is None:
+            index_map = current_indices
+        else:
+            index_map = [current_indices[i] for i in index_map]
+        current = current.dataset
+
+    return current, index_map
+
+
+class _TrainingPolicyDataset(Dataset):
+    """Trainer-only dataset wrapper that owns runtime sampling and caches."""
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        config: TorchTrainingConfig,
+        *,
+        split: str,
+    ) -> None:
+        self._wrapped_dataset = dataset
+        self._root_dataset, self._indices = _flatten_subset_indices(dataset)
+        self._config = config
+        self._split = split
+        self._cache_state = _RuntimeCacheState()
+
+        cache_scope = str(getattr(config, "cache_scope", "all"))
+        cache_enabled = (
+            cache_scope == "all"
+            or (cache_scope == "train" and split == "train")
+            or (cache_scope == "val" and split == "val")
+        )
+        self.cache_features = bool(config.cache_features) and cache_enabled
+        self.cache_force_neighbors = (
+            bool(config.cache_force_neighbors) and cache_enabled
+        )
+        self.cache_force_triplets = (
+            bool(config.cache_force_triplets) and cache_enabled
+        )
+        self.force_sampling = str(config.force_sampling)
+        self.force_fraction = float(config.force_fraction)
+        self.force_min_structures_per_epoch = getattr(
+            config, "force_min_structures_per_epoch", None
+        )
+        self.selected_force_indices: Optional[List[int]] = None
+
+        force_indices_all = list(self._root_dataset.get_force_indices())
+        if self._indices is None:
+            self._force_indices = force_indices_all
+        else:
+            force_index_set = set(force_indices_all)
+            self._force_indices = [
+                source_idx
+                for source_idx in self._indices
+                if source_idx in force_index_set
+            ]
+
+        if self.force_sampling == "fixed" and self.force_fraction < 1.0:
+            self.selected_force_indices = self._sample_force_indices()
+
+    def __getstate__(self) -> dict:
+        """Reset split-local runtime caches when DataLoader workers spawn."""
+        state = self.__dict__.copy()
+        state["_cache_state"] = _RuntimeCacheState()
+        return state
+
+    def __len__(self) -> int:
+        if self._indices is not None:
+            return len(self._indices)
+        return len(self._root_dataset)
+
+    @property
+    def structures(self) -> Optional[List[Structure]]:
+        """Expose structure lists for output helpers when available."""
+        base_structures = getattr(self._root_dataset, "structures", None)
+        if base_structures is None:
+            return None
+        if self._indices is None:
+            return list(base_structures)
+        return [base_structures[i] for i in self._indices]
+
+    def _source_index(self, idx: int) -> int:
+        if self._indices is None:
+            return idx
+        return int(self._indices[idx])
+
+    def _sample_force_indices(self) -> List[int]:
+        """Sample source-dataset force indices for this split."""
+        n_force_total = len(self._force_indices)
+        if n_force_total == 0:
+            return []
+
+        n_force = int(n_force_total * self.force_fraction)
+        if self.force_min_structures_per_epoch is not None:
+            n_force = max(n_force, self.force_min_structures_per_epoch)
+        n_force = min(n_force, n_force_total)
+        if n_force <= 0:
+            return []
+        return random.sample(self._force_indices, n_force)
+
+    def initialize_force_sampling(self) -> None:
+        """Populate the initial random force subset before epoch 0."""
+        if float(getattr(self._config, "force_weight", 0.0)) <= 0.0:
+            self.selected_force_indices = []
+            return
+        if self.force_sampling == "random" and self.force_fraction < 1.0:
+            self.selected_force_indices = self._sample_force_indices()
+
+    def resample_force_structures(self) -> None:
+        """Refresh the random force-supervision subset for this split."""
+        if float(getattr(self._config, "force_weight", 0.0)) <= 0.0:
+            self.selected_force_indices = []
+            return
+        if self.force_sampling != "random":
+            return
+        self.selected_force_indices = self._sample_force_indices()
+
+    def should_use_forces(self, source_idx: int, struct_has_forces: bool) -> bool:
+        """Return whether the wrapped sample should use force supervision."""
+        if not struct_has_forces:
+            return False
+        if float(getattr(self._config, "force_weight", 0.0)) <= 0.0:
+            return False
+        if self.force_fraction >= 1.0:
+            return True
+        if self.selected_force_indices is None:
+            return False
+        return source_idx in self.selected_force_indices
+
+    def warmup_caches(self, show_progress: bool = True) -> None:
+        """Pre-populate split-local runtime caches for the current policy."""
+        if not (
+            self.cache_features
+            or self.cache_force_neighbors
+            or self.cache_force_triplets
+        ):
+            return
+
+        iterator = range(len(self))
+        if show_progress and tqdm is not None:
+            iterator = tqdm(
+                iterator,
+                desc=f"Warming {self._split} caches",
+                ncols=80,
+                leave=False,
+            )
+
+        for idx in iterator:
+            _ = self[idx]
+
+    def __getitem__(self, idx: int) -> dict:
+        source_idx = self._source_index(idx)
+        struct = self._root_dataset.get_structure(source_idx)
+        use_forces = self.should_use_forces(source_idx, struct.has_forces())
+        return self._root_dataset.materialize_sample(
+            source_idx,
+            use_forces=use_forces,
+            cache_state=self._cache_state,
+            cache_features=self.cache_features,
+            cache_force_neighbors=self.cache_force_neighbors,
+            cache_force_triplets=self.cache_force_triplets,
+            load_local_derivatives=use_forces,
+        )
+
+
+def _should_wrap_training_policy_dataset(dataset: Optional[Dataset]) -> bool:
+    """Return True when the dataset supports trainer-owned policy wrapping."""
+    if dataset is None:
+        return False
+    root_dataset, _ = _flatten_subset_indices(dataset)
+    return (
+        hasattr(root_dataset, "materialize_sample")
+        and hasattr(root_dataset, "get_force_indices")
+        and hasattr(root_dataset, "get_structure")
+    )
+
+
+def _requires_training_worker_restart(
+    dataset: Optional[Dataset],
+    config: TorchTrainingConfig,
+) -> bool:
+    """
+    Return True when training workers must restart to observe new sampling.
+
+    Random force resampling mutates trainer-owned dataset state between epochs.
+    Persistent DataLoader workers keep their own copy of that state, so they
+    must be restarted whenever epoch-to-epoch resampling is enabled.
+    """
+    if not isinstance(dataset, _TrainingPolicyDataset):
+        return False
+    if int(getattr(config, "num_workers", 0)) <= 0:
+        return False
+    if float(getattr(config, "force_weight", 0.0)) <= 0.0:
+        return False
+    if dataset.force_sampling != "random":
+        return False
+    if dataset.force_fraction >= 1.0:
+        return False
+    return int(getattr(config, "force_resample_num_epochs", 0)) > 0
+
+
 def _iter_progress(iterable, enable: bool, desc: str):
     """
     Wrap an iterable with tqdm progress bar if enabled and available.
@@ -126,8 +343,12 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
           features: (N,F), species_indices: (N,), n_atoms: (B,),
           energy_ref: (B,)
       - force view (only selected structures):
+          features_f: (Nf, F), unnormalized per-atom features for the
+              force-supervised structures in force-view order
           positions_f: (Nf,3), species_f (list[str]),
           species_indices_f: (Nf,), forces_ref_f: (Nf,3),
+          local_derivatives_f: Optional[dict] batched sparse local
+              derivative payload aligned with positions_f
           graph_f: Optional[dict] batched CSR neighbor graph for the
               force view (keys: center_ptr[int32 Nf+1], nbr_idx[int32 E],
               r_ij[E,3], d_ij[E]),
@@ -147,10 +368,22 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     energy_ref_list: List[float] = []
 
     # For optional force view
+    features_f_list: List[torch.Tensor] = []
     positions_f_list: List[torch.Tensor] = []
     species_f_names: List[str] = []
     species_idx_f_list: List[torch.Tensor] = []
     forces_f_list: List[torch.Tensor] = []
+    radial_center_parts: List[torch.Tensor] = []
+    radial_neighbor_parts: List[torch.Tensor] = []
+    radial_grads_parts: List[torch.Tensor] = []
+    radial_typespin_parts: List[torch.Tensor] = []
+    angular_center_parts: List[torch.Tensor] = []
+    angular_j_parts: List[torch.Tensor] = []
+    angular_k_parts: List[torch.Tensor] = []
+    angular_grads_i_parts: List[torch.Tensor] = []
+    angular_grads_j_parts: List[torch.Tensor] = []
+    angular_grads_k_parts: List[torch.Tensor] = []
+    angular_typespin_parts: List[torch.Tensor] = []
     # Optional batched CSR/Triplets parts for force view
     deg_parts: List[torch.Tensor] = []  # degrees per center (concat later)
     nbr_idx_parts: List[torch.Tensor] = []
@@ -163,6 +396,9 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     tri_k_local_parts: List[torch.Tensor] = []
 
     base_atom_idx_force = 0
+    local_derivatives_available = True
+    graph_available_for_all = True
+    n_force_samples = 0
     # Track total atoms with available force labels in this batch
     n_atoms_force_total: int = 0
 
@@ -194,44 +430,86 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
             continue
         pos = sample["positions"]
         frc = sample["forces"]
+        feat = sample["features"]
         species_idx = sample["species_indices"]
         species_names = sample["species"]
 
+        n_force_samples += 1
+        features_f_list.append(feat)
         positions_f_list.append(pos)
         forces_f_list.append(frc)
         species_idx_f_list.append(species_idx)
         species_f_names.extend(species_names)
 
+        local_derivatives = sample.get("local_derivatives", None)
+        if local_derivatives is None:
+            local_derivatives_available = False
+        elif local_derivatives_available:
+            radial = local_derivatives["radial"]
+            radial_center_parts.append(
+                torch.as_tensor(radial["center_idx"]).to(torch.int64)
+                + base_atom_idx_force
+            )
+            radial_neighbor_parts.append(
+                torch.as_tensor(radial["neighbor_idx"]).to(torch.int64)
+                + base_atom_idx_force
+            )
+            radial_grads_parts.append(torch.as_tensor(radial["dG_drij"]))
+            if radial["neighbor_typespin"] is not None:
+                radial_typespin_parts.append(
+                    torch.as_tensor(radial["neighbor_typespin"])
+                )
+
+            angular = local_derivatives["angular"]
+            angular_center_parts.append(
+                torch.as_tensor(angular["center_idx"]).to(torch.int64)
+                + base_atom_idx_force
+            )
+            angular_j_parts.append(
+                torch.as_tensor(angular["neighbor_j_idx"]).to(torch.int64)
+                + base_atom_idx_force
+            )
+            angular_k_parts.append(
+                torch.as_tensor(angular["neighbor_k_idx"]).to(torch.int64)
+                + base_atom_idx_force
+            )
+            angular_grads_i_parts.append(torch.as_tensor(angular["grads_i"]))
+            angular_grads_j_parts.append(torch.as_tensor(angular["grads_j"]))
+            angular_grads_k_parts.append(torch.as_tensor(angular["grads_k"]))
+            if angular["triplet_typespin"] is not None:
+                angular_typespin_parts.append(
+                    torch.as_tensor(angular["triplet_typespin"])
+                )
+
         g = sample.get("graph", None)
         if g is None:
-            raise RuntimeError(
-                "Force-supervised training samples must provide a graph "
-                "payload for the sparse force path."
-            )
+            graph_available_for_all = False
+        else:
+            cp = torch.as_tensor(g["center_ptr"])
+            deg_parts.append((cp[1:] - cp[:-1]).to(torch.int64))
+            nbr_idx_parts.append(torch.as_tensor(g["nbr_idx"]).to(
+                torch.int64) + base_atom_idx_force)
+            r_ij_parts.append(torch.as_tensor(g["r_ij"]))
+            d_ij_parts.append(torch.as_tensor(g["d_ij"]))
 
-        cp = torch.as_tensor(g["center_ptr"])
-        deg_parts.append((cp[1:] - cp[:-1]).to(torch.int64))
-        nbr_idx_parts.append(torch.as_tensor(g["nbr_idx"]).to(
-            torch.int64) + base_atom_idx_force)
-        r_ij_parts.append(torch.as_tensor(g["r_ij"]))
-        d_ij_parts.append(torch.as_tensor(g["d_ij"]))
-
-        t = sample.get("triplets", None)
-        if t is not None:
-            tri_i_parts.append(torch.as_tensor(t["tri_i"]).to(
-                torch.int64) + base_atom_idx_force)
-            tri_j_parts.append(torch.as_tensor(t["tri_j"]).to(
-                torch.int64) + base_atom_idx_force)
-            tri_k_parts.append(torch.as_tensor(t["tri_k"]).to(
-                torch.int64) + base_atom_idx_force)
-            tri_j_local_parts.append(
-                torch.as_tensor(t["tri_j_local"]).to(torch.int64))
-            tri_k_local_parts.append(
-                torch.as_tensor(t["tri_k_local"]).to(torch.int64))
+            t = sample.get("triplets", None)
+            if t is not None:
+                tri_i_parts.append(torch.as_tensor(t["tri_i"]).to(
+                    torch.int64) + base_atom_idx_force)
+                tri_j_parts.append(torch.as_tensor(t["tri_j"]).to(
+                    torch.int64) + base_atom_idx_force)
+                tri_k_parts.append(torch.as_tensor(t["tri_k"]).to(
+                    torch.int64) + base_atom_idx_force)
+                tri_j_local_parts.append(
+                    torch.as_tensor(t["tri_j_local"]).to(torch.int64))
+                tri_k_local_parts.append(
+                    torch.as_tensor(t["tri_k_local"]).to(torch.int64))
 
         base_atom_idx_force += int(pos.shape[0])
 
     force_view_present = len(positions_f_list) > 0
+    features_f = (torch.cat(features_f_list, dim=0)
+                  if force_view_present else None)
     positions_f = (torch.cat(positions_f_list, dim=0)
                    if force_view_present else None)
     species_indices_f = (
@@ -239,11 +517,46 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     )
     forces_ref_f = (torch.cat(forces_f_list, dim=0)
                     if force_view_present else None)
+    local_derivatives_f = None
+    if force_view_present and local_derivatives_available and n_force_samples > 0:
+        radial_block = {
+            "center_idx": torch.cat(radial_center_parts).to(torch.int64),
+            "neighbor_idx": torch.cat(radial_neighbor_parts).to(torch.int64),
+            "dG_drij": torch.cat(radial_grads_parts, dim=0),
+            "neighbor_typespin": (
+                torch.cat(radial_typespin_parts, dim=0)
+                if len(radial_typespin_parts) > 0
+                else None
+            ),
+        }
+        angular_block = {
+            "center_idx": torch.cat(angular_center_parts).to(torch.int64),
+            "neighbor_j_idx": torch.cat(angular_j_parts).to(torch.int64),
+            "neighbor_k_idx": torch.cat(angular_k_parts).to(torch.int64),
+            "grads_i": torch.cat(angular_grads_i_parts, dim=0),
+            "grads_j": torch.cat(angular_grads_j_parts, dim=0),
+            "grads_k": torch.cat(angular_grads_k_parts, dim=0),
+            "triplet_typespin": (
+                torch.cat(angular_typespin_parts, dim=0)
+                if len(angular_typespin_parts) > 0
+                else None
+            ),
+        }
+        local_derivatives_f = {
+            "radial": radial_block,
+            "angular": angular_block,
+        }
+    elif force_view_present and not graph_available_for_all:
+        raise RuntimeError(
+            "Force-supervised training batches must provide either "
+            "precomputed local derivatives or graph payloads for every "
+            "force sample."
+        )
 
     # Build batched CSR/Triplets for force view if any parts were collected
     graph_f = None
     triplets_f = None
-    if force_view_present and len(deg_parts) > 0:
+    if force_view_present and graph_available_for_all and len(deg_parts) > 0:
         total_centers = int(positions_f.shape[0])
         deg_cat = (torch.cat(deg_parts) if len(deg_parts) > 0
                    else torch.empty(0, dtype=torch.int64))
@@ -281,10 +594,12 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         "n_atoms": n_atoms,
         "energy_ref": energy_ref,
         # Force view
+        "features_f": features_f,
         "positions_f": positions_f,
         "species_f": species_f_names if force_view_present else None,
         "species_indices_f": species_indices_f,
         "forces_ref_f": forces_ref_f,
+        "local_derivatives_f": local_derivatives_f,
         "graph_f": graph_f,
         "triplets_f": triplets_f,
         # Bookkeeping for unbiased scaling / diagnostics
@@ -742,25 +1057,8 @@ class TorchANNPotential:
                 full_ds = StructureDataset(
                     structures=structures,
                     descriptor=self.descriptor,
-                    force_fraction=config.force_fraction,
-                    force_sampling=config.force_sampling,
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
-                    min_force_structures_per_epoch=getattr(
-                        config, "force_min_structures_per_epoch", None
-                    ),
-                    cache_features=bool(
-                        getattr(config, "cache_features", False)
-                    ),
-                    cache_force_neighbors=bool(
-                        getattr(config, "cache_force_neighbors", False)
-                    ),
-                    cache_force_triplets=(
-                        bool(getattr(config, "cache_force_triplets", False))
-                        or float(getattr(config, "force_weight", 0.0)) > 0.0
-                    ),
-                    cache_persist_dir=getattr(
-                        config, "cache_persist_dir", None),
                     seed=None,
                 )
                 if config.testpercent > 0:
@@ -771,49 +1069,78 @@ class TorchANNPotential:
                 else:
                     train_ds, test_ds = full_ds, None
 
-        # Warmup caches if using StructureDataset with caching enabled
+        if _should_wrap_training_policy_dataset(train_ds):
+            train_ds = _TrainingPolicyDataset(
+                train_ds,
+                config,
+                split="train",
+            )
+        if _should_wrap_training_policy_dataset(test_ds):
+            test_ds = _TrainingPolicyDataset(
+                test_ds,
+                config,
+                split="val",
+            )
+
+        # Warmup caches if using trainer-owned runtime caching
         show_progress = bool(getattr(config, "show_progress", True))
-        if isinstance(train_ds, StructureDataset):
+        if isinstance(train_ds, _TrainingPolicyDataset):
             train_ds.warmup_caches(show_progress=show_progress)
-        if isinstance(test_ds, StructureDataset):
+        if isinstance(test_ds, _TrainingPolicyDataset):
             test_ds.warmup_caches(show_progress=show_progress)
 
-        # Initial force structure selection for random sampling
-        # This must be called at least once before training to populate
-        # selected_force_indices when using force_sampling="random"
-        if isinstance(train_ds, StructureDataset):
-            if (train_ds.force_sampling == "random"
-                    and config.force_fraction < 1.0):
-                train_ds.resample_force_structures()
-        # Also initialize test dataset force sampling if applicable
-        if isinstance(test_ds, StructureDataset):
-            if (test_ds.force_sampling == "random"
-                    and config.force_fraction < 1.0):
-                test_ds.resample_force_structures()
+        # Initial force structure selection for random sampling.
+        if isinstance(train_ds, _TrainingPolicyDataset):
+            train_ds.initialize_force_sampling()
+        if isinstance(test_ds, _TrainingPolicyDataset):
+            test_ds.initialize_force_sampling()
 
         # DataLoaders
         batch_size = OptimizerBuilder.get_batch_size(config.method)
-        dl_kwargs: Dict[str, Any] = {}
+        train_dl_kwargs: Dict[str, Any] = {}
+        eval_dl_kwargs: Dict[str, Any] = {}
         nw = int(getattr(config, "num_workers", 0))
         if nw > 0:
-            dl_kwargs.update(
+            prefetch_factor = int(getattr(config, "prefetch_factor", 2))
+            eval_persistent_workers = bool(
+                getattr(config, "persistent_workers", True)
+            )
+            train_persistent_workers = eval_persistent_workers
+            if _requires_training_worker_restart(train_ds, config):
+                if train_persistent_workers:
+                    warnings.warn(
+                        "Disabling persistent_workers for the training "
+                        "DataLoader because random force resampling updates "
+                        "dataset state between epochs and persistent worker "
+                        "copies would otherwise keep a stale force subset.",
+                        UserWarning,
+                    )
+                train_persistent_workers = False
+
+            train_dl_kwargs.update(
                 dict(
                     num_workers=nw,
-                    prefetch_factor=int(
-                        getattr(config, "prefetch_factor", 2)),
-                    persistent_workers=bool(
-                        getattr(config, "persistent_workers", True)),
+                    prefetch_factor=prefetch_factor,
+                    persistent_workers=train_persistent_workers,
+                )
+            )
+            eval_dl_kwargs.update(
+                dict(
+                    num_workers=nw,
+                    prefetch_factor=prefetch_factor,
+                    persistent_workers=eval_persistent_workers,
                 )
             )
         else:
-            dl_kwargs.update(dict(num_workers=0))
+            train_dl_kwargs.update(dict(num_workers=0))
+            eval_dl_kwargs.update(dict(num_workers=0))
 
         train_loader = DataLoader(
             train_ds,
             batch_size=batch_size,
             shuffle=True,
             collate_fn=_collate_fn,
-            **dl_kwargs,
+            **train_dl_kwargs,
         )
         test_loader = (
             DataLoader(
@@ -821,7 +1148,7 @@ class TorchANNPotential:
                 batch_size=batch_size,
                 shuffle=False,
                 collate_fn=_collate_fn,
-                **dl_kwargs,
+                **eval_dl_kwargs,
             )
             if test_ds is not None
             else None
@@ -962,11 +1289,12 @@ class TorchANNPotential:
         for epoch in range(start_epoch, n_epochs):
             t0 = time.time()
             # Force sampling per epoch-window
-            if hasattr(train_ds, "resample_force_structures"):
+            if isinstance(train_ds, _TrainingPolicyDataset):
                 # Resample if force_resample_num_epochs > 0 and we're at
                 # the right epoch modulo
                 should_resample = (
-                    config.force_sampling == "random"
+                    train_ds.force_sampling == "random"
+                    and train_ds.force_fraction < 1.0
                     and config.force_resample_num_epochs > 0
                     and ((epoch - start_epoch)
                          % config.force_resample_num_epochs == 0)

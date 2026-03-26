@@ -5,13 +5,16 @@ import numpy as np
 import pytest
 import torch
 
+import aenet.torch_training.trainer as trainer_module
 from aenet.geometry import AtomicStructure
 from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
+    HDF5StructureDataset,
     Structure,
     TorchANNPotential,
     TorchTrainingConfig,
 )
+from aenet.torch_training.trainer import _TrainingPolicyDataset
 
 
 def make_simple_structures_H_two():
@@ -85,6 +88,15 @@ def make_descriptor_H(dtype=torch.float64):
         device="cpu",
         dtype=dtype,
     )
+
+
+def _parser_factory(structures):
+    """Return a simple path-index parser for HDF5-backed test datasets."""
+    def _parser(path: str) -> Structure:
+        idx = int(Path(path).name.split("_")[-1])
+        return structures[idx]
+
+    return _parser
 
 
 def make_arch_H(descriptor: ChebyshevDescriptor):
@@ -515,3 +527,165 @@ def test_save_energies_uses_input_paths_for_split_outputs(
 
     assert train_paths.isdisjoint(test_paths)
     assert train_paths | test_paths == expected_paths
+
+
+@pytest.mark.cpu
+def test_training_policy_cache_features_preserves_hdf5_feature_values(
+    tmp_path: Path,
+):
+    """Trainer-owned runtime caches should preserve HDF5 feature values."""
+    structures = make_simple_structures_H_two()
+    file_paths = [str(tmp_path / f"s_{i}") for i in range(len(structures))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    db_persisted = tmp_path / "policy_cached_features_persisted.h5"
+    ds_persisted = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_persisted),
+        file_paths=file_paths,
+        parser=_parser_factory(structures),
+        mode="build",
+    )
+    ds_persisted.build_database(show_progress=False, persist_features=True)
+
+    db_fallback = tmp_path / "policy_cached_features_fallback.h5"
+    ds_fallback = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_fallback),
+        file_paths=file_paths,
+        parser=_parser_factory(structures),
+        mode="build",
+    )
+    ds_fallback.build_database(show_progress=False)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        cache_features=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    persisted_policy = _TrainingPolicyDataset(ds_persisted, cfg, split="train")
+    fallback_policy = _TrainingPolicyDataset(ds_fallback, cfg, split="train")
+
+    persisted_first = persisted_policy[0]
+    persisted_second = persisted_policy[0]
+    fallback_first = fallback_policy[0]
+    fallback_second = fallback_policy[0]
+
+    positions = torch.as_tensor(structures[0].positions, dtype=torch.float64)
+    expected = ds_persisted.descriptor.forward_from_positions(
+        positions,
+        structures[0].species,
+        None,
+        None,
+    )
+
+    assert 0 in persisted_policy._cache_state.feature_cache
+    assert 0 in fallback_policy._cache_state.feature_cache
+    assert torch.equal(persisted_first["features"], expected)
+    assert torch.equal(persisted_second["features"], expected)
+    assert torch.equal(fallback_first["features"], expected)
+    assert torch.equal(fallback_second["features"], expected)
+    assert torch.equal(persisted_first["features"], fallback_first["features"])
+
+
+class _StopAfterLoaderConfig(RuntimeError):
+    """Sentinel used to stop trainer setup after DataLoader configuration."""
+
+
+@pytest.mark.cpu
+def test_random_force_resampling_disables_persistent_train_workers(
+    monkeypatch,
+):
+    """Epoch-level random resampling should restart training workers."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=0.5,
+        force_sampling="random",
+        force_resample_num_epochs=1,
+        num_workers=2,
+        persistent_workers=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="Disabling persistent_workers for the training DataLoader",
+    ):
+        with pytest.raises(_StopAfterLoaderConfig):
+            pot.train(
+                structures=make_simple_structures_H_many(n_structures=6),
+                config=cfg,
+            )
+
+    assert len(records) == 1
+    assert records[0]["num_workers"] == 2
+    assert records[0]["persistent_workers"] is False
+
+
+@pytest.mark.cpu
+def test_fixed_or_static_force_sampling_keeps_persistent_train_workers(
+    monkeypatch,
+):
+    """Training should preserve persistent workers when no restart is needed."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=0.5,
+        force_sampling="random",
+        force_resample_num_epochs=0,
+        num_workers=2,
+        persistent_workers=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.raises(_StopAfterLoaderConfig):
+        pot.train(
+            structures=make_simple_structures_H_many(n_structures=6),
+            config=cfg,
+        )
+
+    assert len(records) == 1
+    assert records[0]["num_workers"] == 2
+    assert records[0]["persistent_workers"] is True
