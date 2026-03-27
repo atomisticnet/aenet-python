@@ -11,8 +11,8 @@ Notes
 -----
 - Default dtype is float64 for scientific reproducibility
 - Devices: 'cpu' or 'cuda' (auto if config.device is None)
-- Memory modes: 'cpu' and 'gpu' behave as expected; 'mixed' currently
-  behaves like 'gpu' (streaming/CPU-GPU mixing can be added later)
+- Memory modes: 'cpu' and 'gpu' are supported; 'mixed' is reserved for a
+  future real mixed-memory mode and currently raises NotImplementedError
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import os
 import random
 import time
 import warnings
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -108,10 +108,62 @@ def _warn_on_small_validation_set(
 class _RuntimeCacheState:
     """Split-local runtime caches owned by the trainer policy wrapper."""
 
-    def __init__(self) -> None:
-        self.feature_cache: Dict[int, torch.Tensor] = {}
-        self.neighbor_cache: Dict[int, dict] = {}
-        self.graph_cache: Dict[int, dict] = {}
+    def __init__(
+        self,
+        *,
+        feature_max_entries: int | None,
+        neighbor_max_entries: int | None,
+        graph_max_entries: int | None,
+    ) -> None:
+        self.feature_cache = _BoundedCache(max_entries=feature_max_entries)
+        self.neighbor_cache = _BoundedCache(max_entries=neighbor_max_entries)
+        self.graph_cache = _BoundedCache(max_entries=graph_max_entries)
+
+
+class _BoundedCache:
+    """Small LRU cache with an optional maximum entry count."""
+
+    def __init__(self, *, max_entries: int | None) -> None:
+        self.max_entries = max_entries
+        self._entries: OrderedDict[int, Any] = OrderedDict()
+
+    def __contains__(self, key: int) -> bool:
+        return key in self._entries
+
+    def __getitem__(self, key: int) -> Any:
+        value = self._entries[key]
+        self._entries.move_to_end(key)
+        return value
+
+    def __setitem__(self, key: int, value: Any) -> None:
+        if self.max_entries == 0:
+            return
+        if key in self._entries:
+            self._entries.move_to_end(key)
+        self._entries[key] = value
+        if self.max_entries is not None:
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, key: int, default: Any = None) -> Any:
+        if key not in self._entries:
+            return default
+        return self[key]
+
+    def is_enabled(self) -> bool:
+        """Return whether this cache can retain any entries."""
+        return self.max_entries is None or self.max_entries > 0
+
+    def is_full(self) -> bool:
+        """Return whether a bounded cache has reached capacity."""
+        return (
+            self.max_entries is not None
+            and self.max_entries > 0
+            and len(self._entries) >= self.max_entries
+        )
 
 
 def _flatten_subset_indices(dataset: Dataset) -> Tuple[Dataset, Optional[List[int]]]:
@@ -144,7 +196,18 @@ class _TrainingPolicyDataset(Dataset):
         self._root_dataset, self._indices = _flatten_subset_indices(dataset)
         self._config = config
         self._split = split
-        self._cache_state = _RuntimeCacheState()
+        self._cache_limits = {
+            "feature_max_entries": getattr(
+                config, "cache_feature_max_entries", None
+            ),
+            "neighbor_max_entries": getattr(
+                config, "cache_neighbor_max_entries", None
+            ),
+            "graph_max_entries": getattr(
+                config, "cache_force_triplet_max_entries", None
+            ),
+        }
+        self._cache_state = _RuntimeCacheState(**self._cache_limits)
 
         cache_scope = str(getattr(config, "cache_scope", "all"))
         cache_enabled = (
@@ -183,7 +246,7 @@ class _TrainingPolicyDataset(Dataset):
     def __getstate__(self) -> dict:
         """Reset split-local runtime caches when DataLoader workers spawn."""
         state = self.__dict__.copy()
-        state["_cache_state"] = _RuntimeCacheState()
+        state["_cache_state"] = _RuntimeCacheState(**state["_cache_limits"])
         return state
 
     def __len__(self) -> int:
@@ -200,6 +263,17 @@ class _TrainingPolicyDataset(Dataset):
         if self._indices is None:
             return list(base_structures)
         return [base_structures[i] for i in self._indices]
+
+    def get_structure(self, idx: int) -> Structure:
+        """Return the wrapped structure for one split-local dataset index."""
+        return self._root_dataset.get_structure(self._source_index(idx))
+
+    def get_structure_identifier(self, idx: int) -> Optional[str]:
+        """Return the wrapped identifier for one split-local dataset index."""
+        getter = getattr(self._root_dataset, "get_structure_identifier", None)
+        if callable(getter):
+            return getter(self._source_index(idx))
+        return None
 
     def _source_index(self, idx: int) -> int:
         if self._indices is None:
@@ -250,12 +324,14 @@ class _TrainingPolicyDataset(Dataset):
         return source_idx in self.selected_force_indices
 
     def warmup_caches(self, show_progress: bool = True) -> None:
-        """Pre-populate split-local runtime caches for the current policy."""
-        if not (
-            self.cache_features
-            or self.cache_neighbors
-            or self.cache_force_triplets
-        ):
+        """
+        Pre-populate split-local runtime caches for the current policy.
+
+        When all enabled caches have bounded capacities, warmup stops once
+        every enabled cache has reached its limit instead of walking the full
+        split eagerly.
+        """
+        if not self.has_enabled_runtime_caches():
             return
 
         iterator = range(len(self))
@@ -269,6 +345,33 @@ class _TrainingPolicyDataset(Dataset):
 
         for idx in iterator:
             _ = self[idx]
+            if self._warmup_can_stop_early() and self._all_warmup_targets_full():
+                break
+
+    def has_enabled_runtime_caches(self) -> bool:
+        """Return whether this split can retain any trainer-owned cache data."""
+        return any(cache.is_enabled() for cache in self._enabled_caches())
+
+    def _enabled_caches(self) -> list[_BoundedCache]:
+        caches: list[_BoundedCache] = []
+        if self.cache_features:
+            caches.append(self._cache_state.feature_cache)
+        if self.cache_neighbors:
+            caches.append(self._cache_state.neighbor_cache)
+        if self.cache_force_triplets:
+            caches.append(self._cache_state.graph_cache)
+        return [cache for cache in caches if cache.is_enabled()]
+
+    def _warmup_can_stop_early(self) -> bool:
+        caches = self._enabled_caches()
+        return bool(caches) and all(
+            cache.max_entries is not None and cache.max_entries > 0
+            for cache in caches
+        )
+
+    def _all_warmup_targets_full(self) -> bool:
+        caches = self._enabled_caches()
+        return bool(caches) and all(cache.is_full() for cache in caches)
 
     def __getitem__(self, idx: int) -> dict:
         source_idx = self._source_index(idx)
@@ -283,6 +386,40 @@ class _TrainingPolicyDataset(Dataset):
             cache_force_triplets=self.cache_force_triplets,
             load_local_derivatives=use_forces,
         )
+
+    def materialize_uncached_sample(self, idx: int) -> dict:
+        """
+        Materialize one sample without touching trainer-owned runtime caches.
+
+        This is used for pre-training stats collection so normalization does
+        not implicitly prefill or reorder the runtime caches that back the
+        actual training loop.
+        """
+        source_idx = self._source_index(idx)
+        struct = self._root_dataset.get_structure(source_idx)
+        use_forces = self.should_use_forces(source_idx, struct.has_forces())
+        return self._root_dataset.materialize_sample(
+            source_idx,
+            use_forces=use_forces,
+            cache_state=None,
+            cache_features=False,
+            cache_neighbors=False,
+            cache_force_triplets=False,
+            load_local_derivatives=use_forces,
+        )
+
+
+class _TrainingStatsDataset(Dataset):
+    """Stats-only wrapper that bypasses trainer-owned runtime caches."""
+
+    def __init__(self, dataset: _TrainingPolicyDataset) -> None:
+        self._dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+    def __getitem__(self, idx: int) -> dict:
+        return self._dataset.materialize_uncached_sample(idx)
 
 
 def _should_wrap_training_policy_dataset(dataset: Optional[Dataset]) -> bool:
@@ -319,6 +456,26 @@ def _requires_training_worker_restart(
     if dataset.force_fraction >= 1.0:
         return False
     return int(getattr(config, "force_resample_num_epochs", 0)) > 0
+
+
+def _should_skip_runtime_cache_warmup(
+    *,
+    train_dataset: Optional[Dataset],
+    val_dataset: Optional[Dataset],
+    config: TorchTrainingConfig,
+) -> bool:
+    """Return True when configured warmup should be skipped for worker mode."""
+    if not bool(getattr(config, "cache_warmup", False)):
+        return False
+    if int(getattr(config, "num_workers", 0)) <= 0:
+        return False
+    for dataset in (train_dataset, val_dataset):
+        if (
+            isinstance(dataset, _TrainingPolicyDataset)
+            and dataset.has_enabled_runtime_caches()
+        ):
+            return True
+    return False
 
 
 def _iter_progress(iterable, enable: bool, desc: str):
@@ -746,23 +903,82 @@ class TorchANNPotential:
                 return None
             return [base_structures[i] for i in dataset.indices]
 
+        get_structure = getattr(dataset, "get_structure", None)
+        if callable(get_structure):
+            structures: List[Structure] = []
+            for idx in range(len(dataset)):
+                struct = get_structure(idx)
+                identifier = self._dataset_structure_identifier(
+                    dataset,
+                    idx,
+                    structure=struct,
+                )
+                structures.append(
+                    self._structure_with_identifier(
+                        struct,
+                        idx,
+                        identifier=identifier,
+                    )
+                )
+            return structures
+
         structures = getattr(dataset, "structures", None)
         if structures is None:
             return None
         return [
-            self._structure_with_identifier(struct, idx)
+            self._structure_with_identifier(
+                struct,
+                idx,
+                identifier=self._dataset_structure_identifier(
+                    dataset,
+                    idx,
+                    structure=struct,
+                ),
+            )
             for idx, struct in enumerate(structures)
         ]
+
+    @staticmethod
+    def _dataset_structure_identifier(
+        dataset: Dataset,
+        index: int,
+        *,
+        structure: Optional[Structure] = None,
+    ) -> Optional[str]:
+        """Return the preferred output identifier for one dataset entry."""
+        getter = getattr(dataset, "get_structure_identifier", None)
+        if callable(getter):
+            identifier = getter(index)
+            if identifier not in (None, ""):
+                return str(identifier)
+
+        if structure is not None and getattr(structure, "name", None) not in (
+            None,
+            "",
+        ):
+            return str(structure.name)
+
+        return None
 
     @staticmethod
     def _structure_with_identifier(
         structure: Structure,
         index: int,
+        identifier: Optional[str] = None,
     ) -> Structure:
         """Return a structure carrying a stable identifier for outputs."""
-        if getattr(structure, "name", None) not in (None, ""):
+        resolved = identifier
+        if resolved in (None, "") and getattr(structure, "name", None) not in (
+            None,
+            "",
+        ):
+            resolved = str(structure.name)
+        if resolved in (None, ""):
+            resolved = f"structure_{index:06d}"
+
+        if getattr(structure, "name", None) == resolved:
             return structure
-        return replace(structure, name=f"structure_{index:06d}")
+        return replace(structure, name=resolved)
 
     def _write_energies_file(
         self,
@@ -902,6 +1118,15 @@ class TorchANNPotential:
             'dataset' and 'structures'.
         test_dataset : torch.utils.data.Dataset, optional
             Explicit test dataset to use alongside train_dataset.
+        config : TorchTrainingConfig, optional
+            Training configuration. ``config.iterations`` always means the
+            number of epochs to run in this call. When ``resume_from`` is
+            provided, the trainer loads the checkpoint state and then runs
+            that many additional epochs.
+        resume_from : str, optional
+            Path to a training checkpoint created by the checkpoint manager.
+            The checkpoint's saved epoch, optimizer state, history, and
+            normalization state are restored before continuing training.
 
         Notes
         -----
@@ -923,6 +1148,12 @@ class TorchANNPotential:
         memory_mode = config.memory_mode
         if memory_mode not in ("cpu", "gpu", "mixed"):
             raise ValueError(f"Invalid memory_mode '{memory_mode}'")
+        if memory_mode == "mixed":
+            raise NotImplementedError(
+                "memory_mode='mixed' is reserved for a future real "
+                "mixed-memory execution mode and is not implemented yet. "
+                "Use memory_mode='cpu' or memory_mode='gpu' for now."
+            )
 
         # Ensure model on device/dtype
         self.model.to(device)
@@ -1082,18 +1313,30 @@ class TorchANNPotential:
                 split="val",
             )
 
-        # Warmup caches if using trainer-owned runtime caching
-        show_progress = bool(getattr(config, "show_progress", True))
-        if isinstance(train_ds, _TrainingPolicyDataset):
-            train_ds.warmup_caches(show_progress=show_progress)
-        if isinstance(test_ds, _TrainingPolicyDataset):
-            test_ds.warmup_caches(show_progress=show_progress)
-
         # Initial force structure selection for random sampling.
         if isinstance(train_ds, _TrainingPolicyDataset):
             train_ds.initialize_force_sampling()
         if isinstance(test_ds, _TrainingPolicyDataset):
             test_ds.initialize_force_sampling()
+
+        # Optional trainer-owned runtime-cache warmup.
+        show_progress = bool(getattr(config, "show_progress", True))
+        if _should_skip_runtime_cache_warmup(
+            train_dataset=train_ds,
+            val_dataset=test_ds,
+            config=config,
+        ):
+            warnings.warn(
+                "Skipping trainer-owned runtime cache warmup because "
+                "num_workers > 0 creates worker-local caches after "
+                "DataLoader worker spawn.",
+                UserWarning,
+            )
+        elif bool(getattr(config, "cache_warmup", False)):
+            if isinstance(train_ds, _TrainingPolicyDataset):
+                train_ds.warmup_caches(show_progress=show_progress)
+            if isinstance(test_ds, _TrainingPolicyDataset):
+                test_ds.warmup_caches(show_progress=show_progress)
 
         # DataLoaders
         batch_size = OptimizerBuilder.get_batch_size(config.method)
@@ -1174,9 +1417,15 @@ class TorchANNPotential:
             device=device,
         )
 
-        # Stats DataLoader (no shuffle)
+        # Stats DataLoader (no shuffle). Keep normalization/stat collection
+        # independent from trainer-owned runtime cache population.
+        stats_dataset = (
+            _TrainingStatsDataset(train_ds)
+            if isinstance(train_ds, _TrainingPolicyDataset)
+            else train_ds
+        )
         stats_loader = DataLoader(
-            train_ds, batch_size=batch_size,
+            stats_dataset, batch_size=batch_size,
             shuffle=False, collate_fn=_collate_fn
         )
 
@@ -1233,7 +1482,7 @@ class TorchANNPotential:
 
         # Checkpoint manager
         ckpt_manager = None
-        if config.checkpoint_dir is not None:
+        if config.checkpoint_dir is not None or resume_from is not None:
             ckpt_manager = CheckpointManager(
                 checkpoint_dir=config.checkpoint_dir,
                 max_to_keep=config.max_checkpoints,
@@ -1254,9 +1503,13 @@ class TorchANNPotential:
                 if "normalization" in payload:
                     self._normalizer.set_state(payload["normalization"])
                 # Infer start epoch
-                start_epoch = ckpt_manager.infer_start_epoch(resume_from)
+                start_epoch = ckpt_manager.infer_start_epoch(
+                    resume_from,
+                    payload=payload,
+                )
 
         n_epochs = int(config.iterations)
+        end_epoch = start_epoch + n_epochs
         alpha = float(config.alpha)
 
         # Training loop instance
@@ -1281,13 +1534,14 @@ class TorchANNPotential:
                 pass
 
         pbar = (
-            tqdm(total=(n_epochs - start_epoch), desc="Training", ncols=80)
+            tqdm(total=n_epochs, desc="Training", ncols=80)
             if show_progress and tqdm is not None
             else None
         )
 
-        for epoch in range(start_epoch, n_epochs):
+        for epoch in range(start_epoch, end_epoch):
             t0 = time.time()
+            save_best_checkpoint = False
             # Force sampling per epoch-window
             if isinstance(train_ds, _TrainingPolicyDataset):
                 # Resample if force_resample_num_epochs > 0 and we're at
@@ -1344,17 +1598,14 @@ class TorchANNPotential:
 
                 # Best model tracking
                 if config.save_best and ckpt_manager is not None:
-                    if ckpt_manager.should_save_best(val_loss_monitor):
+                    save_best_checkpoint = ckpt_manager.should_save_best(
+                        val_loss_monitor
+                    )
+                    if save_best_checkpoint:
                         self.best_val = (
                             float(ckpt_manager.best_val_loss)
                             if ckpt_manager.best_val_loss is not None
                             else float(val_loss_monitor)
-                            )
-                        ckpt_manager.save_best_model(
-                            trainer=self,
-                            optimizer=optimizer,
-                            epoch=epoch,
-                            training_config=config,
                         )
 
                 # Scheduler
@@ -1377,6 +1628,14 @@ class TorchANNPotential:
                 train_timing=train_timing,
                 val_timing=val_timing,
             )
+
+            if save_best_checkpoint and ckpt_manager is not None:
+                ckpt_manager.save_best_model(
+                    trainer=self,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    training_config=config,
+                )
 
             # Update progress bar
             if pbar is not None:

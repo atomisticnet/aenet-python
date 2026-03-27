@@ -1,15 +1,16 @@
 import math
+from pathlib import Path
 
 import numpy as np
-import torch
 import pytest
+import torch
 
+from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
-    TorchTrainingConfig,
     Structure,
     TorchANNPotential,
+    TorchTrainingConfig,
 )
-from aenet.torch_featurize import ChebyshevDescriptor
 
 
 def _make_simple_structures_H_two():
@@ -193,3 +194,65 @@ def test_progress_bars_disabled(monkeypatch):
     # Assert training completed
     assert len(history.errors["RMSE_train"]) == 2
     assert not math.isnan(history.errors["RMSE_train"].iloc[-1])
+
+
+@pytest.mark.cpu
+def test_progress_bars_resume_use_additional_iterations(monkeypatch, tmp_path):
+    # Arrange
+    structures = _make_simple_structures_H_two()
+    descriptor = _make_descriptor_H(dtype=torch.float64)
+    arch = _make_arch_H(descriptor)
+
+    initial_potential = TorchANNPotential(arch=arch, descriptor=descriptor)
+    initial_config = TorchTrainingConfig(
+        iterations=2,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=False,
+        show_progress=False,
+        checkpoint_dir=str(tmp_path),
+        checkpoint_interval=1,
+        save_best=False,
+        use_scheduler=False,
+    )
+    initial_potential.train(structures=structures, config=initial_config)
+    checkpoint_path = sorted(
+        Path(tmp_path).glob("checkpoint_epoch_*.pt")
+    )[-1]
+
+    resumed_potential = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    from aenet.torch_training import trainer as trainer_mod
+    FakeTqdm.instances = []
+    monkeypatch.setattr(trainer_mod, "tqdm", FakeTqdm, raising=True)
+
+    resumed_config = TorchTrainingConfig(
+        iterations=4,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=False,
+        show_progress=True,
+        show_batch_progress=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    # Act
+    history = resumed_potential.train(
+        structures=structures,
+        config=resumed_config,
+        resume_from=str(checkpoint_path),
+    )
+
+    # Assert outer progress bar reflects additional epochs in this call
+    outers = [inst for inst in FakeTqdm.instances if inst.iterable is None]
+    assert len(outers) == 1, "Expected a single outer epoch progress bar"
+    assert outers[0].total == 4
+    assert outers[0].n == 4
+    assert len(history.errors["RMSE_train"]) == 6

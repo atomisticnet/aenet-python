@@ -67,6 +67,58 @@ def _parser_factory(structs: list[Structure]):
     return _parser
 
 
+def _pickle_parser(path: str):
+    """Load one pickled parser payload for build-worker tests."""
+    with Path(path).open("rb") as handle:
+        payload = pickle.load(handle)
+    if (
+        isinstance(payload, tuple)
+        and len(payload) == 2
+        and payload[0] == "raise"
+    ):
+        raise RuntimeError(str(payload[1]))
+    return payload
+
+
+def _write_pickled_build_inputs(
+    directory: Path,
+    payloads: list[object],
+) -> list[str]:
+    """Write parser payloads for process-based build tests."""
+    directory.mkdir(parents=True, exist_ok=True)
+    file_paths = []
+    for index, payload in enumerate(payloads):
+        path = directory / f"build_input_{index}.pkl"
+        with path.open("wb") as handle:
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        file_paths.append(str(path))
+    return file_paths
+
+
+def _decode_table_string(value) -> str:
+    """Decode PyTables string columns to plain Python strings."""
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
+def _read_meta_rows(db_path: Path) -> list[tuple[str, int, bool, int, float, str]]:
+    """Read the HDF5 metadata table for deterministic-order assertions."""
+    with tables.open_file(str(db_path), mode="r") as h5:
+        meta = h5.get_node("/entries/meta")
+        rows = []
+        for row in meta:  # type: ignore[assignment]
+            rows.append(
+                (
+                    _decode_table_string(row["path"]),
+                    int(row["frame"]),
+                    bool(row["has_forces"]),
+                    int(row["n_atoms"]),
+                    float(row["energy"]),
+                    _decode_table_string(row["name"]),
+                )
+            )
+        return rows
+
+
 def _make_descriptor(dtype=torch.float64) -> ChebyshevDescriptor:
     # Keep orders small to minimize compute; ensure within cutoffs.
     return ChebyshevDescriptor(
@@ -387,6 +439,166 @@ def test_hdf5_build_and_getitem(tmp_path: Path):
     assert sample0["n_atoms"] == 3
     # Features shape has 3 rows (atoms) x F columns
     assert sample0["features"].shape[0] == 3
+
+
+@pytest.mark.cpu
+def test_hdf5_parallel_build_preserves_order_for_multiframe_inputs(
+    tmp_path: Path,
+):
+    """Parallel builds should preserve deterministic path/frame ordering."""
+    struct_a = _make_struct(0)
+    struct_a.name = "serial-a"
+    struct_b0 = _make_struct(1)
+    struct_b0.name = "multi-b0"
+    struct_b1 = _make_struct(2)
+    struct_b1.name = "multi-b1"
+    struct_c = _make_energy_only_struct()
+    struct_c.name = "serial-c"
+
+    file_paths = _write_pickled_build_inputs(
+        tmp_path,
+        [struct_a, [struct_b0, struct_b1], struct_c],
+    )
+    db_path = tmp_path / "parallel_ordered.h5"
+    ds = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(db_path),
+        file_paths=file_paths,
+        parser=_pickle_parser,
+        mode="build",
+    )
+
+    ds.build_database(show_progress=False, build_workers=2)
+
+    expected_rows = [
+        (file_paths[0], 0, True, 3, float(struct_a.energy), "serial-a"),
+        (file_paths[1], 0, True, 3, float(struct_b0.energy), "multi-b0"),
+        (file_paths[1], 1, True, 3, float(struct_b1.energy), "multi-b1"),
+        (file_paths[2], 0, False, 2, float(struct_c.energy), "serial-c"),
+    ]
+    assert len(ds) == 4
+    assert _read_meta_rows(db_path) == expected_rows
+    assert [ds.get_structure(i).name for i in range(len(ds))] == [
+        "serial-a",
+        "multi-b0",
+        "multi-b1",
+        "serial-c",
+    ]
+
+
+@pytest.mark.cpu
+def test_hdf5_parallel_build_matches_serial_for_persisted_caches(
+    tmp_path: Path,
+):
+    """Parallel persisted-cache builds should match serial output exactly."""
+    structs = [_make_struct(0), _make_struct(1), _make_struct(2)]
+    for index, struct in enumerate(structs):
+        struct.name = f"struct-{index}"
+
+    file_paths = _write_pickled_build_inputs(tmp_path / "inputs", structs)
+    serial_path = tmp_path / "serial_cache_build.h5"
+    parallel_path = tmp_path / "parallel_cache_build.h5"
+
+    serial_ds = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(serial_path),
+        file_paths=file_paths,
+        parser=_pickle_parser,
+        mode="build",
+    )
+    parallel_ds = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(parallel_path),
+        file_paths=file_paths,
+        parser=_pickle_parser,
+        mode="build",
+    )
+
+    serial_ds.build_database(
+        show_progress=False,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+    parallel_ds.build_database(
+        show_progress=False,
+        build_workers=2,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+
+    assert _read_meta_rows(serial_path) == _read_meta_rows(parallel_path)
+    for idx in range(len(serial_ds)):
+        serial_features = serial_ds.load_persisted_features(idx)
+        parallel_features = parallel_ds.load_persisted_features(idx)
+        serial_derivatives = serial_ds.load_persisted_force_derivatives(idx)
+        parallel_derivatives = parallel_ds.load_persisted_force_derivatives(idx)
+
+        assert serial_features is not None
+        assert parallel_features is not None
+        assert torch.equal(serial_features, parallel_features)
+        assert serial_derivatives is not None
+        assert parallel_derivatives is not None
+        for key in ("center_idx", "neighbor_idx"):
+            assert torch.equal(
+                serial_derivatives["radial"][key],
+                parallel_derivatives["radial"][key],
+            )
+        assert torch.allclose(
+            serial_derivatives["radial"]["dG_drij"],
+            parallel_derivatives["radial"]["dG_drij"],
+        )
+        for key in ("center_idx", "neighbor_j_idx", "neighbor_k_idx"):
+            assert torch.equal(
+                serial_derivatives["angular"][key],
+                parallel_derivatives["angular"][key],
+            )
+        for key in ("grads_i", "grads_j", "grads_k"):
+            assert torch.allclose(
+                serial_derivatives["angular"][key],
+                parallel_derivatives["angular"][key],
+            )
+
+
+@pytest.mark.cpu
+def test_hdf5_parallel_build_failure_preserves_existing_database(
+    tmp_path: Path,
+):
+    """Failed parallel rebuilds should not replace an existing database."""
+    initial_struct = _make_struct(0)
+    ok_inputs = _write_pickled_build_inputs(tmp_path / "ok", [initial_struct])
+    db_path = tmp_path / "atomic_parallel_build.h5"
+
+    ds_ok = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(db_path),
+        file_paths=ok_inputs,
+        parser=_pickle_parser,
+        mode="build",
+    )
+    ds_ok.build_database(show_progress=False)
+
+    failing_inputs = _write_pickled_build_inputs(
+        tmp_path / "fail",
+        [_make_struct(1), ("raise", "boom")],
+    )
+    ds_fail = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(db_path),
+        file_paths=failing_inputs,
+        parser=_pickle_parser,
+        mode="build",
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to parse build input"):
+        ds_fail.build_database(show_progress=False, build_workers=2)
+
+    ds_load = HDF5StructureDataset(
+        descriptor=_make_descriptor(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+    assert len(ds_load) == 1
+    assert ds_load.get_structure(0).energy == pytest.approx(initial_struct.energy)
 
 
 @pytest.mark.cpu
@@ -1629,6 +1841,10 @@ def test_hdf5_dataset_close_is_idempotent_and_context_manager_closes(
         mode="build",
     )
     ds.build_database(show_progress=False)
+    assert ds._h5 is None
+
+    sample = ds[0]
+    assert sample["n_atoms"] == 3
     assert ds._h5 is not None
 
     ds.close()

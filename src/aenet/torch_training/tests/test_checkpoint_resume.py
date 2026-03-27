@@ -17,6 +17,12 @@ from aenet.torch_training import TorchANNPotential
 from aenet.torch_training.config import Adam, Structure, TorchTrainingConfig
 
 
+def _completed_epochs_from_payload(payload: dict) -> int:
+    """Return completed epochs from checkpoint payload metadata."""
+    extra_metadata = payload.get("extra_metadata", {}) or {}
+    return int(extra_metadata["epoch"]) + 1
+
+
 @pytest.fixture
 def temp_checkpoint_dir():
     """Create a temporary directory for checkpoints."""
@@ -70,7 +76,7 @@ def architecture():
 def test_checkpoint_resume_basic(
     temp_checkpoint_dir, simple_structures, descriptor, architecture
 ):
-    """Test basic checkpoint save and resume functionality."""
+    """Test that resume runs additional epochs from the saved checkpoint."""
     # Phase 1: Train for 5 epochs with checkpointing
     pot1 = TorchANNPotential(arch=architecture, descriptor=descriptor)
 
@@ -79,7 +85,7 @@ def test_checkpoint_resume_basic(
         method=Adam(mu=0.01, batchsize=2),
         testpercent=0,
         checkpoint_dir=temp_checkpoint_dir,
-        checkpoint_interval=2,
+        checkpoint_interval=1,
         max_checkpoints=3,
         save_best=False,
         show_progress=False,
@@ -87,6 +93,7 @@ def test_checkpoint_resume_basic(
 
     results1 = pot1.train(structures=simple_structures, config=config1)
     assert results1 is not None
+    assert len(results1.errors) == 5
 
     # Verify checkpoints were created
     checkpoint_files = list(
@@ -95,16 +102,20 @@ def test_checkpoint_resume_basic(
 
     # Get the last checkpoint
     last_checkpoint = sorted(checkpoint_files)[-1]
+    payload = torch.load(
+        last_checkpoint, map_location="cpu", weights_only=False
+    )
+    completed_epochs = _completed_epochs_from_payload(payload)
 
     # Phase 2: Create new trainer and resume from checkpoint
     pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
 
     config2 = TorchTrainingConfig(
-        iterations=10,  # Total 10 epochs
+        iterations=4,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=0,
-        checkpoint_dir=temp_checkpoint_dir,
-        checkpoint_interval=2,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
         show_progress=False,
     )
 
@@ -116,7 +127,7 @@ def test_checkpoint_resume_basic(
 
     # Verify training completed successfully (results object returned)
     assert results2 is not None
-    # The training should have completed without errors
+    assert len(results2.errors) == completed_epochs + 4
 
 
 def test_checkpoint_resume_preserves_history(
@@ -147,10 +158,11 @@ def test_checkpoint_resume_preserves_history(
     pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
 
     config2 = TorchTrainingConfig(
-        iterations=5,  # Total should be 5 epochs
+        iterations=2,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=20,
-        checkpoint_dir=temp_checkpoint_dir,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
         show_progress=False,
     )
 
@@ -162,6 +174,11 @@ def test_checkpoint_resume_preserves_history(
 
     # Training should complete successfully
     assert results2 is not None
+    assert len(results2.errors) == 5
+    np.testing.assert_allclose(
+        results2.errors["RMSE_train"].iloc[:3].to_numpy(),
+        results1.errors["RMSE_train"].to_numpy(),
+    )
 
 
 def test_checkpoint_resume_optimizer_state(
@@ -198,7 +215,7 @@ def test_checkpoint_resume_optimizer_state(
 def test_checkpoint_best_model(
     temp_checkpoint_dir, simple_structures, descriptor, architecture
 ):
-    """Test that best model checkpoint works correctly."""
+    """Test that ``best_model.pt`` resumes from saved checkpoint metadata."""
     pot = TorchANNPotential(arch=architecture, descriptor=descriptor)
 
     config = TorchTrainingConfig(
@@ -218,9 +235,14 @@ def test_checkpoint_best_model(
     assert best_model_path.exists(), "best_model.pt was not created"
 
     # Verify it can be loaded
+    best_payload = torch.load(
+        best_model_path, map_location="cpu", weights_only=False
+    )
+    completed_epochs = _completed_epochs_from_payload(best_payload)
+
     pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
     config2 = TorchTrainingConfig(
-        iterations=8,
+        iterations=2,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=20,
         checkpoint_dir=None,
@@ -228,12 +250,14 @@ def test_checkpoint_best_model(
         show_progress=False,
     )
 
-    # Should be able to resume from best_model.pt
-    pot2.train(
+    results = pot2.train(
         structures=simple_structures,
         config=config2,
         resume_from=str(best_model_path),
     )
+
+    assert results is not None
+    assert len(results.errors) == completed_epochs + 2
 
 
 def test_checkpoint_rotation(
@@ -304,7 +328,7 @@ def test_checkpoint_metadata_preservation(
 def test_checkpoint_resume_different_iterations(
     temp_checkpoint_dir, simple_structures, descriptor, architecture
 ):
-    """Test resuming with different total iteration count."""
+    """Test resuming with per-call iteration semantics."""
     # Train for 3 epochs
     pot1 = TorchANNPotential(arch=architecture, descriptor=descriptor)
     config1 = TorchTrainingConfig(
@@ -321,10 +345,10 @@ def test_checkpoint_resume_different_iterations(
         Path(temp_checkpoint_dir).glob("checkpoint_epoch_*.pt")
     )[-1]
 
-    # Resume but set iterations to 10 (should train 7 more epochs)
+    # Resume and run 2 additional epochs
     pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
     config2 = TorchTrainingConfig(
-        iterations=10,
+        iterations=2,
         method=Adam(mu=0.01, batchsize=2),
         testpercent=0,
         checkpoint_dir=None,
@@ -340,3 +364,46 @@ def test_checkpoint_resume_different_iterations(
 
     # Training should complete successfully
     assert results is not None
+    assert len(results.errors) == 5
+
+
+def test_checkpoint_resume_zero_iterations_is_noop(
+    temp_checkpoint_dir, simple_structures, descriptor, architecture
+):
+    """Test that resuming with zero iterations only restores checkpoint state."""
+    pot1 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+    config1 = TorchTrainingConfig(
+        iterations=3,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        checkpoint_dir=temp_checkpoint_dir,
+        checkpoint_interval=1,
+        show_progress=False,
+    )
+    results1 = pot1.train(structures=simple_structures, config=config1)
+
+    checkpoint_path = sorted(
+        Path(temp_checkpoint_dir).glob("checkpoint_epoch_*.pt")
+    )[-1]
+
+    pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+    config2 = TorchTrainingConfig(
+        iterations=0,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        show_progress=False,
+    )
+
+    results2 = pot2.train(
+        structures=simple_structures,
+        config=config2,
+        resume_from=str(checkpoint_path),
+    )
+
+    assert len(results2.errors) == 3
+    np.testing.assert_allclose(
+        results2.errors["RMSE_train"].to_numpy(),
+        results1.errors["RMSE_train"].to_numpy(),
+    )

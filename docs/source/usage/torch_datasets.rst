@@ -336,7 +336,7 @@ Building the Database
    from aenet.geometry import AtomicStructure
    from glob import glob
 
-   # Define a top-level parser function (required for multiprocessing)
+   # Define the parser used during HDF5 database construction
    def parse_xsf(path: str):
        """Parse XSF file and return torch Structure(s)."""
        atomic_struct = AtomicStructure.from_file(path)
@@ -360,6 +360,7 @@ Building the Database
 
    db.build_database(
        show_progress=True,
+       build_workers=8,                 # optional build-time worker threads
        persist_descriptor=True,         # optional descriptor recovery step
        persist_features=True,           # optional persisted raw features
        persist_force_derivatives=True,  # optional sparse derivative cache
@@ -367,6 +368,14 @@ Building the Database
 
    # ``db`` is immediately reusable after build_database(); reopening the
    # file is only needed in a later session or when you want a separate handle.
+
+.. note::
+
+   ``build_workers`` only affects the one-time ``build_database()`` call.
+   It parallelizes parser execution and optional persisted-cache preparation
+   with worker threads, while the parent process still performs all ordered
+   HDF5 writes. This is
+   separate from training-time ``num_workers`` on ``TorchTrainingConfig``.
 
 .. note::
 
@@ -413,7 +422,8 @@ different purposes:
   for force-labeled entries to ``/torch_cache/force_derivatives``
 * ``cache_features=True`` is a trainer-owned in-memory runtime cache attached
   to the current dataset instance; it speeds up repeated accesses within a run
-  but does not modify the HDF5 file
+  but does not modify the HDF5 file. Its size is controlled by
+  ``cache_feature_max_entries`` on ``TorchTrainingConfig``
 
 Runtime precedence is explicit:
 
@@ -456,7 +466,9 @@ Training from HDF5 Database
        force_fraction=0.3,
        force_sampling="random",
        cache_features=True,
+       cache_feature_max_entries=1024,
        cache_neighbors=True,
+       cache_neighbor_max_entries=512,
        num_workers=8,               # Parallel workers (each opens own handle)
        prefetch_factor=4,
        persistent_workers=True,
@@ -479,10 +491,18 @@ Key HDF5 Features
 * **Multiprocessing-safe**: Each DataLoader worker opens its own read-only handle
 * **Compression**: Built-in HDF5 compression (zlib, blosc) reduces disk usage
 * **LRU caching**: Configurable in-memory cache per worker for frequently accessed entries
-* **Parser requirements**: Must be a top-level function (pickleable) when using ``num_workers > 0``
+* **Build parallelism**: ``build_workers`` accelerates parser execution and
+  optional persisted-cache generation, but ordered HDF5 writes still happen
+  in the parent process
+* **Parser concurrency**: When using ``build_workers > 1``, make sure the
+  parser callable is safe to invoke concurrently over independent file paths
 * **Unified persisted cache**: Optional ``/torch_cache/features`` and
   ``/torch_cache/force_derivatives`` sections can be written once and reused
   lazily across later HDF5-backed runs
+* **Separate trainer cache limits**: ``cache_feature_max_entries``,
+  ``cache_neighbor_max_entries``, and ``cache_force_triplet_max_entries`` bound
+  the trainer-owned runtime caches separately from HDF5
+  ``in_memory_cache_size``
 * **Deterministic handle cleanup**: Call ``dataset.close()`` or use
   ``with HDF5StructureDataset(...) as dataset:``
 
@@ -586,6 +606,8 @@ Set these on ``TorchTrainingConfig``:
   HDF5 features and does not write back to disk.
 * **cache_neighbors**: Reuse neighbor search results for energy-view reuse and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets instead of rebuilding them for the default sparse force-training path
+* **cache_*_max_entries**: Bound the trainer-owned runtime caches per split and per process/worker
+* **cache_warmup**: Optional single-process cache prefill before epoch 0; skipped automatically when ``num_workers > 0``
 
 For repeated fixed-geometry HDF5 workflows, prefer build-time
 ``persist_features=True`` and ``persist_force_derivatives=True`` when you want

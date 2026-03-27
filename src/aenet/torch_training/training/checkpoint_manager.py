@@ -162,6 +162,13 @@ class CheckpointManager:
             model.load_state_dict(payload["model_state_dict"])
             optimizer.load_state_dict(payload["optimizer_state_dict"])
 
+            if "history" not in payload and "training_history" in payload:
+                payload["history"] = payload["training_history"]
+            if "epoch" not in payload:
+                extra_metadata = payload.get("extra_metadata", {}) or {}
+                if "epoch" in extra_metadata:
+                    payload["epoch"] = extra_metadata["epoch"]
+
             if "best_val_loss" in payload:
                 self.best_val_loss = payload["best_val_loss"]
 
@@ -212,20 +219,38 @@ class CheckpointManager:
             filename="best_model.pt",
         )
 
-    def infer_start_epoch(self, checkpoint_path: str) -> int:
+    def infer_start_epoch(
+        self,
+        checkpoint_path: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> int:
         """
-        Infer starting epoch from checkpoint filename.
+        Infer starting epoch from checkpoint metadata or filename.
 
         Parameters
         ----------
         checkpoint_path : str
             Path to checkpoint file.
+        payload : dict, optional
+            Loaded checkpoint payload. When present, ``payload["epoch"]`` is
+            used as the authoritative epoch number.
 
         Returns
         -------
         int
-            Starting epoch (checkpoint epoch + 1), or 0 if cannot infer.
+            Starting epoch (checkpoint epoch + 1), or 0 if it cannot be
+            inferred.
         """
+        if payload is not None:
+            try:
+                if "epoch" in payload:
+                    return int(payload["epoch"]) + 1
+                extra_metadata = payload.get("extra_metadata", {}) or {}
+                if "epoch" in extra_metadata:
+                    return int(extra_metadata["epoch"]) + 1
+            except Exception:
+                pass
+
         try:
             name = Path(checkpoint_path).name
             if name.startswith("checkpoint_epoch_") and name.endswith(".pt"):

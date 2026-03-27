@@ -149,6 +149,10 @@ class TestTorchTrainingConfig:
         assert config.force_weight == 0.0
         assert config.force_fraction == 1.0
         assert config.force_sampling == 'random'
+        assert config.cache_feature_max_entries == 1024
+        assert config.cache_neighbor_max_entries == 512
+        assert config.cache_force_triplet_max_entries == 256
+        assert config.cache_warmup is False
         assert config.memory_mode == 'gpu'
         assert config.method is not None
         assert isinstance(config.method, Adam)
@@ -162,7 +166,11 @@ class TestTorchTrainingConfig:
             force_weight=0.5,
             force_fraction=0.8,
             force_sampling='fixed',
+            cache_feature_max_entries=32,
             cache_neighbors=True,
+            cache_neighbor_max_entries=16,
+            cache_force_triplet_max_entries=8,
+            cache_warmup=True,
             memory_mode='cpu'
         )
 
@@ -172,7 +180,11 @@ class TestTorchTrainingConfig:
         assert config.force_weight == 0.5
         assert config.force_fraction == 0.8
         assert config.force_sampling == 'fixed'
+        assert config.cache_feature_max_entries == 32
         assert config.cache_neighbors is True
+        assert config.cache_neighbor_max_entries == 16
+        assert config.cache_force_triplet_max_entries == 8
+        assert config.cache_warmup is True
         assert config.memory_mode == 'cpu'
 
     def test_alpha_property(self):
@@ -215,6 +227,32 @@ class TestTorchTrainingConfig:
         """Test validation of memory_mode."""
         with pytest.raises(ValueError, match="memory_mode must be"):
             TorchTrainingConfig(memory_mode='invalid')
+
+    def test_mixed_memory_mode_is_not_implemented(self):
+        """The reserved mixed mode should fail fast until implemented."""
+        with pytest.raises(
+            NotImplementedError,
+            match="reserved for a future real mixed-memory execution mode",
+        ):
+            TorchTrainingConfig(
+                memory_mode='mixed',
+                num_workers=2,
+                persistent_workers=True,
+            )
+
+    def test_invalid_runtime_cache_entry_limit(self):
+        """Runtime cache entry limits must be non-negative or None."""
+        with pytest.raises(ValueError, match="cache_feature_max_entries"):
+            TorchTrainingConfig(cache_feature_max_entries=-1)
+
+        with pytest.raises(ValueError, match="cache_neighbor_max_entries"):
+            TorchTrainingConfig(cache_neighbor_max_entries=-1)
+
+        with pytest.raises(
+            ValueError,
+            match="cache_force_triplet_max_entries",
+        ):
+            TorchTrainingConfig(cache_force_triplet_max_entries=-1)
 
     def test_negative_iterations(self):
         """Test validation of iterations."""

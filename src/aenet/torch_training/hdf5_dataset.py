@@ -38,8 +38,11 @@ import json
 import os
 import pickle
 import random
+import tempfile
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -131,6 +134,244 @@ def _tensor_to_numpy_1d(
     return tensor.numpy().astype(dtype, copy=False)
 
 
+def _normalize_parsed_structures(
+    structures: Structure | Sequence[Structure],
+) -> list[Structure]:
+    """Normalize parser output to a list of torch-training structures."""
+    if isinstance(structures, (list, tuple)):
+        return list(structures)
+    return [structures]
+
+
+def _structure_energy_or_nan(struct: Structure) -> float:
+    """Return the structure energy or ``nan`` if it is unavailable."""
+    try:
+        return float(struct.energy)
+    except Exception:
+        return float("nan")
+
+
+def _decode_meta_text(value: object) -> str:
+    """Normalize persisted HDF5 string metadata to a plain Python string."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8").rstrip("\x00")
+    return str(value).rstrip("\x00")
+
+
+@dataclass
+class _PersistedForceDerivativePayload:
+    """Worker-safe NumPy payload for one persisted derivative entry."""
+
+    radial_center: np.ndarray
+    radial_neighbor: np.ndarray
+    radial_grads: np.ndarray
+    radial_typespin: np.ndarray
+    angular_center: np.ndarray
+    angular_neighbor_j: np.ndarray
+    angular_neighbor_k: np.ndarray
+    angular_grads_i: np.ndarray
+    angular_grads_j: np.ndarray
+    angular_grads_k: np.ndarray
+    angular_typespin: np.ndarray
+
+
+@dataclass
+class _BuildEntryPayload:
+    """Worker-safe payload for one HDF5 entry."""
+
+    source_path: str
+    frame_idx: int
+    structure_bytes: bytes
+    has_forces: bool
+    n_atoms: int
+    energy: float
+    name: str
+    feature_values: np.ndarray | None = None
+    feature_n_features: int | None = None
+    force_derivatives: _PersistedForceDerivativePayload | None = None
+
+
+def _build_force_derivative_payload(
+    local_derivatives: dict[str, dict[str, torch.Tensor | None]],
+    *,
+    descriptor_dtype: torch.dtype,
+) -> _PersistedForceDerivativePayload:
+    """Convert derivative tensors into a worker-safe NumPy payload."""
+    float_dtype = (
+        np.float32 if descriptor_dtype == torch.float32 else np.float64
+    )
+    radial = local_derivatives["radial"]
+    angular = local_derivatives["angular"]
+    return _PersistedForceDerivativePayload(
+        radial_center=_tensor_to_numpy_1d(
+            radial["center_idx"],
+            dtype=np.int64,
+        ),
+        radial_neighbor=_tensor_to_numpy_1d(
+            radial["neighbor_idx"],
+            dtype=np.int64,
+        ),
+        radial_grads=_tensor_to_numpy_1d(
+            radial["dG_drij"],
+            dtype=float_dtype,
+        ),
+        radial_typespin=_tensor_to_numpy_1d(
+            radial["neighbor_typespin"],
+            dtype=float_dtype,
+        ),
+        angular_center=_tensor_to_numpy_1d(
+            angular["center_idx"],
+            dtype=np.int64,
+        ),
+        angular_neighbor_j=_tensor_to_numpy_1d(
+            angular["neighbor_j_idx"],
+            dtype=np.int64,
+        ),
+        angular_neighbor_k=_tensor_to_numpy_1d(
+            angular["neighbor_k_idx"],
+            dtype=np.int64,
+        ),
+        angular_grads_i=_tensor_to_numpy_1d(
+            angular["grads_i"],
+            dtype=float_dtype,
+        ),
+        angular_grads_j=_tensor_to_numpy_1d(
+            angular["grads_j"],
+            dtype=float_dtype,
+        ),
+        angular_grads_k=_tensor_to_numpy_1d(
+            angular["grads_k"],
+            dtype=float_dtype,
+        ),
+        angular_typespin=_tensor_to_numpy_1d(
+            angular["triplet_typespin"],
+            dtype=float_dtype,
+        ),
+    )
+
+
+def _prepare_build_payloads_for_path(
+    path: str,
+    *,
+    parser: Callable[[str], Structure] | None,
+    descriptor,
+    persist_features: bool,
+    persist_force_derivatives: bool,
+) -> list[_BuildEntryPayload]:
+    """
+    Parse one input path and prepare worker-safe payloads for ordered writes.
+
+    This helper is intentionally top-level so concurrent build workers can
+    execute it without capturing dataset instance state.
+    """
+    if parser is None:
+        raise RuntimeError("Parallel HDF5 build requires a parser callable.")
+
+    try:
+        structs = _normalize_parsed_structures(parser(path))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to parse build input {path!r}.") from exc
+
+    payloads: list[_BuildEntryPayload] = []
+    for frame_idx, struct in enumerate(structs):
+        try:
+            structure_bytes = pickle.dumps(
+                struct,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+            features = None
+            local_derivatives = None
+
+            if persist_features or persist_force_derivatives:
+                positions = torch.from_numpy(struct.positions).to(
+                    descriptor.dtype
+                )
+                cell = (
+                    torch.from_numpy(struct.cell).to(descriptor.dtype)
+                    if struct.cell is not None
+                    else None
+                )
+                pbc = (
+                    torch.from_numpy(struct.pbc)
+                    if struct.pbc is not None
+                    else None
+                )
+
+                if persist_force_derivatives and struct.has_forces():
+                    species_indices = torch.tensor(
+                        [descriptor.species_to_idx[s] for s in struct.species],
+                        dtype=torch.long,
+                    )
+                    graph_trip = _build_force_graph_triplets(
+                        descriptor=descriptor,
+                        positions=positions,
+                        cell=cell,
+                        pbc=pbc,
+                    )
+                    features, local_derivatives = (
+                        descriptor.compute_features_and_local_derivatives_with_graph(
+                            positions=positions,
+                            species_indices=species_indices,
+                            graph=graph_trip["graph"],
+                            triplets=graph_trip["triplets"],
+                            center_indices=None,
+                        )
+                    )
+
+                feature_values = None
+                feature_n_features = None
+                if persist_features:
+                    if features is None:
+                        features = descriptor.forward_from_positions(
+                            positions,
+                            struct.species,
+                            cell,
+                            pbc,
+                        )
+                    feature_values = _tensor_to_numpy_1d(
+                        features,
+                        dtype=np.dtype(
+                            str(descriptor.dtype).replace("torch.", "")
+                        ),
+                    )
+                    feature_n_features = int(features.shape[-1])
+
+                derivative_payload = None
+                if local_derivatives is not None:
+                    derivative_payload = _build_force_derivative_payload(
+                        local_derivatives,
+                        descriptor_dtype=descriptor.dtype,
+                    )
+            else:
+                feature_values = None
+                feature_n_features = None
+                derivative_payload = None
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to prepare persisted build payloads for {path!r} "
+                f"(frame {frame_idx})."
+            ) from exc
+
+        payloads.append(
+            _BuildEntryPayload(
+                source_path=str(path),
+                frame_idx=int(frame_idx),
+                structure_bytes=structure_bytes,
+                has_forces=bool(struct.has_forces()),
+                n_atoms=int(struct.n_atoms),
+                energy=_structure_energy_or_nan(struct),
+                name=str(struct.name) if struct.name is not None else "",
+                feature_values=feature_values,
+                feature_n_features=feature_n_features,
+                force_derivatives=derivative_payload,
+            )
+        )
+
+    return payloads
+
+
 @dataclass
 class _FiltersConfig:
     """Compression filters configuration for HDF5 storage."""
@@ -193,8 +434,6 @@ class HDF5StructureDataset(Dataset):
         Callable that, given a file path, returns a Structure (or a list of
         Structures). If a list is returned, all frames are added as separate
         entries. If None, a sensible default should be provided by user code.
-        Note: this callable must be a top-level function if used by
-        multiprocessing (i.e., avoid lambdas that can't be pickled).
     mode : str, optional
         One of {'auto', 'build', 'load'} controlling initialization behavior:
         - 'auto': if database_file exists, load; otherwise, expect that user
@@ -218,7 +457,11 @@ class HDF5StructureDataset(Dataset):
     ------------------------
     - The HDF5 file handle is not pickled; on worker fork/deserialize,
       each worker lazily opens its own read-only handle on first use.
-    - The parser is not used during read mode; it's only used for building.
+    - The parser is not used during read mode; it is only used by
+      ``build_database()``.
+    - Build-time parallelism uses worker threads for parsing and optional
+      persisted-cache preparation, but all HDF5 writes remain serialized in
+      the main process to preserve deterministic output ordering.
 
     Lifecycle
     ---------
@@ -406,6 +649,7 @@ class HDF5StructureDataset(Dataset):
         self,
         show_progress: bool = True,
         *,
+        build_workers: int = 0,
         persist_descriptor: bool = False,
         persist_features: bool = False,
         persist_force_derivatives: bool = False,
@@ -424,6 +668,13 @@ class HDF5StructureDataset(Dataset):
         ----------
         show_progress : bool
             If True and tqdm is available, show a progress bar.
+        build_workers : int
+            Number of worker threads used for parser execution and
+            optional persisted-cache preparation. ``0`` and ``1`` keep the
+            existing serial build path. Values greater than ``1`` preserve
+            deterministic HDF5 entry ordering while keeping all HDF5 writes
+            in the parent process. This setting is separate from training-time
+            ``num_workers``. Default: ``0``
         persist_descriptor : bool
             If True, persist a versioned descriptor manifest that can recover
             supported descriptor objects when the HDF5 dataset is reopened
@@ -446,6 +697,9 @@ class HDF5StructureDataset(Dataset):
             raise ValueError("file_paths must be provided to build_database()")
         if self._parser is None:
             raise ValueError("parser must be provided to build_database()")
+        build_workers = int(build_workers)
+        if build_workers < 0:
+            raise ValueError("build_workers must be >= 0")
 
         persist_descriptor = bool(
             persist_descriptor or persist_features or persist_force_derivatives
@@ -467,9 +721,23 @@ class HDF5StructureDataset(Dataset):
         # Close any open handles before writing
         self._close_handle()
 
+        tmp_handle = tempfile.NamedTemporaryFile(
+            prefix=f"{Path(self._db_path).name}.",
+            suffix=".tmp",
+            dir=str(Path(self._db_path).parent),
+            delete=False,
+        )
+        tmp_path = tmp_handle.name
+        tmp_handle.close()
+
         # Open HDF5 file for writing
-        h5 = tables.open_file(self._db_path, mode="w",
-                              filters=self._filters.to_tables_filters())
+        h5 = tables.open_file(
+            tmp_path,
+            mode="w",
+            filters=self._filters.to_tables_filters(),
+        )
+        pbar = None
+        build_succeeded = False
         try:
             if persist_force_derivatives and not hasattr(
                 self.descriptor,
@@ -500,130 +768,127 @@ class HDF5StructureDataset(Dataset):
                 )
 
             # Optional progress bar
-            pbar = None
             try:
                 from tqdm import tqdm as _tqdm  # type: ignore
-                pbar = _tqdm(total=len(self._file_paths),
-                             desc="Building HDF5",
-                             ncols=80) if show_progress else None
+                pbar = (
+                    _tqdm(
+                        total=len(self._file_paths),
+                        desc="Building HDF5",
+                        ncols=80,
+                    )
+                    if show_progress
+                    else None
+                )
             except Exception:
                 pbar = None
 
-            # Iterate files and serialize Structures
-            for path in self._file_paths:
-                structures = self._parser(path)
-                # Support parser returning a single Structure or a list
-                structs: list[Structure]
-                if (isinstance(structures, list)
-                        or isinstance(structures, tuple)):
-                    structs = list(structures)  # type: ignore[assignment]
-                    # If AtomicStructure.to_TorchStructure() returns
-                    # list of frames, keep all frames.
-                else:
-                    structs = [structures]  # type: ignore[list-item]
-
-                # Append all frames as entries
-                for frame_idx, struct in enumerate(structs):
-                    entry_idx = int(len(vl_struct))
-                    # Pickle Structure to bytes
-                    data_bytes = pickle.dumps(
-                        struct, protocol=pickle.HIGHEST_PROTOCOL)
-                    vl_struct.append(np.frombuffer(data_bytes, dtype=np.uint8))
-
-                    # Metadata row
-                    row = meta_table.row
-                    row["path"] = str(path)
-                    row["frame"] = int(frame_idx)
-                    row["has_forces"] = bool(struct.has_forces())
-                    row["n_atoms"] = int(struct.n_atoms)
-                    # Some structures may miss energy; be defensive
-                    try:
-                        row["energy"] = float(struct.energy)
-                    except Exception:
-                        row["energy"] = float("nan")
-                    row["name"] = (str(struct.name)
-                                   if struct.name is not None else "")
-                    row.append()
-
-                    if persist_features or persist_force_derivatives:
-                        positions = torch.from_numpy(struct.positions).to(
-                            self.descriptor.dtype
-                        )
-                        cell = (
-                            torch.from_numpy(struct.cell).to(
-                                self.descriptor.dtype
-                            )
-                            if struct.cell is not None
-                            else None
-                        )
-                        pbc = (
-                            torch.from_numpy(struct.pbc)
-                            if struct.pbc is not None
-                            else None
-                        )
-                        features = None
-                        local_derivatives = None
-
-                        if persist_force_derivatives and struct.has_forces():
-                            species_indices = torch.tensor(
-                                [self.descriptor.species_to_idx[s]
-                                 for s in struct.species],
-                                dtype=torch.long,
-                            )
-                            graph_trip = _build_force_graph_triplets(
-                                descriptor=self.descriptor,
-                                positions=positions,
-                                cell=cell,
-                                pbc=pbc,
-                            )
-                            features, local_derivatives = (
-                                self.descriptor
-                                .compute_features_and_local_derivatives_with_graph(
-                                    positions=positions,
-                                    species_indices=species_indices,
-                                    graph=graph_trip["graph"],
-                                    triplets=graph_trip["triplets"],
-                                    center_indices=None,
-                                )
-                            )
-
-                        if persist_features:
-                            if features is None:
-                                features = self.descriptor.forward_from_positions(
-                                    positions,
-                                    struct.species,
-                                    cell,
-                                    pbc,
-                                )
-                            self._append_feature_cache_entry(
+            worker = partial(
+                _prepare_build_payloads_for_path,
+                parser=self._parser,
+                descriptor=self.descriptor,
+                persist_features=persist_features,
+                persist_force_derivatives=persist_force_derivatives,
+            )
+            if build_workers <= 1:
+                payload_batches = map(worker, self._file_paths or [])
+                for payload_batch in payload_batches:
+                    self._append_build_payload_batch(
+                        h5=h5,
+                        vl_struct=vl_struct,
+                        meta_table=meta_table,
+                        payload_batch=payload_batch,
+                    )
+                    if pbar is not None:
+                        pbar.update(1)
+            else:
+                try:
+                    with ThreadPoolExecutor(
+                        max_workers=build_workers,
+                    ) as executor:
+                        for payload_batch in executor.map(
+                            worker,
+                            self._file_paths or [],
+                        ):
+                            self._append_build_payload_batch(
                                 h5=h5,
-                                entry_idx=entry_idx,
-                                n_atoms=int(struct.n_atoms),
-                                features=features,
+                                vl_struct=vl_struct,
+                                meta_table=meta_table,
+                                payload_batch=payload_batch,
                             )
+                            if pbar is not None:
+                                pbar.update(1)
+                except Exception as exc:
+                    if isinstance(exc, RuntimeError):
+                        raise
+                    raise RuntimeError(
+                        "Parallel HDF5 build failed while preparing "
+                        "worker-side payloads."
+                    ) from exc
 
-                        if local_derivatives is not None:
-                            self._append_force_derivative_cache_entry(
-                                h5=h5,
-                                entry_idx=entry_idx,
-                                n_atoms=int(struct.n_atoms),
-                                local_derivatives=local_derivatives,
-                                node_paths=self._v2_force_derivative_node_paths(),
-                            )
-
-                if pbar is not None:
-                    pbar.update(1)
-
+            h5.flush()
+            build_succeeded = True
+        finally:
             if pbar is not None:
                 pbar.close()
-
-            meta_table.flush()
-            h5.flush()
-        finally:
             h5.close()
+            if not build_succeeded and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
-        # Re-open read-only for later training use
-        self._open_readonly()
+        try:
+            os.replace(tmp_path, self._db_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
+
+        # Clear any stale state; the dataset will reopen lazily on first use.
+        self._close_handle()
+
+    def _append_build_payload_batch(
+        self,
+        *,
+        h5: tables.File,
+        vl_struct,
+        meta_table,
+        payload_batch: list[_BuildEntryPayload],
+    ) -> None:
+        """Append one parsed input file worth of payloads to the HDF5 file."""
+        for payload in payload_batch:
+            entry_idx = int(len(vl_struct))
+            vl_struct.append(
+                np.frombuffer(payload.structure_bytes, dtype=np.uint8)
+            )
+
+            row = meta_table.row
+            row["path"] = payload.source_path
+            row["frame"] = int(payload.frame_idx)
+            row["has_forces"] = bool(payload.has_forces)
+            row["n_atoms"] = int(payload.n_atoms)
+            row["energy"] = float(payload.energy)
+            row["name"] = payload.name
+            row.append()
+
+            if payload.feature_values is not None:
+                if payload.feature_n_features is None:
+                    raise RuntimeError("Missing persisted feature shape metadata.")
+                self._append_feature_cache_payload(
+                    h5=h5,
+                    entry_idx=entry_idx,
+                    n_atoms=int(payload.n_atoms),
+                    n_features=int(payload.feature_n_features),
+                    feature_values=payload.feature_values,
+                )
+
+            if payload.force_derivatives is not None:
+                self._append_force_derivative_cache_payload(
+                    h5=h5,
+                    entry_idx=entry_idx,
+                    n_atoms=int(payload.n_atoms),
+                    payload=payload.force_derivatives,
+                    node_paths=self._v2_force_derivative_node_paths(),
+                )
+
+        meta_table.flush()
 
     def _create_descriptor_manifest_storage(self, h5: tables.File) -> None:
         """Create the versioned HDF5 node used for descriptor recovery."""
@@ -823,21 +1088,39 @@ class HDF5StructureDataset(Dataset):
         features: torch.Tensor,
     ) -> None:
         """Append one persisted raw feature tensor to the unified cache."""
+        self._append_feature_cache_payload(
+            h5=h5,
+            entry_idx=entry_idx,
+            n_atoms=n_atoms,
+            n_features=int(features.shape[-1]),
+            feature_values=_tensor_to_numpy_1d(
+                features,
+                dtype=np.dtype(
+                    str(self.descriptor.dtype).replace("torch.", "")
+                ),
+            ),
+        )
+
+    def _append_feature_cache_payload(
+        self,
+        *,
+        h5: tables.File,
+        entry_idx: int,
+        n_atoms: int,
+        n_features: int,
+        feature_values: np.ndarray,
+    ) -> None:
+        """Append one persisted raw feature payload to the unified cache."""
         index_table = h5.get_node(self._NODE_CACHE_FEATURE_INDEX)
         values = h5.get_node(self._NODE_CACHE_FEATURE_VALUES)
         cache_row = int(index_table.nrows)
-        values.append(
-            _tensor_to_numpy_1d(
-                features,
-                dtype=np.dtype(str(self.descriptor.dtype).replace("torch.", "")),
-            )
-        )
+        values.append(feature_values)
 
         row = index_table.row
         row["entry_idx"] = int(entry_idx)
         row["cache_row"] = int(cache_row)
         row["n_atoms"] = int(n_atoms)
-        row["n_features"] = int(features.shape[-1])
+        row["n_features"] = int(n_features)
         row.append()
         index_table.flush()
 
@@ -851,100 +1134,70 @@ class HDF5StructureDataset(Dataset):
         node_paths: dict[str, str],
     ) -> None:
         """Append one force-labeled structure to the derivative cache."""
+        self._append_force_derivative_cache_payload(
+            h5=h5,
+            entry_idx=entry_idx,
+            n_atoms=n_atoms,
+            payload=_build_force_derivative_payload(
+                local_derivatives,
+                descriptor_dtype=self.descriptor.dtype,
+            ),
+            node_paths=node_paths,
+        )
+
+    def _append_force_derivative_cache_payload(
+        self,
+        *,
+        h5: tables.File,
+        entry_idx: int,
+        n_atoms: int,
+        payload: _PersistedForceDerivativePayload,
+        node_paths: dict[str, str],
+    ) -> None:
+        """Append one worker-safe derivative payload to the cache."""
         index_table = h5.get_node(node_paths["index"])
         cache_row = int(index_table.nrows)
-
-        radial = local_derivatives["radial"]
-        angular = local_derivatives["angular"]
-
-        radial_center = _tensor_to_numpy_1d(
-            radial["center_idx"], dtype=np.int64
-        )
-        radial_neighbor = _tensor_to_numpy_1d(
-            radial["neighbor_idx"], dtype=np.int64
-        )
-        radial_grads = _tensor_to_numpy_1d(
-            radial["dG_drij"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-        radial_typespin = _tensor_to_numpy_1d(
-            radial["neighbor_typespin"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-
-        angular_center = _tensor_to_numpy_1d(
-            angular["center_idx"], dtype=np.int64
-        )
-        angular_j = _tensor_to_numpy_1d(
-            angular["neighbor_j_idx"], dtype=np.int64
-        )
-        angular_k = _tensor_to_numpy_1d(
-            angular["neighbor_k_idx"], dtype=np.int64
-        )
-        angular_grads_i = _tensor_to_numpy_1d(
-            angular["grads_i"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-        angular_grads_j = _tensor_to_numpy_1d(
-            angular["grads_j"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-        angular_grads_k = _tensor_to_numpy_1d(
-            angular["grads_k"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-        angular_typespin = _tensor_to_numpy_1d(
-            angular["triplet_typespin"],
-            dtype=np.float32 if self.descriptor.dtype == torch.float32
-            else np.float64,
-        )
-
         h5.get_node(node_paths["radial_center"]).append(
-            radial_center
+            payload.radial_center
         )
         h5.get_node(node_paths["radial_neighbor"]).append(
-            radial_neighbor
+            payload.radial_neighbor
         )
         h5.get_node(node_paths["radial_grads"]).append(
-            radial_grads
+            payload.radial_grads
         )
         h5.get_node(node_paths["radial_typespin"]).append(
-            radial_typespin
+            payload.radial_typespin
         )
 
         h5.get_node(node_paths["angular_center"]).append(
-            angular_center
+            payload.angular_center
         )
         h5.get_node(node_paths["angular_neighbor_j"]).append(
-            angular_j
+            payload.angular_neighbor_j
         )
         h5.get_node(node_paths["angular_neighbor_k"]).append(
-            angular_k
+            payload.angular_neighbor_k
         )
         h5.get_node(node_paths["angular_grads_i"]).append(
-            angular_grads_i
+            payload.angular_grads_i
         )
         h5.get_node(node_paths["angular_grads_j"]).append(
-            angular_grads_j
+            payload.angular_grads_j
         )
         h5.get_node(node_paths["angular_grads_k"]).append(
-            angular_grads_k
+            payload.angular_grads_k
         )
         h5.get_node(node_paths["angular_typespin"]).append(
-            angular_typespin
+            payload.angular_typespin
         )
 
         row = index_table.row
         row["entry_idx"] = int(entry_idx)
         row["cache_row"] = int(cache_row)
         row["n_atoms"] = int(n_atoms)
-        row["n_radial_edges"] = int(radial_center.size)
-        row["n_angular_triplets"] = int(angular_center.size)
+        row["n_radial_edges"] = int(payload.radial_center.size)
+        row["n_angular_triplets"] = int(payload.angular_center.size)
         row.append()
         index_table.flush()
 
@@ -1531,6 +1784,45 @@ class HDF5StructureDataset(Dataset):
             struct = pickle.loads(data.tobytes())
             self._cache_put(idx, struct)
         return struct
+
+    def get_entry_metadata(self, idx: int) -> dict[str, object]:
+        """
+        Return persisted metadata for one HDF5 entry.
+
+        The metadata is read lazily from the ``/entries/meta`` table and is
+        intended for output helpers that need stable source identifiers
+        without changing the serialized ``Structure`` payload.
+        """
+        if self._h5 is None:
+            self._open_readonly()
+
+        meta = self._h5.get_node(self._NODE_META)
+        row = meta[int(idx)]
+        return {
+            "path": _decode_meta_text(row["path"]),
+            "frame": int(row["frame"]),
+            "name": _decode_meta_text(row["name"]),
+            "has_forces": bool(row["has_forces"]),
+            "n_atoms": int(row["n_atoms"]),
+            "energy": float(row["energy"]),
+        }
+
+    def get_structure_identifier(self, idx: int) -> str:
+        """
+        Return the stable energy-output identifier for one HDF5 entry.
+
+        HDF5-backed outputs prefer the persisted source path, then the
+        persisted structure name, and always append the persisted frame index
+        so multi-frame sources remain distinguishable.
+        """
+        meta = self.get_entry_metadata(idx)
+        frame = int(meta["frame"])
+        base = (
+            str(meta["path"])
+            or str(meta["name"])
+            or f"structure_{idx:06d}"
+        )
+        return f"{base}#frame={frame}"
 
     def get_force_indices(self) -> list[int]:
         """Return indices of entries that carry force labels."""

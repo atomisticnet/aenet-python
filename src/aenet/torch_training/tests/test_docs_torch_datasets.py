@@ -264,7 +264,7 @@ def test_hdf5_build_load_and_generic_split_examples(
         persist_features=True,
         persist_force_derivatives=True,
     )
-    assert build_dataset._h5 is not None
+    assert build_dataset._h5 is None
     assert build_dataset.has_persisted_features() is True
     assert build_dataset.has_persisted_force_derivatives() is True
 

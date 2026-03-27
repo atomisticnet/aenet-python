@@ -255,7 +255,9 @@ class TorchTrainingConfig:
     Parameters
     ----------
     iterations : int, optional
-        Maximum number of training epochs. Default: 100
+        Number of training epochs to run in this ``train()`` call.
+        When resuming from a checkpoint, this is the number of additional
+        epochs to run after the checkpoint's saved epoch. Default: 100
     method : TrainingMethod, optional
         Training method configuration (Adam or SGD).
         Default: None (will use Adam with defaults)
@@ -288,6 +290,11 @@ class TorchTrainingConfig:
         caches features for structures not selected for force supervision
         in the current epoch-window, reusing cached features and skipping
         neighbor_info computation. Default: False
+    cache_feature_max_entries : int or None, optional
+        Maximum number of trainer-owned energy-view feature entries to retain
+        per split and per process/worker when ``cache_features=True``.
+        Use ``None`` for an explicit unbounded cache or ``0`` to suppress
+        storage even if feature caching is enabled. Default: 1024
     cache_neighbors : bool, optional
         Cache per-structure neighbor graphs (indices and displacement vectors)
         to avoid repeated neighbor searches across epochs when geometries are
@@ -295,11 +302,22 @@ class TorchTrainingConfig:
         force-training path, but it can still help reuse neighbor information
         for energy-view feature generation and legacy non-graph paths.
         Default: False
+    cache_neighbor_max_entries : int or None, optional
+        Maximum number of trainer-owned neighbor payload entries to retain per
+        split and per process/worker when ``cache_neighbors=True``.
+        Use ``None`` for an explicit unbounded cache or ``0`` to suppress
+        storage even if neighbor caching is enabled. Default: 512
     cache_force_triplets : bool, optional
         Cache CSR neighbor graphs and precomputed angular triplet indices per
         structure for force training. Supported force training always uses the
         graph/triplet sparse path; enabling this option keeps those graph
         payloads cached instead of rebuilding them on demand. Default: False
+    cache_force_triplet_max_entries : int or None, optional
+        Maximum number of trainer-owned graph/triplet payload entries to
+        retain per split and per process/worker when
+        ``cache_force_triplets=True``. Use ``None`` for an explicit unbounded
+        cache or ``0`` to suppress storage even if graph/triplet caching is
+        enabled. Default: 256
     cache_persist_dir : str, optional
         Optional root directory for persisted graph/triplet caches
         (planned follow-up). When provided, caches may be serialized to disk
@@ -307,9 +325,15 @@ class TorchTrainingConfig:
     cache_scope : {'train', 'val', 'all'}, optional
         Scope limiting which dataset split(s) should be cached/persisted,
         allowing memory/I-O control. Default: 'all'
+    cache_warmup : bool, optional
+        If True, pre-populate trainer-owned runtime caches before the first
+        epoch in single-process training. This warmup is skipped when
+        ``num_workers > 0`` because DataLoader workers own their own cache
+        instances. Default: False
     memory_mode : str, optional
-        Memory management strategy: 'cpu', 'gpu', or 'mixed'.
-        Default: 'gpu'
+        Memory management strategy: 'cpu', 'gpu', or 'mixed'. ``'mixed'`` is
+        reserved for a future real mixed-memory implementation and currently
+        raises ``NotImplementedError`` when requested. Default: 'gpu'
     max_energy : float, optional
         Exclude structures with energy above this threshold. Default: None
     max_forces : float, optional
@@ -328,6 +352,9 @@ class TorchTrainingConfig:
     ------
     ValueError
         If parameters are out of valid ranges.
+    NotImplementedError
+        If ``memory_mode='mixed'`` is requested before that mode is
+        implemented.
     """
 
     iterations: int = 100
@@ -343,15 +370,23 @@ class TorchTrainingConfig:
     # Mixed-run caching: cache features for non-force structures
     # in current window
     cache_features: bool = False
+    # Maximum retained trainer-owned feature-cache entries per split/process.
+    cache_feature_max_entries: Optional[int] = 1024
     # Cache per-structure neighbor graphs to avoid repeated neighbor
     # searches across epochs (indices and displacement vectors).
     cache_neighbors: bool = False
+    # Maximum retained trainer-owned neighbor-cache entries per split/process.
+    cache_neighbor_max_entries: Optional[int] = 512
     # Cache graph/triplet payloads for the sparse force-training path.
     cache_force_triplets: bool = False
+    # Maximum retained graph/triplet cache entries per split/process.
+    cache_force_triplet_max_entries: Optional[int] = 256
     # Optional on-disk persistence root (Phase 4 follow-up may enable writing)
     cache_persist_dir: Optional[str] = None
     # Scope for caching/persistence
     cache_scope: Literal['train', 'val', 'all'] = 'all'
+    # Optional eager warmup of trainer-owned runtime caches.
+    cache_warmup: bool = False
     memory_mode: Literal['cpu', 'gpu', 'mixed'] = 'gpu'
     max_energy: Optional[float] = None
     max_forces: Optional[float] = None
@@ -467,6 +502,12 @@ class TorchTrainingConfig:
                 f"memory_mode must be 'cpu', 'gpu', or 'mixed', "
                 f"got '{self.memory_mode}'"
             )
+        if self.memory_mode == 'mixed':
+            raise NotImplementedError(
+                "memory_mode='mixed' is reserved for a future real "
+                "mixed-memory execution mode and is not implemented yet. "
+                "Use memory_mode='cpu' or memory_mode='gpu' for now."
+            )
 
         # Validate cache_scope
         if self.cache_scope not in ['train', 'val', 'all']:
@@ -474,6 +515,18 @@ class TorchTrainingConfig:
                 f"cache_scope must be 'train', 'val', or 'all', "
                 f"got '{self.cache_scope}'"
             )
+
+        cache_limit_fields = (
+            'cache_feature_max_entries',
+            'cache_neighbor_max_entries',
+            'cache_force_triplet_max_entries',
+        )
+        for field_name in cache_limit_fields:
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValueError(
+                    f"{field_name} must be >= 0 or None, got {value}"
+                )
 
         # Validate force_resample_num_epochs
         if self.force_resample_num_epochs < 0:

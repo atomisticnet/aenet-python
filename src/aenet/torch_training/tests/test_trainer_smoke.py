@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tables
 import torch
 
 import aenet.torch_training.trainer as trainer_module
@@ -14,6 +15,7 @@ from aenet.torch_training import (
     TorchANNPotential,
     TorchTrainingConfig,
 )
+from aenet.torch_training.dataset import StructureDataset
 from aenet.torch_training.trainer import _TrainingPolicyDataset
 
 
@@ -95,6 +97,15 @@ def _parser_factory(structures):
     def _parser(path: str) -> Structure:
         idx = int(Path(path).name.split("_")[-1])
         return structures[idx]
+
+    return _parser
+
+
+def _multi_frame_parser_factory(structure_groups):
+    """Return a parser that yields multiple frames per input path."""
+    def _parser(path: str):
+        idx = int(Path(path).name.split("_")[-1])
+        return structure_groups[idx]
 
     return _parser
 
@@ -530,6 +541,151 @@ def test_save_energies_uses_input_paths_for_split_outputs(
 
 
 @pytest.mark.cpu
+def test_save_energies_hdf5_split_outputs_use_source_paths_and_frames(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    frame_groups = [
+        make_simple_structures_H_two(),
+        make_simple_structures_H_two(),
+    ]
+    frame_groups[1][0].energy = 1.0
+    frame_groups[1][1].energy = 1.5
+
+    file_paths = []
+    for idx in range(len(frame_groups)):
+        path = tmp_path / f"frames_{idx}"
+        path.write_text("placeholder", encoding="utf-8")
+        file_paths.append(str(path))
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    db_path = tmp_path / "save_energies_multiframe.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        file_paths=file_paths,
+        parser=_multi_frame_parser_factory(frame_groups),
+        mode="build",
+    )
+    build_ds.build_database(show_progress=False)
+
+    load_ds = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    arch = make_arch_H(descriptor)
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=50,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        dataset=load_ds,
+        config=cfg,
+    )
+
+    assert (tmp_path / "energies.train.0").exists()
+    assert (tmp_path / "energies.test.0").exists()
+    assert result.energies is not None
+
+    train_paths = set(result.energies.energies_train["Path-of-input-file"])
+    test_paths = set(result.energies.energies_test["Path-of-input-file"])
+    expected_paths = {
+        f"{file_path}#frame={frame_idx}"
+        for file_path in file_paths
+        for frame_idx in range(2)
+    }
+
+    assert train_paths.isdisjoint(test_paths)
+    assert train_paths | test_paths == expected_paths
+
+
+@pytest.mark.cpu
+def test_save_energies_hdf5_identifier_precedence_uses_name_then_fallback(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    structures[0].name = "named_frame"
+    structures[1].name = "will_be_cleared"
+
+    file_path = tmp_path / "frames_0"
+    file_path.write_text("placeholder", encoding="utf-8")
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    db_path = tmp_path / "save_energies_identifier_precedence.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        file_paths=[str(file_path)],
+        parser=_multi_frame_parser_factory([structures]),
+        mode="build",
+    )
+    build_ds.build_database(show_progress=False)
+
+    with tables.open_file(str(db_path), mode="a") as h5:
+        meta = h5.get_node("/entries/meta")
+        for row in meta.iterrows():
+            row["path"] = ""
+            if int(row["frame"]) == 1:
+                row["name"] = ""
+            row.update()
+        meta.flush()
+
+    load_ds = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    arch = make_arch_H(descriptor)
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        dataset=load_ds,
+        config=cfg,
+    )
+
+    assert (tmp_path / "energies.train.0").exists()
+    assert result.energies is not None
+
+    identifiers = set(result.energies.energies_train["Path-of-input-file"])
+    assert identifiers == {
+        "named_frame#frame=0",
+        "structure_000001#frame=1",
+    }
+
+
+@pytest.mark.cpu
 def test_training_policy_cache_features_preserves_hdf5_feature_values(
     tmp_path: Path,
 ):
@@ -597,6 +753,82 @@ def test_training_policy_cache_features_preserves_hdf5_feature_values(
     assert torch.equal(fallback_first["features"], expected)
     assert torch.equal(fallback_second["features"], expected)
     assert torch.equal(persisted_first["features"], fallback_first["features"])
+
+
+@pytest.mark.cpu
+def test_training_policy_feature_cache_eviction_uses_lru_order():
+    """Trainer-owned feature caches should evict the least-recent entry."""
+    structures = make_simple_structures_H_many(n_structures=3)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(structures=structures, descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        cache_features=True,
+        cache_feature_max_entries=2,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    policy = _TrainingPolicyDataset(dataset, cfg, split="train")
+    _ = policy[0]
+    _ = policy[1]
+    _ = policy[0]
+    _ = policy[2]
+
+    cache = policy._cache_state.feature_cache
+    assert len(cache) == 2
+    assert 0 in cache
+    assert 1 not in cache
+    assert 2 in cache
+
+
+@pytest.mark.cpu
+def test_training_policy_warmup_stops_when_bounded_caches_are_full(
+    monkeypatch,
+):
+    """Warmup should stop once all enabled bounded caches reach capacity."""
+    structures = make_simple_structures_H_many(n_structures=6)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(structures=structures, descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        cache_features=True,
+        cache_feature_max_entries=2,
+        cache_warmup=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    policy = _TrainingPolicyDataset(dataset, cfg, split="train")
+    calls = {"count": 0}
+    original_getitem = _TrainingPolicyDataset.__getitem__
+
+    def _counting_getitem(self, idx):
+        calls["count"] += 1
+        return original_getitem(self, idx)
+
+    monkeypatch.setattr(_TrainingPolicyDataset, "__getitem__", _counting_getitem)
+
+    policy.warmup_caches(show_progress=False)
+
+    assert calls["count"] == 2
+    assert len(policy._cache_state.feature_cache) == 2
 
 
 class _StopAfterLoaderConfig(RuntimeError):
@@ -689,3 +921,125 @@ def test_fixed_or_static_force_sampling_keeps_persistent_train_workers(
     assert len(records) == 1
     assert records[0]["num_workers"] == 2
     assert records[0]["persistent_workers"] is True
+
+
+@pytest.mark.cpu
+def test_cache_warmup_is_disabled_by_default(monkeypatch):
+    """Stats collection should not prefill runtime caches by default."""
+    structures = make_simple_structures_H_many(n_structures=4)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(structures=structures, descriptor=descriptor)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+
+    def _unexpected_cached_getitem(self, idx):
+        raise AssertionError(
+            "runtime-cache-backed dataset access should not happen before "
+            "epoch 0 when cache_warmup=False"
+        )
+
+    monkeypatch.setattr(
+        _TrainingPolicyDataset,
+        "__getitem__",
+        _unexpected_cached_getitem,
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        cache_features=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    pot.train(dataset=dataset, config=cfg)
+
+
+@pytest.mark.cpu
+def test_cache_warmup_runs_when_enabled_for_single_process_training(
+    monkeypatch,
+):
+    """Explicit warmup should run before epoch 0 for single-process loaders."""
+    structures = make_simple_structures_H_many(n_structures=4)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(structures=structures, descriptor=descriptor)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+
+    calls = []
+
+    def _record_warmup(self, show_progress=True):
+        calls.append(self._split)
+        return None
+
+    monkeypatch.setattr(_TrainingPolicyDataset, "warmup_caches", _record_warmup)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        cache_features=True,
+        cache_warmup=True,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    pot.train(dataset=dataset, config=cfg)
+
+    assert calls == ["train"]
+
+
+@pytest.mark.cpu
+def test_cache_warmup_warns_and_skips_for_worker_dataloaders(
+    monkeypatch,
+):
+    """Configured warmup should be skipped when DataLoader workers are used."""
+    structures = make_simple_structures_H_many(n_structures=4)
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(structures=structures, descriptor=descriptor)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+
+    calls = []
+
+    def _record_warmup(self, show_progress=True):
+        calls.append(self._split)
+        return None
+
+    monkeypatch.setattr(_TrainingPolicyDataset, "warmup_caches", _record_warmup)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        cache_features=True,
+        cache_warmup=True,
+        num_workers=2,
+        persistent_workers=False,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="Skipping trainer-owned runtime cache warmup",
+    ):
+        pot.train(dataset=dataset, config=cfg)
+
+    assert calls == []

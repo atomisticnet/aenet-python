@@ -201,6 +201,44 @@ The longer file-backed dataset workflow is intentionally kept in the training
 notebook above so the ``torch_datasets`` page can stay focused on compact
 API-facing examples.
 
+Execution Model
+~~~~~~~~~~~~~~~~
+
+The current trainer has two distinct runtime stages:
+
+1. Sample preparation happens in the main process when ``num_workers=0``, or
+   in ``DataLoader`` workers when ``num_workers > 0``. Structures are
+   converted to tensors on ``descriptor.device``, and descriptor
+   featurization, neighbor reuse, graph/triplet construction, and lazy HDF5
+   cache reads happen there.
+2. The collated batch is then moved onto ``config.device`` inside the
+   training loop. Model forward passes, normalization, loss computation, and
+   optimizer steps run on that device.
+
+In practice, GPU training with ``num_workers > 0`` is best understood as
+worker-side data preparation feeding a training loop on the selected device.
+It is not currently a separate mixed CPU/GPU execution pipeline.
+
+If ``descriptor.device`` and ``config.device`` match, featurization and model
+compute happen on the same device. If they differ, samples are materialized on
+``descriptor.device`` and transferred before the forward pass. The compact
+examples on this page create the descriptor on CPU, so later
+``device='cuda'`` examples describe CPU-side sample preparation feeding GPU
+training unless you also move the descriptor to CUDA.
+
+For HDF5-backed datasets, each worker reopens its own read-only file handle
+and keeps its own bounded ``in_memory_cache_size`` LRU cache. Trainer-owned
+runtime caches (``cache_features``, ``cache_neighbors``,
+``cache_force_triplets``) are also per process/worker, so
+``cache_warmup=True`` is skipped automatically when ``num_workers > 0``. See
+:doc:`torch_datasets` for persisted HDF5 cache precedence and for the
+distinction between build-time ``build_workers`` and training-time
+``num_workers``.
+
+``memory_mode='mixed'`` is reserved for a future real mixed-memory mode and
+currently raises ``NotImplementedError`` if requested. Today, the supported
+execution modes remain ``'cpu'`` and ``'gpu'``.
+
 Performance Optimization Tips
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -245,6 +283,10 @@ Performance Optimization Tips
   and legacy non-graph paths
 * **cache_force_triplets**: Cache CSR graphs and triplets for the default sparse
   force-training path instead of rebuilding them on demand
+* **cache_*_max_entries**: Bound the trainer-owned runtime caches per split
+  and per process/worker instead of letting them grow without limit
+* **cache_warmup**: Optional single-process prefill of trainer-owned runtime
+  caches before epoch 0; skipped automatically when ``num_workers > 0``
 
 These runtime caches are distinct from the on-disk HDF5 persisted cache
 sections created with ``HDF5StructureDataset.build_database(...)``. For HDF5
@@ -339,10 +381,11 @@ Large Dataset (> 500 structures)
        method=Adam(mu=0.001, batchsize=64),  # Larger batches
        testpercent=10,
        force_weight=0.1,
-       device='cuda',  # Use GPU for speedup
+       device='cuda',  # Model/loss on GPU
        # Performance optimizations
        cache_features=True,  # Runtime in-memory feature cache
-       num_workers=8,         # Parallel data loading
+       cache_feature_max_entries=1024,
+       num_workers=8,         # Parallel CPU-side sample preparation
        prefetch_factor=4
    )
 
@@ -356,7 +399,8 @@ Energy-Only with Maximum Speed
        method=Adam(mu=0.001, batchsize=32),
        testpercent=10,
        force_weight=0.0,  # Energy-only
-       cache_features=True,  # Eager/runtime feature cache for this run
+       cache_features=True,  # Bounded runtime feature cache for this run
+       cache_warmup=True,    # Optional single-process prefill
        device='cuda'
    )
 
@@ -371,8 +415,8 @@ Force Training with Optimizations
        testpercent=10,
        force_weight=0.1,
        force_fraction=0.3,  # Use 30% of forces (3× faster)
-       cache_neighbors=True,  # Cache neighbor lists
-       num_workers=4,
+       cache_neighbors=True,  # Cache worker-local neighbor lists
+       num_workers=4,         # Parallel CPU-side sample preparation
        device='cuda'
    )
 
@@ -409,6 +453,13 @@ Checkpointing & Model Saving
 To resume training from a checkpoint, pass the checkpoint path to
 ``train(..., resume_from="checkpoints/checkpoint_epoch_0050.pt")``. The
 notebook above contains the maintained checkpoint workflow.
+
+When ``resume_from`` is provided, ``config.iterations`` means the number of
+additional epochs to run in that ``train()`` call. For example, resuming a
+checkpoint with ``iterations=10`` runs 10 more epochs after the saved
+checkpoint epoch, regardless of how many epochs were completed in the
+original run. This applies to numbered checkpoints and ``best_model.pt``
+alike.
 
 The trainer will automatically:
 
@@ -512,16 +563,31 @@ Performance & Caching
    * For force training (``force_weight > 0``): Caches features for structures not
      selected for force supervision in current epoch (useful with ``force_fraction < 1.0``)
 
+**cache_feature_max_entries** : int or None (default: 1024)
+   Maximum number of trainer-owned energy-view feature entries to retain per
+   split and per process/worker when ``cache_features=True``. Use ``None`` for
+   an explicit unbounded cache or ``0`` to suppress storage.
+
 **cache_neighbors** : bool (default: False)
    Cache per-structure neighbor graphs (indices, displacement vectors) across
    epochs. Avoids repeated neighbor searches for fixed geometries on
    energy-view reuse and legacy non-graph paths. Supported force training
    does not require this option.
 
+**cache_neighbor_max_entries** : int or None (default: 512)
+   Maximum number of trainer-owned neighbor payload entries to retain per
+   split and per process/worker when ``cache_neighbors=True``. Use ``None`` for
+   an explicit unbounded cache or ``0`` to suppress storage.
+
 **cache_force_triplets** : bool (default: False)
    Cache CSR neighbor graphs and precompute angular triplet indices for the
    default sparse force-training path. Leaving this disabled still uses the
    sparse graph/triplet path, but rebuilds those graph payloads on demand.
+
+**cache_force_triplet_max_entries** : int or None (default: 256)
+   Maximum number of trainer-owned graph/triplet payload entries to retain per
+   split and per process/worker when ``cache_force_triplets=True``. Use
+   ``None`` for an explicit unbounded cache or ``0`` to suppress storage.
 
 **cache_persist_dir** : str (default: None)
    Directory for persisting graph/triplet caches to disk for reuse across runs.
@@ -529,9 +595,19 @@ Performance & Caching
 **cache_scope** : str (default: 'all')
    Which dataset splits to cache: ``'train'``, ``'val'``, or ``'all'``.
 
+**cache_warmup** : bool (default: False)
+   If True, pre-populate trainer-owned runtime caches before the first epoch
+   in single-process training. When all enabled caches have finite entry
+   limits, warmup stops once those limits are filled. Warmup is skipped
+   automatically when ``num_workers > 0`` because workers own their own cache
+   instances and the main-process warmup would not populate those worker-local
+   caches.
+
 **num_workers** : int (default: 0)
-   Number of parallel DataLoader workers for on-the-fly featurization.
-   0 = main process only. Values >0 enable parallel data loading.
+   Number of parallel ``DataLoader`` workers for structure loading, HDF5
+   reads, and on-the-fly featurization. ``0`` keeps sample preparation in the
+   main process. Values ``>0`` parallelize worker-side sample preparation; they
+   do not parallelize model compute.
 
 **prefetch_factor** : int (default: 2)
    Number of batches to prefetch per worker when ``num_workers > 0``.
@@ -540,7 +616,9 @@ Performance & Caching
    Keep DataLoader workers alive between epochs for faster iteration.
    During training, this is disabled automatically when
    ``force_sampling='random'`` uses epoch-level resampling, because worker
-   copies would otherwise keep a stale force-supervision subset.
+   copies would otherwise keep a stale force-supervision subset. Trainer-owned
+   runtime caches and HDF5 ``in_memory_cache_size`` state are also
+   worker-local when ``num_workers > 0``.
 
 
 Data Filtering & Quality Control
@@ -593,7 +671,11 @@ Output & Diagnostics
    Save predicted energies for train/test sets to disk. The
    ``Path-of-input-file`` column preserves the original structure path or
    name when available; otherwise it uses a stable ``structure_XXXXXX``
-   identifier from the pre-split input order.
+   identifier from the pre-split input order. For HDF5-backed datasets,
+   the identifier is reconstructed from persisted metadata as
+   ``path#frame=N`` when the source path is available, ``name#frame=N``
+   when only the persisted name is available, and
+   ``structure_XXXXXX#frame=N`` as the final fallback.
 
 **save_forces** : bool (default: False)
    Save predicted forces for train/test sets to disk.
@@ -618,11 +700,17 @@ Advanced Options
 
 **memory_mode** : str (default: 'gpu')
    Memory management strategy: ``'cpu'``, ``'gpu'``, or ``'mixed'``.
-   Controls where data and intermediate results are stored.
+   ``'mixed'`` is reserved for a future real mixed-memory implementation and
+   currently raises ``NotImplementedError``. Use ``'cpu'`` or ``'gpu'`` with
+   ``descriptor.device`` and ``device`` set explicitly to control the current
+   execution path.
 
 **device** : str (default: None)
    PyTorch device: ``'cpu'``, ``'cuda'``, or ``'cuda:0'``. Auto-detected if
-   None.
+   None. This selects the model/training-loop device. ``descriptor.device``
+   separately controls where structures are featurized. When the two differ,
+   samples are prepared on ``descriptor.device`` and moved to ``device``
+   before the forward pass.
 
 
 Monitoring Training Progress

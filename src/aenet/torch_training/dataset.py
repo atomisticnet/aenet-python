@@ -234,6 +234,13 @@ class StructureDataset(Dataset):
         """Return the filtered torch-training structure at ``idx``."""
         return self.structures[idx]
 
+    def get_structure_identifier(self, idx: int) -> str:
+        """Return the stable energy-output identifier for ``idx``."""
+        struct = self.get_structure(idx)
+        if getattr(struct, "name", None) not in (None, ""):
+            return str(struct.name)
+        return f"structure_{idx:06d}"
+
     def get_force_indices(self) -> list[int]:
         """Return indices of structures that carry force labels."""
         return list(self.force_structures)
@@ -503,6 +510,17 @@ class CachedStructureDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self._cached)
+
+    def get_structure(self, idx: int) -> Structure:
+        """Return the cached torch-training structure at ``idx``."""
+        return self.structures[idx]
+
+    def get_structure_identifier(self, idx: int) -> str:
+        """Return the stable energy-output identifier for ``idx``."""
+        struct = self.get_structure(idx)
+        if getattr(struct, "name", None) not in (None, ""):
+            return str(struct.name)
+        return f"structure_{idx:06d}"
 
     def __getitem__(self, idx: int) -> dict:
         return self._cached[idx]

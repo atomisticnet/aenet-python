@@ -136,3 +136,35 @@ def test_force_training_example():
     assert "RMSE_train" in results.errors.columns
     assert "RMSE_test" in results.errors.columns
     assert "RMSE_force_train" in results.errors.columns
+
+
+@pytest.mark.cpu
+def test_mutated_mixed_memory_mode_still_fails_fast():
+    """Trainer should reject a mixed mode reintroduced after validation."""
+    potential = _make_potential()
+    config = TorchTrainingConfig(
+        iterations=1,
+        method=Adam(mu=0.001, batchsize=1),
+        testpercent=50,
+        force_weight=0.0,
+        atomic_energies={"H": 0.0},
+        normalize_features=False,
+        normalize_energy=False,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+    config.memory_mode = "mixed"
+
+    with pytest.raises(
+        NotImplementedError,
+        match="reserved for a future real mixed-memory execution mode",
+    ):
+        potential.train(
+            structures=_make_structures(include_forces=False),
+            config=config,
+        )
