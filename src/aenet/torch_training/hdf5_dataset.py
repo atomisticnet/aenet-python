@@ -5,7 +5,7 @@ This module provides:
 - HDF5StructureDataset: a database-backed lazy-loading PyTorch Dataset
   that stores serialized (pickled) torch Structure objects in an HDF5
   (PyTables) file with per-entry metadata. It supports building the database
-  from a list of raw structure files via a user-provided parser callable,
+  from source collections that load one or more structures per logical input,
   and efficient read-only access during training with multiprocessing.
 
 - train_test_split_dataset: a generic dataset splitter that returns PyTorch
@@ -44,7 +44,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import tables  # PyTables
@@ -69,6 +68,7 @@ from .descriptor_manifest import (
     descriptor_manifest_from_object,
     descriptor_matches_manifest,
 )
+from .sources import SourceCollection, SourceRecord, coerce_source_collection
 
 __all__ = [
     "HDF5StructureDataset",
@@ -78,6 +78,10 @@ __all__ = [
 
 _build_force_graph_triplets = build_force_graph_triplets
 _forward_force_features_with_graph = forward_force_features_with_graph
+_SOURCE_ID_MAX_BYTES = 2048
+_SOURCE_KIND_MAX_BYTES = 64
+_DISPLAY_NAME_MAX_BYTES = 2048
+_STRUCTURE_NAME_MAX_BYTES = 1024
 
 
 def _descriptor_cache_signature(descriptor) -> dict:
@@ -134,15 +138,6 @@ def _tensor_to_numpy_1d(
     return tensor.numpy().astype(dtype, copy=False)
 
 
-def _normalize_parsed_structures(
-    structures: Structure | Sequence[Structure],
-) -> list[Structure]:
-    """Normalize parser output to a list of torch-training structures."""
-    if isinstance(structures, (list, tuple)):
-        return list(structures)
-    return [structures]
-
-
 def _structure_energy_or_nan(struct: Structure) -> float:
     """Return the structure energy or ``nan`` if it is unavailable."""
     try:
@@ -158,6 +153,29 @@ def _decode_meta_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8").rstrip("\x00")
     return str(value).rstrip("\x00")
+
+
+def _validated_hdf5_text(
+    *,
+    field_name: str,
+    value: object,
+    max_bytes: int,
+) -> str:
+    """
+    Validate text destined for a fixed-width HDF5 string column.
+
+    PyTables silently truncates overlong strings written to ``StringCol``.
+    The source-oriented metadata path uses these values for stable output
+    identifiers, so silent truncation would corrupt source identity.
+    """
+    text = "" if value is None else str(value)
+    encoded = text.encode("utf-8")
+    if len(encoded) > max_bytes:
+        raise ValueError(
+            f"HDF5 metadata field {field_name!r} exceeds the maximum stored "
+            f"length of {max_bytes} bytes."
+        )
+    return text
 
 
 @dataclass
@@ -181,8 +199,10 @@ class _PersistedForceDerivativePayload:
 class _BuildEntryPayload:
     """Worker-safe payload for one HDF5 entry."""
 
-    source_path: str
+    source_id: str
     frame_idx: int
+    source_kind: str
+    display_name: str
     structure_bytes: bytes
     has_forces: bool
     n_atoms: int
@@ -252,27 +272,26 @@ def _build_force_derivative_payload(
     )
 
 
-def _prepare_build_payloads_for_path(
-    path: str,
+def _prepare_build_payloads_for_source_record(
+    record: SourceRecord,
     *,
-    parser: Callable[[str], Structure] | None,
     descriptor,
     persist_features: bool,
     persist_force_derivatives: bool,
 ) -> list[_BuildEntryPayload]:
     """
-    Parse one input path and prepare worker-safe payloads for ordered writes.
+    Load one source record and prepare worker-safe payloads for ordered writes.
 
     This helper is intentionally top-level so concurrent build workers can
     execute it without capturing dataset instance state.
     """
-    if parser is None:
-        raise RuntimeError("Parallel HDF5 build requires a parser callable.")
-
+    source_id = str(record.source_id)
     try:
-        structs = _normalize_parsed_structures(parser(path))
+        structs = record.load_structures()
     except Exception as exc:
-        raise RuntimeError(f"Failed to parse build input {path!r}.") from exc
+        raise RuntimeError(
+            f"Failed to load build source {source_id!r}."
+        ) from exc
 
     payloads: list[_BuildEntryPayload] = []
     for frame_idx, struct in enumerate(structs):
@@ -350,14 +369,16 @@ def _prepare_build_payloads_for_path(
                 derivative_payload = None
         except Exception as exc:
             raise RuntimeError(
-                f"Failed to prepare persisted build payloads for {path!r} "
+                f"Failed to prepare persisted build payloads for {source_id!r} "
                 f"(frame {frame_idx})."
             ) from exc
 
         payloads.append(
             _BuildEntryPayload(
-                source_path=str(path),
+                source_id=source_id,
                 frame_idx=int(frame_idx),
+                source_kind=str(record.source_kind or ""),
+                display_name=str(record.display_name or ""),
                 structure_bytes=structure_bytes,
                 has_forces=bool(struct.has_forces()),
                 n_atoms=int(struct.n_atoms),
@@ -396,8 +417,9 @@ class HDF5StructureDataset(Dataset):
     file containing:
       - A VLArray 'entries/structures': pickled Structure per entry
       - A Table 'entries/meta': metadata per entry
-          columns: path(str), frame(int), has_forces(bool),
-                   n_atoms(int32), energy(float64), name(str)
+          columns: source_id(str), frame_idx(int), source_kind(str),
+                   display_name(str), has_forces(bool), n_atoms(int32),
+                   energy(float64), name(str)
       - Optionally, a versioned '/torch_cache' container holding persisted
         raw feature payloads and/or sparse local derivative payloads plus
         descriptor-compatibility metadata
@@ -427,13 +449,11 @@ class HDF5StructureDataset(Dataset):
         and the descriptor will be recovered automatically.
     database_file : str
         Path to HDF5 database file. Will be created on build.
-    file_paths : Sequence[str], optional
-        List of raw structure file paths used for building the database.
+    sources : Sequence[str | os.PathLike] | SourceCollection, optional
+        Build inputs used for database construction. Ordinary path-like input
+        sequences are wrapped in the built-in file-source adapter. Custom
+        source collections may load one or more structures per logical input.
         Required if you plan to call build_database().
-    parser : Callable[[str], Structure], optional
-        Callable that, given a file path, returns a Structure (or a list of
-        Structures). If a list is returned, all frames are added as separate
-        entries. If None, a sensible default should be provided by user code.
     mode : str, optional
         One of {'auto', 'build', 'load'} controlling initialization behavior:
         - 'auto': if database_file exists, load; otherwise, expect that user
@@ -457,8 +477,7 @@ class HDF5StructureDataset(Dataset):
     ------------------------
     - The HDF5 file handle is not pickled; on worker fork/deserialize,
       each worker lazily opens its own read-only handle on first use.
-    - The parser is not used during read mode; it is only used by
-      ``build_database()``.
+    - Source records are only used during ``build_database()``.
     - Build-time parallelism uses worker threads for parsing and optional
       persisted-cache preparation, but all HDF5 writes remain serialized in
       the main process to preserve deterministic output ordering.
@@ -561,15 +580,16 @@ class HDF5StructureDataset(Dataset):
         DESCRIPTOR_MANIFEST_SCHEMA_VERSION
     )
     _DESCRIPTOR_MANIFEST_FORMAT = DESCRIPTOR_MANIFEST_FORMAT
-
     # --- metadata table schema
     class _MetaRow(tables.IsDescription):
-        path = tables.StringCol(1024)
-        frame = tables.Int64Col()
+        source_id = tables.StringCol(_SOURCE_ID_MAX_BYTES)
+        frame_idx = tables.Int64Col()
+        source_kind = tables.StringCol(_SOURCE_KIND_MAX_BYTES)
+        display_name = tables.StringCol(_DISPLAY_NAME_MAX_BYTES)
         has_forces = tables.BoolCol()
         n_atoms = tables.Int32Col()
         energy = tables.Float64Col()
-        name = tables.StringCol(256)
+        name = tables.StringCol(_STRUCTURE_NAME_MAX_BYTES)
 
     class _ForceDerivativeIndexRow(tables.IsDescription):
         entry_idx = tables.Int64Col()
@@ -588,8 +608,7 @@ class HDF5StructureDataset(Dataset):
         self,
         descriptor,
         database_file: str,
-        file_paths: Sequence[str] | None = None,
-        parser: Callable[[str], Structure] | None = None,
+        sources: Sequence[str | os.PathLike] | SourceCollection | None = None,
         mode: str = "auto",
         *,
         seed: int | None = None,
@@ -605,8 +624,11 @@ class HDF5StructureDataset(Dataset):
 
         # Build/read configuration
         self._db_path = str(database_file)
-        self._file_paths = list(file_paths) if file_paths is not None else None
-        self._parser = parser
+        self._sources = (
+            coerce_source_collection(sources)
+            if sources is not None
+            else None
+        )
         self._filters = _FiltersConfig(
             compression=compression,
             compression_level=int(compression_level),
@@ -655,7 +677,7 @@ class HDF5StructureDataset(Dataset):
         persist_force_derivatives: bool = False,
     ) -> None:
         """
-        Build (or overwrite) the HDF5 database from file_paths using parser.
+        Build (or overwrite) the HDF5 database from the configured sources.
 
         This will:
           - Create '/entries/structures' VLArray of uint8 (pickled Structure)
@@ -669,7 +691,7 @@ class HDF5StructureDataset(Dataset):
         show_progress : bool
             If True and tqdm is available, show a progress bar.
         build_workers : int
-            Number of worker threads used for parser execution and
+            Number of worker threads used for source-record loading and
             optional persisted-cache preparation. ``0`` and ``1`` keep the
             existing serial build path. Values greater than ``1`` preserve
             deterministic HDF5 entry ordering while keeping all HDF5 writes
@@ -693,13 +715,16 @@ class HDF5StructureDataset(Dataset):
             expose the persisted payload lazily through ``__getitem__`` when
             it is present and descriptor-compatible.
         """
-        if self._file_paths is None:
-            raise ValueError("file_paths must be provided to build_database()")
-        if self._parser is None:
-            raise ValueError("parser must be provided to build_database()")
+        source_collection = self._sources
+        if source_collection is None:
+            raise ValueError("sources must be provided to build_database()")
         build_workers = int(build_workers)
         if build_workers < 0:
             raise ValueError("build_workers must be >= 0")
+        if build_workers > 1 and not source_collection.capabilities.supports_parallel_build:
+            raise ValueError(
+                "The configured sources do not support build_workers > 1."
+            )
 
         persist_descriptor = bool(
             persist_descriptor or persist_features or persist_force_derivatives
@@ -767,12 +792,18 @@ class HDF5StructureDataset(Dataset):
                     persist_force_derivatives=persist_force_derivatives,
                 )
 
+            total_records = None
+            try:
+                total_records = len(source_collection)  # type: ignore[arg-type]
+            except (TypeError, AttributeError):
+                total_records = None
+
             # Optional progress bar
             try:
                 from tqdm import tqdm as _tqdm  # type: ignore
                 pbar = (
                     _tqdm(
-                        total=len(self._file_paths),
+                        total=total_records,
                         desc="Building HDF5",
                         ncols=80,
                     )
@@ -783,14 +814,13 @@ class HDF5StructureDataset(Dataset):
                 pbar = None
 
             worker = partial(
-                _prepare_build_payloads_for_path,
-                parser=self._parser,
+                _prepare_build_payloads_for_source_record,
                 descriptor=self.descriptor,
                 persist_features=persist_features,
                 persist_force_derivatives=persist_force_derivatives,
             )
             if build_workers <= 1:
-                payload_batches = map(worker, self._file_paths or [])
+                payload_batches = map(worker, source_collection.iter_records())
                 for payload_batch in payload_batches:
                     self._append_build_payload_batch(
                         h5=h5,
@@ -807,7 +837,7 @@ class HDF5StructureDataset(Dataset):
                     ) as executor:
                         for payload_batch in executor.map(
                             worker,
-                            self._file_paths or [],
+                            source_collection.iter_records(),
                         ):
                             self._append_build_payload_batch(
                                 h5=h5,
@@ -852,7 +882,7 @@ class HDF5StructureDataset(Dataset):
         meta_table,
         payload_batch: list[_BuildEntryPayload],
     ) -> None:
-        """Append one parsed input file worth of payloads to the HDF5 file."""
+        """Append one source record worth of payloads to the HDF5 file."""
         for payload in payload_batch:
             entry_idx = int(len(vl_struct))
             vl_struct.append(
@@ -860,12 +890,30 @@ class HDF5StructureDataset(Dataset):
             )
 
             row = meta_table.row
-            row["path"] = payload.source_path
-            row["frame"] = int(payload.frame_idx)
+            row["source_id"] = _validated_hdf5_text(
+                field_name="source_id",
+                value=payload.source_id,
+                max_bytes=_SOURCE_ID_MAX_BYTES,
+            )
+            row["frame_idx"] = int(payload.frame_idx)
+            row["source_kind"] = _validated_hdf5_text(
+                field_name="source_kind",
+                value=payload.source_kind,
+                max_bytes=_SOURCE_KIND_MAX_BYTES,
+            )
+            row["display_name"] = _validated_hdf5_text(
+                field_name="display_name",
+                value=payload.display_name,
+                max_bytes=_DISPLAY_NAME_MAX_BYTES,
+            )
             row["has_forces"] = bool(payload.has_forces)
             row["n_atoms"] = int(payload.n_atoms)
             row["energy"] = float(payload.energy)
-            row["name"] = payload.name
+            row["name"] = _validated_hdf5_text(
+                field_name="name",
+                value=payload.name,
+                max_bytes=_STRUCTURE_NAME_MAX_BYTES,
+            )
             row.append()
 
             if payload.feature_values is not None:
@@ -1799,8 +1847,10 @@ class HDF5StructureDataset(Dataset):
         meta = self._h5.get_node(self._NODE_META)
         row = meta[int(idx)]
         return {
-            "path": _decode_meta_text(row["path"]),
-            "frame": int(row["frame"]),
+            "source_id": _decode_meta_text(row["source_id"]),
+            "frame_idx": int(row["frame_idx"]),
+            "source_kind": _decode_meta_text(row["source_kind"]),
+            "display_name": _decode_meta_text(row["display_name"]),
             "name": _decode_meta_text(row["name"]),
             "has_forces": bool(row["has_forces"]),
             "n_atoms": int(row["n_atoms"]),
@@ -1811,14 +1861,15 @@ class HDF5StructureDataset(Dataset):
         """
         Return the stable energy-output identifier for one HDF5 entry.
 
-        HDF5-backed outputs prefer the persisted source path, then the
-        persisted structure name, and always append the persisted frame index
-        so multi-frame sources remain distinguishable.
+        HDF5-backed outputs synthesize the Fortran-compatible merged
+        identifier from structured source metadata and always append the
+        persisted frame index so multi-frame sources remain distinguishable.
         """
         meta = self.get_entry_metadata(idx)
-        frame = int(meta["frame"])
+        frame = int(meta["frame_idx"])
         base = (
-            str(meta["path"])
+            str(meta["display_name"])
+            or str(meta["source_id"])
             or str(meta["name"])
             or f"structure_{idx:06d}"
         )

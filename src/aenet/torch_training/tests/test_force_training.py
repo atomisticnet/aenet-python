@@ -21,6 +21,7 @@ from aenet.torch_training import (
     TorchTrainingConfig,
 )
 from aenet.torch_training.dataset import StructureDataset
+from aenet.torch_training.sources import RecordSourceCollection, SourceRecord
 
 
 def make_structures_with_forces(n_structures=10, n_atoms=5):
@@ -89,6 +90,22 @@ def make_arch(descriptor: ChebyshevDescriptor):
     return {
         "H": [(8, "tanh"), (4, "tanh")],
     }
+
+
+def _source_collection_from_structures(
+    source_ids: list[str],
+    structures: list[Structure],
+) -> RecordSourceCollection:
+    """Build a simple record-backed source collection for test structures."""
+    records = [
+        SourceRecord(
+            source_id=source_id,
+            loader=(lambda struct=struct: struct),
+            source_kind="test",
+        )
+        for source_id, struct in zip(source_ids, structures, strict=True)
+    ]
+    return RecordSourceCollection(records)
 
 
 @pytest.mark.cpu
@@ -418,16 +435,11 @@ def test_force_training_uses_persisted_hdf5_derivatives_when_available(
     for path in file_paths:
         Path(path).write_text("placeholder", encoding="utf-8")
 
-    def _parser(path: str) -> Structure:
-        idx = int(Path(path).name.split("_")[-1])
-        return structures[idx]
-
     descriptor = make_descriptor(dtype=torch.float64)
     dataset = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(tmp_path / "force_training_cached.h5"),
-        file_paths=file_paths,
-        parser=_parser,
+        sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
     )
     dataset.build_database(
@@ -491,16 +503,11 @@ def test_hdf5_force_training_random_sampling_initializes_force_selection(
     for path in file_paths:
         Path(path).write_text("placeholder", encoding="utf-8")
 
-    def _parser(path: str) -> Structure:
-        idx = int(Path(path).name.split("_")[-1])
-        return structures[idx]
-
     descriptor = make_descriptor(dtype=torch.float64)
     dataset = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(tmp_path / "force_training_random.h5"),
-        file_paths=file_paths,
-        parser=_parser,
+        sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
     )
     dataset.build_database(
@@ -543,16 +550,11 @@ def test_prebuilt_hdf5_dataset_uses_config_owned_runtime_policy(
     for path in file_paths:
         Path(path).write_text("placeholder", encoding="utf-8")
 
-    def _parser(path: str) -> Structure:
-        idx = int(Path(path).name.split("_")[-1])
-        return structures[idx]
-
     descriptor = make_descriptor(dtype=torch.float64)
     dataset = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(tmp_path / "force_training_mismatch.h5"),
-        file_paths=file_paths,
-        parser=_parser,
+        sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
     )
     dataset.build_database(show_progress=False)
@@ -611,15 +613,13 @@ def test_persisted_hdf5_force_training_matches_on_the_fly_training(
         for path in file_paths:
             Path(path).write_text("placeholder", encoding="utf-8")
 
-        def _parser(path: str) -> Structure:
-            idx = int(Path(path).stem.split("_")[-1])
-            return subset_structures[idx]
-
         dataset = HDF5StructureDataset(
             descriptor=descriptor,
             database_file=str(tmp_path / f"{database_name}.h5"),
-            file_paths=file_paths,
-            parser=_parser,
+            sources=_source_collection_from_structures(
+                file_paths,
+                subset_structures,
+            ),
             mode="build",
         )
         dataset.build_database(

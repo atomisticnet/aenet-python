@@ -945,7 +945,15 @@ class TorchANNPotential:
         *,
         structure: Optional[Structure] = None,
     ) -> Optional[str]:
-        """Return the preferred output identifier for one dataset entry."""
+        """
+        Return the preferred output identifier for one dataset entry.
+
+        Datasets that persist structured source metadata, such as
+        ``HDF5StructureDataset``, own the merged identifier synthesis via
+        ``get_structure_identifier()``. The trainer stays agnostic to the
+        underlying metadata fields and only falls back to ``Structure.name``
+        when the dataset does not provide an identifier.
+        """
         getter = getattr(dataset, "get_structure_identifier", None)
         if callable(getter):
             identifier = getter(index)

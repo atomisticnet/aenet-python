@@ -333,16 +333,7 @@ Building the Database
 .. code-block:: python
 
    from aenet.torch_training.dataset import HDF5StructureDataset
-   from aenet.geometry import AtomicStructure
    from glob import glob
-
-   # Define the parser used during HDF5 database construction
-   def parse_xsf(path: str):
-       """Parse XSF file and return torch Structure(s)."""
-       atomic_struct = AtomicStructure.from_file(path)
-       torch_structs = atomic_struct.to_TorchStructure()
-       # to_TorchStructure() may return list of frames
-       return torch_structs if isinstance(torch_structs, list) else [torch_structs]
 
    # Build HDF5 database (do this once)
    file_list = glob("data/**/*.xsf", recursive=True)
@@ -350,8 +341,7 @@ Building the Database
    db = HDF5StructureDataset(
        descriptor=descriptor,
        database_file="datasets/training.h5",
-       file_paths=file_list,
-       parser=parse_xsf,
+       sources=file_list,
        mode="build",                # Build mode
        in_memory_cache_size=2048,   # LRU cache for unpickled structures
        compression="zlib",
@@ -372,10 +362,40 @@ Building the Database
 .. note::
 
    ``build_workers`` only affects the one-time ``build_database()`` call.
-   It parallelizes parser execution and optional persisted-cache preparation
-   with worker threads, while the parent process still performs all ordered
-   HDF5 writes. This is
-   separate from training-time ``num_workers`` on ``TorchTrainingConfig``.
+   It parallelizes source-record loading and optional persisted-cache
+   preparation with worker threads, while the parent process still performs
+   all ordered HDF5 writes. This is separate from training-time
+   ``num_workers`` on ``TorchTrainingConfig``.
+
+For archive-backed datasets, pass an explicit source adapter instead of a
+list of paths. For example, a ``.tar.bz2`` archive of XSF files can be
+streamed directly:
+
+.. code-block:: python
+
+   from aenet.torch_training.sources import TarArchiveXSFSourceCollection
+
+   db = HDF5StructureDataset(
+       descriptor=descriptor,
+       database_file="datasets/training_from_tar.h5",
+       sources=TarArchiveXSFSourceCollection("data/training.tar.bz2"),
+       mode="build",
+   )
+   db.build_database(show_progress=True)
+
+.. note::
+
+   ``TarArchiveXSFSourceCollection`` is intentionally conservative for
+   compressed tar archives and does not support ``build_workers > 1``.
+   If matching archive members repeat the same member name, the adapter
+   disambiguates them by archive order so persisted source IDs remain
+   unique.
+
+.. note::
+
+   Source metadata written to HDF5 is validated before it is stored.
+   Overlong source labels raise an error instead of being silently
+   truncated.
 
 .. note::
 
@@ -491,11 +511,12 @@ Key HDF5 Features
 * **Multiprocessing-safe**: Each DataLoader worker opens its own read-only handle
 * **Compression**: Built-in HDF5 compression (zlib, blosc) reduces disk usage
 * **LRU caching**: Configurable in-memory cache per worker for frequently accessed entries
-* **Build parallelism**: ``build_workers`` accelerates parser execution and
+* **Build parallelism**: ``build_workers`` accelerates source-record loading and
   optional persisted-cache generation, but ordered HDF5 writes still happen
   in the parent process
-* **Parser concurrency**: When using ``build_workers > 1``, make sure the
-  parser callable is safe to invoke concurrently over independent file paths
+* **Adapter capabilities**: When using ``build_workers > 1``, the selected
+  source collection must advertise ``supports_parallel_build=True``. Some
+  adapters, such as compressed tar archives, intentionally do not.
 * **Unified persisted cache**: Optional ``/torch_cache/features`` and
   ``/torch_cache/force_derivatives`` sections can be written once and reused
   lazily across later HDF5-backed runs
@@ -619,7 +640,10 @@ for energy-only structure-list training.
 Common Pitfalls
 ---------------
 
-1. **Parser not pickleable**: When using HDF5 with ``num_workers > 0``, the parser function must be defined at module top-level (not a lambda or nested function).
+1. **Build adapter limitations**: Some source adapters intentionally do not
+   support ``build_workers > 1``. For example,
+   ``TarArchiveXSFSourceCollection`` reports conservative capabilities for
+   compressed tar archives.
 
 2. **Descriptor mismatch**: Ensure descriptor species order matches your dataset. Datasets use ``descriptor.species_to_idx`` for species indexing.
 

@@ -19,6 +19,11 @@ from aenet.torch_training.dataset import (
     StructureDataset,
     _build_force_graph_triplets,
 )
+from aenet.torch_training.sources import (
+    RecordSourceCollection,
+    SourceCapabilities,
+    SourceRecord,
+)
 from aenet.torch_training.trainer import _collate_fn
 
 
@@ -51,40 +56,11 @@ def _make_struct(i: int) -> Structure:
                      energy=energy, forces=forces)
 
 
-def _parser_factory(structs: list[Structure]):
-    """
-    Build a top-level, picklable parser callable that maps file path
-    suffix index to a pre-generated Structure. This avoids I/O in tests.
-    """
-    def _parser(path: str) -> Structure:
-        name = Path(path).name
-        # Expect names like "s_0", "s_1", etc.
-        try:
-            idx = int(name.split("_")[-1])
-        except Exception:
-            idx = 0
-        return structs[idx]
-    return _parser
-
-
-def _pickle_parser(path: str):
-    """Load one pickled parser payload for build-worker tests."""
-    with Path(path).open("rb") as handle:
-        payload = pickle.load(handle)
-    if (
-        isinstance(payload, tuple)
-        and len(payload) == 2
-        and payload[0] == "raise"
-    ):
-        raise RuntimeError(str(payload[1]))
-    return payload
-
-
 def _write_pickled_build_inputs(
     directory: Path,
     payloads: list[object],
 ) -> list[str]:
-    """Write parser payloads for process-based build tests."""
+    """Write serialized source payloads for process-based build tests."""
     directory.mkdir(parents=True, exist_ok=True)
     file_paths = []
     for index, payload in enumerate(payloads):
@@ -95,12 +71,72 @@ def _write_pickled_build_inputs(
     return file_paths
 
 
+def _payload_loader(payload):
+    """Create a record loader returning one in-memory payload."""
+
+    def _load():
+        return payload
+
+    return _load
+
+
+def _payload_source_collection(
+    source_ids: list[str],
+    payloads: list[Structure | list[Structure]],
+    *,
+    capabilities: SourceCapabilities | None = None,
+) -> RecordSourceCollection:
+    """Build a record-backed source collection for in-memory payloads."""
+    records = [
+        SourceRecord(
+            source_id=source_id,
+            loader=_payload_loader(payload),
+            source_kind="test",
+        )
+        for source_id, payload in zip(source_ids, payloads, strict=True)
+    ]
+    return RecordSourceCollection(records, capabilities=capabilities)
+
+def _pickled_source_collection(
+    file_paths: list[str],
+    *,
+    capabilities: SourceCapabilities | None = None,
+) -> RecordSourceCollection:
+    """Build a source collection that loads payloads from pickle files."""
+
+    def _make_loader(path: str):
+        def _load():
+            with Path(path).open("rb") as handle:
+                payload = pickle.load(handle)
+            if (
+                isinstance(payload, tuple)
+                and len(payload) == 2
+                and payload[0] == "raise"
+            ):
+                raise RuntimeError(str(payload[1]))
+            return payload
+
+        return _load
+
+    records = [
+        SourceRecord(
+            source_id=path,
+            loader=_make_loader(path),
+            source_kind="pickle",
+        )
+        for path in file_paths
+    ]
+    return RecordSourceCollection(records, capabilities=capabilities)
+
+
 def _decode_table_string(value) -> str:
     """Decode PyTables string columns to plain Python strings."""
     return value.decode("utf-8") if isinstance(value, bytes) else str(value)
 
 
-def _read_meta_rows(db_path: Path) -> list[tuple[str, int, bool, int, float, str]]:
+def _read_meta_rows(
+    db_path: Path,
+) -> list[tuple[str, int, str, str, bool, int, float, str]]:
     """Read the HDF5 metadata table for deterministic-order assertions."""
     with tables.open_file(str(db_path), mode="r") as h5:
         meta = h5.get_node("/entries/meta")
@@ -108,8 +144,10 @@ def _read_meta_rows(db_path: Path) -> list[tuple[str, int, bool, int, float, str
         for row in meta:  # type: ignore[assignment]
             rows.append(
                 (
-                    _decode_table_string(row["path"]),
-                    int(row["frame"]),
+                    _decode_table_string(row["source_id"]),
+                    int(row["frame_idx"]),
+                    _decode_table_string(row["source_kind"]),
+                    _decode_table_string(row["display_name"]),
                     bool(row["has_forces"]),
                     int(row["n_atoms"]),
                     float(row["energy"]),
@@ -146,8 +184,7 @@ def _build_legacy_v1_force_cache(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
 
@@ -176,8 +213,10 @@ def _build_legacy_v1_force_cache(
             vl_struct.append(np.frombuffer(data_bytes, dtype=np.uint8))
 
             row = meta_table.row
-            row["path"] = file_paths[entry_idx]
-            row["frame"] = 0
+            row["source_id"] = file_paths[entry_idx]
+            row["frame_idx"] = 0
+            row["source_kind"] = "legacy"
+            row["display_name"] = ""
             row["has_forces"] = bool(struct.has_forces())
             row["n_atoms"] = int(struct.n_atoms)
             row["energy"] = float(struct.energy)
@@ -421,8 +460,7 @@ def test_hdf5_build_and_getitem(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
         compression="zlib",
         compression_level=5,
@@ -463,18 +501,53 @@ def test_hdf5_parallel_build_preserves_order_for_multiframe_inputs(
     ds = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_pickle_parser,
+        sources=_pickled_source_collection(file_paths),
         mode="build",
     )
 
     ds.build_database(show_progress=False, build_workers=2)
 
     expected_rows = [
-        (file_paths[0], 0, True, 3, float(struct_a.energy), "serial-a"),
-        (file_paths[1], 0, True, 3, float(struct_b0.energy), "multi-b0"),
-        (file_paths[1], 1, True, 3, float(struct_b1.energy), "multi-b1"),
-        (file_paths[2], 0, False, 2, float(struct_c.energy), "serial-c"),
+        (
+            file_paths[0],
+            0,
+            "pickle",
+            "",
+            True,
+            3,
+            float(struct_a.energy),
+            "serial-a",
+        ),
+        (
+            file_paths[1],
+            0,
+            "pickle",
+            "",
+            True,
+            3,
+            float(struct_b0.energy),
+            "multi-b0",
+        ),
+        (
+            file_paths[1],
+            1,
+            "pickle",
+            "",
+            True,
+            3,
+            float(struct_b1.energy),
+            "multi-b1",
+        ),
+        (
+            file_paths[2],
+            0,
+            "pickle",
+            "",
+            False,
+            2,
+            float(struct_c.energy),
+            "serial-c",
+        ),
     ]
     assert len(ds) == 4
     assert _read_meta_rows(db_path) == expected_rows
@@ -502,15 +575,13 @@ def test_hdf5_parallel_build_matches_serial_for_persisted_caches(
     serial_ds = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(serial_path),
-        file_paths=file_paths,
-        parser=_pickle_parser,
+        sources=_pickled_source_collection(file_paths),
         mode="build",
     )
     parallel_ds = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(parallel_path),
-        file_paths=file_paths,
-        parser=_pickle_parser,
+        sources=_pickled_source_collection(file_paths),
         mode="build",
     )
 
@@ -571,8 +642,7 @@ def test_hdf5_parallel_build_failure_preserves_existing_database(
     ds_ok = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=ok_inputs,
-        parser=_pickle_parser,
+        sources=_pickled_source_collection(ok_inputs),
         mode="build",
     )
     ds_ok.build_database(show_progress=False)
@@ -584,12 +654,11 @@ def test_hdf5_parallel_build_failure_preserves_existing_database(
     ds_fail = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=failing_inputs,
-        parser=_pickle_parser,
+        sources=_pickled_source_collection(failing_inputs),
         mode="build",
     )
 
-    with pytest.raises(RuntimeError, match="Failed to parse build input"):
+    with pytest.raises(RuntimeError, match="Failed to load build source"):
         ds_fail.build_database(show_progress=False, build_workers=2)
 
     ds_load = HDF5StructureDataset(
@@ -615,8 +684,7 @@ def test_trainer_with_hdf5_dataset_smoke(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
         compression="zlib",
         compression_level=5,
@@ -671,8 +739,7 @@ def test_hdf5_force_derivative_cache_round_trip(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -752,8 +819,7 @@ def test_hdf5_persisted_feature_cache_round_trip(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_features=True)
@@ -817,8 +883,7 @@ def test_hdf5_persisted_feature_cache_matches_direct_features(
     ds_build = HDF5StructureDataset(
         descriptor=descriptor_factory(dtype=build_dtype),
         database_file=str(db_path),
-        file_paths=[str(file_path)],
-        parser=_parser_factory([struct]),
+        sources=_payload_source_collection([str(file_path)], [struct]),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_features=True)
@@ -868,8 +933,7 @@ def test_hdf5_energy_materialization_prefers_runtime_then_persisted_features(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_features=True)
@@ -926,8 +990,7 @@ def test_hdf5_energy_materialization_recomputes_when_persisted_features_absent(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False)
@@ -974,8 +1037,7 @@ def test_hdf5_energy_materialization_uses_single_neighbor_build_on_cache_miss(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False)
@@ -1037,8 +1099,7 @@ def test_structure_and_hdf5_materialize_sample_match_without_persisted_payloads(
     hdf5_ds = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     hdf5_ds.build_database(show_progress=False)
@@ -1130,8 +1191,7 @@ def test_hdf5_combined_feature_and_derivative_cache_round_trip(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(
@@ -1179,8 +1239,7 @@ def test_hdf5_force_materialization_uses_persisted_features_without_derivatives(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_features=True)
@@ -1220,8 +1279,7 @@ def test_hdf5_force_materialization_recomputes_features_when_feature_cache_absen
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1274,8 +1332,7 @@ def test_hdf5_load_recovers_persisted_descriptor_without_explicit_descriptor(
     ds_build = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_descriptor=True)
@@ -1318,8 +1375,7 @@ def test_hdf5_feature_cache_load_recovers_descriptor_automatically(
     ds_build = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_features=True)
@@ -1354,8 +1410,7 @@ def test_hdf5_force_cache_load_recovers_descriptor_automatically(
     ds_build = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1390,8 +1445,7 @@ def test_hdf5_persisted_feature_cache_rejects_incompatible_descriptor(
     ds_build = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_features=True)
@@ -1420,8 +1474,7 @@ def test_hdf5_materialization_rejects_incompatible_persisted_feature_descriptor(
     ds_build = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_features=True)
@@ -1448,8 +1501,7 @@ def test_hdf5_persisted_feature_cache_casts_to_descriptor_dtype(tmp_path: Path):
     ds_build = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_features=True)
@@ -1488,8 +1540,7 @@ def test_hdf5_getitem_exposes_persisted_force_derivatives(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1527,8 +1578,7 @@ def test_hdf5_collate_batches_persisted_force_derivatives(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1602,8 +1652,7 @@ def test_hdf5_collate_allows_derivative_backed_force_batches_without_graphs(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(
@@ -1640,8 +1689,7 @@ def test_hdf5_force_derivative_cache_rejects_incompatible_descriptor(
     ds_build = HDF5StructureDataset(
         descriptor=build_desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1696,8 +1744,7 @@ def test_hdf5_force_derivative_cache_round_trip_multispecies_typespin(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1745,8 +1792,7 @@ def test_hdf5_force_derivative_cache_round_trip_float32(tmp_path: Path):
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1776,8 +1822,7 @@ def test_hdf5_force_derivative_cache_skips_entries_without_forces(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)
@@ -1801,8 +1846,7 @@ def test_hdf5_load_without_descriptor_or_manifest_rejects_getitem(
     ds_build = HDF5StructureDataset(
         descriptor=_make_descriptor(dtype=torch.float64),
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds_build.build_database(show_progress=False)
@@ -1836,8 +1880,7 @@ def test_hdf5_dataset_close_is_idempotent_and_context_manager_closes(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False)
@@ -1881,8 +1924,7 @@ def test_hdf5_persisted_derivatives_are_loaded_only_for_accessed_entries(
     ds = HDF5StructureDataset(
         descriptor=desc,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_parser_factory(structs),
+        sources=_payload_source_collection(file_paths, structs),
         mode="build",
     )
     ds.build_database(show_progress=False, persist_force_derivatives=True)

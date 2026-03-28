@@ -16,6 +16,7 @@ from aenet.torch_training import (
     TorchTrainingConfig,
 )
 from aenet.torch_training.dataset import StructureDataset
+from aenet.torch_training.sources import RecordSourceCollection, SourceRecord
 from aenet.torch_training.trainer import _TrainingPolicyDataset
 
 
@@ -92,22 +93,20 @@ def make_descriptor_H(dtype=torch.float64):
     )
 
 
-def _parser_factory(structures):
-    """Return a simple path-index parser for HDF5-backed test datasets."""
-    def _parser(path: str) -> Structure:
-        idx = int(Path(path).name.split("_")[-1])
-        return structures[idx]
-
-    return _parser
-
-
-def _multi_frame_parser_factory(structure_groups):
-    """Return a parser that yields multiple frames per input path."""
-    def _parser(path: str):
-        idx = int(Path(path).name.split("_")[-1])
-        return structure_groups[idx]
-
-    return _parser
+def _payload_source_collection(
+    source_ids: list[str],
+    payloads: list[Structure | list[Structure]],
+) -> RecordSourceCollection:
+    """Build a record-backed source collection for HDF5 smoke tests."""
+    records = [
+        SourceRecord(
+            source_id=source_id,
+            loader=(lambda payload=payload: payload),
+            source_kind="test",
+        )
+        for source_id, payload in zip(source_ids, payloads, strict=True)
+    ]
+    return RecordSourceCollection(records)
 
 
 def make_arch_H(descriptor: ChebyshevDescriptor):
@@ -564,8 +563,7 @@ def test_save_energies_hdf5_split_outputs_use_source_paths_and_frames(
     build_ds = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(db_path),
-        file_paths=file_paths,
-        parser=_multi_frame_parser_factory(frame_groups),
+        sources=_payload_source_collection(file_paths, frame_groups),
         mode="build",
     )
     build_ds.build_database(show_progress=False)
@@ -632,8 +630,7 @@ def test_save_energies_hdf5_identifier_precedence_uses_name_then_fallback(
     build_ds = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(db_path),
-        file_paths=[str(file_path)],
-        parser=_multi_frame_parser_factory([structures]),
+        sources=_payload_source_collection([str(file_path)], [structures]),
         mode="build",
     )
     build_ds.build_database(show_progress=False)
@@ -641,8 +638,8 @@ def test_save_energies_hdf5_identifier_precedence_uses_name_then_fallback(
     with tables.open_file(str(db_path), mode="a") as h5:
         meta = h5.get_node("/entries/meta")
         for row in meta.iterrows():
-            row["path"] = ""
-            if int(row["frame"]) == 1:
+            row["source_id"] = ""
+            if int(row["frame_idx"]) == 1:
                 row["name"] = ""
             row.update()
         meta.flush()
@@ -686,6 +683,74 @@ def test_save_energies_hdf5_identifier_precedence_uses_name_then_fallback(
 
 
 @pytest.mark.cpu
+def test_save_energies_hdf5_identifier_precedence_prefers_display_name(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    structures = make_simple_structures_H_two()
+    structures[0].name = "struct-name-0"
+    structures[1].name = "struct-name-1"
+
+    file_path = tmp_path / "frames_0"
+    file_path.write_text("placeholder", encoding="utf-8")
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    db_path = tmp_path / "save_energies_display_name_precedence.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        sources=_payload_source_collection([str(file_path)], [structures]),
+        mode="build",
+    )
+    build_ds.build_database(show_progress=False)
+
+    with tables.open_file(str(db_path), mode="a") as h5:
+        meta = h5.get_node("/entries/meta")
+        for row in meta.iterrows():
+            row["display_name"] = "archive.tar:member.xsf"
+            row.update()
+        meta.flush()
+
+    load_ds = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    arch = make_arch_H(descriptor)
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=True,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+
+    result = pot.train(
+        dataset=load_ds,
+        config=cfg,
+    )
+
+    assert (tmp_path / "energies.train.0").exists()
+    assert result.energies is not None
+
+    identifiers = set(result.energies.energies_train["Path-of-input-file"])
+    assert identifiers == {
+        "archive.tar:member.xsf#frame=0",
+        "archive.tar:member.xsf#frame=1",
+    }
+
+
+@pytest.mark.cpu
 def test_training_policy_cache_features_preserves_hdf5_feature_values(
     tmp_path: Path,
 ):
@@ -699,8 +764,7 @@ def test_training_policy_cache_features_preserves_hdf5_feature_values(
     ds_persisted = HDF5StructureDataset(
         descriptor=make_descriptor_H(dtype=torch.float64),
         database_file=str(db_persisted),
-        file_paths=file_paths,
-        parser=_parser_factory(structures),
+        sources=_payload_source_collection(file_paths, structures),
         mode="build",
     )
     ds_persisted.build_database(show_progress=False, persist_features=True)
@@ -709,8 +773,7 @@ def test_training_policy_cache_features_preserves_hdf5_feature_values(
     ds_fallback = HDF5StructureDataset(
         descriptor=make_descriptor_H(dtype=torch.float64),
         database_file=str(db_fallback),
-        file_paths=file_paths,
-        parser=_parser_factory(structures),
+        sources=_payload_source_collection(file_paths, structures),
         mode="build",
     )
     ds_fallback.build_database(show_progress=False)

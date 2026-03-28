@@ -1,5 +1,6 @@
 """Docs-backed smoke tests for ``docs/source/usage/torch_datasets.rst``."""
 
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from aenet.torch_training.dataset import (
     StructureDataset,
     train_test_split,
 )
+from aenet.torch_training.sources import TarArchiveXSFSourceCollection
 
 
 def _make_descriptor(dtype=torch.float64) -> ChebyshevDescriptor:
@@ -111,14 +113,24 @@ def _write_xsf_files(
     return paths
 
 
-def _parse_xsf(path: str):
-    """Parse an XSF file into the torch Structure entries stored in HDF5."""
-    atomic = AtomicStructure.from_file(path)
-    converted = atomic.to_TorchStructure()
-    if isinstance(converted, list):
-        return converted
-    return [converted]
-
+def _write_xsf_tar_bz2(
+    atomic_structures: list[AtomicStructure],
+    archive_path: Path,
+) -> Path:
+    """Write a tar.bz2 archive containing the provided XSF structures."""
+    member_dir = archive_path.parent / f"{archive_path.stem}_members"
+    member_dir.mkdir(parents=True, exist_ok=True)
+    member_paths = _write_xsf_files(
+        atomic_structures,
+        member_dir,
+    )
+    with tarfile.open(archive_path, mode="w:bz2") as archive:
+        for member_path in member_paths:
+            archive.add(
+                member_path,
+                arcname=f"dataset/{member_path.name}",
+            )
+    return archive_path
 
 @pytest.fixture
 def docs_training_structures():
@@ -252,8 +264,7 @@ def test_hdf5_build_load_and_generic_split_examples(
     build_dataset = HDF5StructureDataset(
         descriptor=descriptor,
         database_file=str(database_file),
-        file_paths=[str(path) for path in file_paths],
-        parser=_parse_xsf,
+        sources=[str(path) for path in file_paths],
         mode="build",
         compression="zlib",
         compression_level=5,
@@ -339,3 +350,30 @@ def test_hdf5_build_load_and_generic_split_examples(
     build_dataset.close()
     assert load_dataset._h5 is None
     assert build_dataset._h5 is None
+
+
+@pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_hdf5_tar_archive_source_example(
+    docs_atomic_structures,
+    tmp_path,
+):
+    """The tar-backed HDF5 docs example should remain runnable."""
+    descriptor = _make_descriptor()
+    archive_path = _write_xsf_tar_bz2(
+        docs_atomic_structures,
+        tmp_path / "training.tar.bz2",
+    )
+    database_file = tmp_path / "training_from_tar.h5"
+
+    dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(database_file),
+        sources=TarArchiveXSFSourceCollection(archive_path),
+        mode="build",
+    )
+    dataset.build_database(show_progress=False)
+
+    assert len(dataset) == 2
+    assert dataset.get_entry_metadata(0)["source_kind"] == "tar_xsf_member"
+    assert dataset[0]["features"].shape == (3, 3)

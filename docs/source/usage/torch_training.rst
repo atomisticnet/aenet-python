@@ -672,10 +672,13 @@ Output & Diagnostics
    ``Path-of-input-file`` column preserves the original structure path or
    name when available; otherwise it uses a stable ``structure_XXXXXX``
    identifier from the pre-split input order. For HDF5-backed datasets,
-   the identifier is reconstructed from persisted metadata as
-   ``path#frame=N`` when the source path is available, ``name#frame=N``
-   when only the persisted name is available, and
-   ``structure_XXXXXX#frame=N`` as the final fallback.
+   the identifier is synthesized from persisted source metadata as
+   ``display_name#frame=N`` when a display name is available,
+   ``source_id#frame=N`` otherwise, then ``name#frame=N`` when only the
+   persisted structure name is available, and
+   ``structure_XXXXXX#frame=N`` as the final fallback. Source metadata is
+   validated at HDF5 build time so these identifiers are not silently
+   truncated on write.
 
 **save_forces** : bool (default: False)
    Save predicted forces for train/test sets to disk.
