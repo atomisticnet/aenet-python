@@ -335,7 +335,8 @@ class TorchTrainingConfig:
         reserved for a future real mixed-memory implementation and currently
         raises ``NotImplementedError`` when requested. Default: 'gpu'
     max_energy : float, optional
-        Exclude structures with energy above this threshold. Default: None
+        Exclude structures with energy per atom above this threshold.
+        Default: None
     max_forces : float, optional
         Exclude structures with max force above this threshold. Default: None
     save_energies : bool, optional

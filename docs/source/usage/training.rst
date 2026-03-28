@@ -72,7 +72,7 @@ The ``TrainingConfig`` class includes:
 *   ``iterations`` (int): Maximum number of training iterations. Default: ``0``
 *   ``method`` (TrainingMethod): The optimization algorithm to use. Default: ``Adam()``
 *   ``testpercent`` (int): Percentage of data for test set (0-100). Default: ``0``
-*   ``max_energy`` (float, optional): Exclude structures with energy above this threshold. Default: ``None``
+*   ``max_energy`` (float, optional): Exclude structures with energy per atom above this threshold. Default: ``None``
 *   ``sampling`` (str, optional): Sampling method ('sequential', 'random', 'weighted', 'energy'). Default: ``None``
 *   ``timing`` (bool): Enable detailed timing output. Default: ``False``
 *   ``save_energies`` (bool): Save predicted energies for training/test sets. Default: ``False``
@@ -305,4 +305,3 @@ Once you have trained ANN potentials, you can use them to make predictions
 (inference) on new atomic structures. The prediction functionality is
 integrated into the :class:`~aenet.mlip.ANNPotential` class, providing a
 unified interface for both training and inference.
-

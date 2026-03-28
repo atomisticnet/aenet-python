@@ -627,8 +627,8 @@ Data Filtering & Quality Control
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **max_energy** : float (default: None)
-   Exclude structures with total energy above this threshold. Useful for
-   removing outliers or high-energy configurations.
+   Exclude structures with energy per atom above this threshold. Useful for
+   removing outliers or unconverged high-energy configurations.
 
 **max_forces** : float (default: None)
    Exclude structures with maximum atomic force magnitude above this threshold.
