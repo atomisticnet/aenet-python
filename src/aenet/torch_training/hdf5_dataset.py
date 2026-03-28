@@ -68,7 +68,12 @@ from .descriptor_manifest import (
     descriptor_manifest_from_object,
     descriptor_matches_manifest,
 )
-from .sources import SourceCollection, SourceRecord, coerce_source_collection
+from .sources import (
+    SourceCollection,
+    SourceRecord,
+    _ChunkedSourceCollection,
+    coerce_source_collection,
+)
 
 __all__ = [
     "HDF5StructureDataset",
@@ -393,6 +398,17 @@ def _prepare_build_payloads_for_source_record(
     return payloads
 
 
+def _parallel_build_chunk_size(build_workers: int) -> int:
+    """
+    Return the logical chunk size for streamed parallel HDF5 builds.
+
+    Matching the chunk size to the worker count keeps the implementation
+    simple and avoids buffering a large number of loaded source payloads
+    in memory for compressed archive builds.
+    """
+    return max(1, int(build_workers))
+
+
 @dataclass
 class _FiltersConfig:
     """Compression filters configuration for HDF5 storage."""
@@ -447,8 +463,9 @@ class HDF5StructureDataset(Dataset):
         (dtype/device/species_index map). When ``mode='load'`` and the HDF5
         file contains a persisted descriptor manifest, this may be ``None``
         and the descriptor will be recovered automatically.
-    database_file : str
-        Path to HDF5 database file. Will be created on build.
+    database_file : str | os.PathLike
+        Path-like location of the HDF5 database file. Will be created on
+        build.
     sources : Sequence[str | os.PathLike] | SourceCollection, optional
         Build inputs used for database construction. Ordinary path-like input
         sequences are wrapped in the built-in file-source adapter. Custom
@@ -607,7 +624,7 @@ class HDF5StructureDataset(Dataset):
     def __init__(
         self,
         descriptor,
-        database_file: str,
+        database_file: str | os.PathLike,
         sources: Sequence[str | os.PathLike] | SourceCollection | None = None,
         mode: str = "auto",
         *,
@@ -623,7 +640,7 @@ class HDF5StructureDataset(Dataset):
         self.seed = seed
 
         # Build/read configuration
-        self._db_path = str(database_file)
+        self._db_path = os.fspath(database_file)
         self._sources = (
             coerce_source_collection(sources)
             if sources is not None
@@ -830,6 +847,34 @@ class HDF5StructureDataset(Dataset):
                     )
                     if pbar is not None:
                         pbar.update(1)
+            elif isinstance(source_collection, _ChunkedSourceCollection):
+                chunk_size = _parallel_build_chunk_size(build_workers)
+                try:
+                    with ThreadPoolExecutor(
+                        max_workers=build_workers,
+                    ) as executor:
+                        for record_chunk in source_collection.iter_record_chunks(
+                            chunk_size=chunk_size,
+                        ):
+                            for payload_batch in executor.map(
+                                worker,
+                                record_chunk,
+                            ):
+                                self._append_build_payload_batch(
+                                    h5=h5,
+                                    vl_struct=vl_struct,
+                                    meta_table=meta_table,
+                                    payload_batch=payload_batch,
+                                )
+                            if pbar is not None:
+                                pbar.update(len(record_chunk))
+                except Exception as exc:
+                    if isinstance(exc, RuntimeError):
+                        raise
+                    raise RuntimeError(
+                        "Parallel HDF5 build failed while streaming "
+                        "source chunks."
+                    ) from exc
             else:
                 try:
                     with ThreadPoolExecutor(

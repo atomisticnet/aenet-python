@@ -541,6 +541,61 @@ def test_hdf5_force_training_random_sampling_initializes_force_selection(
 
 
 @pytest.mark.cpu
+def test_hdf5_force_training_with_worker_restarts_smoke(tmp_path: Path):
+    """HDF5 force training should remain correct with worker restarts."""
+    structures = make_structures_with_forces(n_structures=8, n_atoms=4)
+    file_paths = [str(tmp_path / f"s_{i}") for i in range(len(structures))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    descriptor = make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "force_training_worker_restart.h5"
+    build_dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        sources=_source_collection_from_structures(file_paths, structures),
+        mode="build",
+    )
+    build_dataset.build_database(
+        show_progress=False,
+        persist_force_derivatives=True,
+    )
+    dataset = HDF5StructureDataset(
+        descriptor=make_descriptor(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    pot = TorchANNPotential(
+        arch=make_arch(dataset.descriptor),
+        descriptor=dataset.descriptor,
+    )
+    cfg = TorchTrainingConfig(
+        iterations=2,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=0.5,
+        force_sampling="random",
+        force_resample_num_epochs=1,
+        num_workers=2,
+        persistent_workers=True,
+        method=Adam(mu=0.001, batchsize=2),
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 0.0},
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(dataset=dataset, config=cfg)
+
+    force_rmse = result.errors["RMSE_force_train"].iloc[-1]
+    assert not math.isnan(force_rmse)
+    assert force_rmse > 0
+
+
+@pytest.mark.cpu
 def test_prebuilt_hdf5_dataset_uses_config_owned_runtime_policy(
     tmp_path: Path,
 ):

@@ -17,6 +17,7 @@ Notes
 
 from __future__ import annotations
 
+import atexit
 import os
 import random
 import time
@@ -39,6 +40,7 @@ except Exception:
 from .builders import NetworkBuilder, OptimizerBuilder
 from .config import Structure, TorchTrainingConfig
 from .dataset import (
+    HDF5StructureDataset,
     StructureDataset,
     train_test_split,
     train_test_split_dataset,
@@ -407,6 +409,82 @@ class _TrainingPolicyDataset(Dataset):
             cache_force_triplets=False,
             load_local_derivatives=use_forces,
         )
+
+
+def _find_hdf5_root_datasets(dataset: Optional[Dataset]) -> list[HDF5StructureDataset]:
+    """
+    Return reachable HDF5-backed datasets through known wrapper layers.
+
+    The trainer currently wraps datasets with ``_TrainingPolicyDataset`` and
+    may also see ``Subset`` or other thin delegating wrappers. Worker cleanup
+    needs to find the HDF5-backed root instance so worker-local handles can be
+    closed deterministically on shutdown.
+    """
+    if dataset is None or HDF5StructureDataset is None:
+        return []
+
+    discovered: list[HDF5StructureDataset] = []
+    pending: list[Dataset] = [dataset]
+    visited: set[int] = set()
+
+    while pending:
+        current = pending.pop()
+        current_id = id(current)
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+
+        if isinstance(current, HDF5StructureDataset):
+            discovered.append(current)
+            continue
+
+        candidates: list[Any] = []
+        if isinstance(current, Subset):
+            candidates.append(current.dataset)
+        candidates.extend(
+            [
+                getattr(current, "dataset", None),
+                getattr(current, "_dataset", None),
+                getattr(current, "_wrapped_dataset", None),
+                getattr(current, "_root_dataset", None),
+            ]
+        )
+        for candidate in candidates:
+            if isinstance(candidate, Dataset):
+                pending.append(candidate)
+
+    return discovered
+
+
+def _close_worker_hdf5_datasets(dataset: Optional[Dataset]) -> None:
+    """Close any reachable HDF5-backed datasets for the current worker."""
+    for hdf5_dataset in _find_hdf5_root_datasets(dataset):
+        hdf5_dataset.close()
+
+
+def _register_hdf5_worker_cleanup(worker_id: int) -> None:
+    """
+    Register worker-exit cleanup for HDF5-backed datasets.
+
+    DataLoader workers lazily open worker-local HDF5 handles on first access.
+    Registering an ``atexit`` cleanup closes those handles deterministically
+    before the worker process exits, including when workers are restarted
+    between epochs.
+    """
+    del worker_id  # worker_info already identifies the active worker.
+
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        return
+
+    dataset = worker_info.dataset
+    if not _find_hdf5_root_datasets(dataset):
+        return
+
+    def _cleanup(*, dataset: Dataset = dataset) -> None:
+        _close_worker_hdf5_datasets(dataset)
+
+    atexit.register(_cleanup)
 
 
 class _TrainingStatsDataset(Dataset):
@@ -1373,6 +1451,7 @@ class TorchANNPotential:
                     num_workers=nw,
                     prefetch_factor=prefetch_factor,
                     persistent_workers=train_persistent_workers,
+                    worker_init_fn=_register_hdf5_worker_cleanup,
                 )
             )
             eval_dl_kwargs.update(
@@ -1380,6 +1459,7 @@ class TorchANNPotential:
                     num_workers=nw,
                     prefetch_factor=prefetch_factor,
                     persistent_workers=eval_persistent_workers,
+                    worker_init_fn=_register_hdf5_worker_cleanup,
                 )
             )
         else:

@@ -618,7 +618,9 @@ Performance & Caching
    ``force_sampling='random'`` uses epoch-level resampling, because worker
    copies would otherwise keep a stale force-supervision subset. Trainer-owned
    runtime caches and HDF5 ``in_memory_cache_size`` state are also
-   worker-local when ``num_workers > 0``.
+   worker-local when ``num_workers > 0``. For HDF5-backed datasets, worker
+   handles are opened lazily per worker and closed explicitly when that worker
+   exits.
 
 
 Data Filtering & Quality Control

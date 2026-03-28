@@ -1,3 +1,4 @@
+import io
 import tarfile
 from pathlib import Path
 
@@ -83,6 +84,53 @@ def _write_xsf_tar_bz2(
             )
 
     return archive_path
+
+
+def _write_tar_bz2_members(
+    archive_path: Path,
+    members: list[tuple[str, bytes]],
+) -> Path:
+    """Create a tar.bz2 archive from explicit in-memory members."""
+    with tarfile.open(archive_path, mode="w:bz2") as archive:
+        for member_name, member_bytes in members:
+            info = tarfile.TarInfo(member_name)
+            info.size = len(member_bytes)
+            archive.addfile(info, io.BytesIO(member_bytes))
+    return archive_path
+
+
+def _fixture_path(name: str) -> Path:
+    """Return the path to one XSF fixture from the shared test suite."""
+    return (
+        Path(__file__).resolve().parents[2]
+        / "formats"
+        / "tests"
+        / "fixtures"
+        / name
+    )
+
+
+def _sample_signatures_match(left, right) -> None:
+    """Assert two nested sample payloads are tensor-wise equivalent."""
+    if left is None or right is None:
+        assert left is right
+        return
+    if isinstance(left, torch.Tensor):
+        assert isinstance(right, torch.Tensor)
+        assert left.shape == right.shape
+        assert torch.allclose(left, right)
+        return
+    if isinstance(left, dict):
+        assert isinstance(right, dict)
+        assert set(left) == set(right)
+        for key in left:
+            _sample_signatures_match(left[key], right[key])
+        return
+    if isinstance(left, np.ndarray):
+        assert isinstance(right, np.ndarray)
+        assert np.array_equal(left, right)
+        return
+    assert left == right
 
 
 def test_source_record_load_structures_wraps_single_structure():
@@ -173,7 +221,7 @@ def test_tar_archive_xsf_source_collection_reports_archive_capabilities(
     assert collection.capabilities == SourceCapabilities(
         supports_multiple_passes=True,
         supports_random_access=False,
-        supports_parallel_build=False,
+        supports_parallel_build=True,
     )
     assert len(collection) == 2
 
@@ -232,6 +280,35 @@ def test_hdf5_dataset_builds_from_path_sources_without_parser(tmp_path: Path):
     assert meta["display_name"] == ""
     sample = dataset[0]
     assert sample["features"].ndim == 2
+
+
+def test_hdf5_dataset_accepts_pathlike_database_file(tmp_path: Path):
+    """PathLike database_file inputs should be accepted explicitly."""
+    fixture = (
+        Path(__file__).resolve().parent / "data" / "TiO2-cell.xsf"
+    )
+    descriptor = ChebyshevDescriptor(
+        species=["Ti", "O"],
+        rad_order=1,
+        rad_cutoff=6.0,
+        ang_order=0,
+        ang_cutoff=3.5,
+        min_cutoff=0.5,
+        device="cpu",
+        dtype=torch.float64,
+    )
+    db_path = tmp_path / "pathlike_database_file.h5"
+
+    dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=db_path,
+        sources=[fixture],
+        mode="build",
+    )
+    dataset.build_database(show_progress=False)
+
+    assert len(dataset) == 1
+    assert db_path.exists()
 
 
 def test_hdf5_dataset_builds_from_record_source_collection(tmp_path: Path):
@@ -301,7 +378,7 @@ def test_hdf5_dataset_builds_from_tar_archive_xsf_sources(tmp_path: Path):
         sources=TarArchiveXSFSourceCollection(archive_path),
         mode="build",
     )
-    dataset.build_database(show_progress=False)
+    dataset.build_database(show_progress=False, build_workers=2)
 
     assert len(dataset) == 2
     meta = dataset.get_entry_metadata(0)
@@ -373,23 +450,158 @@ def test_hdf5_dataset_rejects_overlong_display_names(
         dataset.build_database(show_progress=False)
 
 
-def test_hdf5_dataset_rejects_parallel_build_for_tar_archive_xsf_sources(
+def test_hdf5_dataset_parallel_tar_build_keeps_duplicate_member_names_distinct(
     tmp_path: Path,
 ):
-    """Compressed tar-backed sources should reject threaded HDF5 builds."""
-    archive_path = _write_xsf_tar_bz2(tmp_path / "structures.tar.bz2")
-    descriptor = _make_descriptor()
-    db_path = tmp_path / "tar_sources_parallel.h5"
-
+    """Duplicate archive members should remain distinct under parallel build."""
+    archive_path = _write_xsf_tar_bz2(
+        tmp_path / "duplicate_members.tar.bz2",
+        structures=[_make_structure(0.0), _make_structure(1.0)],
+        duplicate_member_names=True,
+    )
     dataset = HDF5StructureDataset(
-        descriptor=descriptor,
-        database_file=str(db_path),
+        descriptor=_make_descriptor(),
+        database_file=str(tmp_path / "duplicate_members.h5"),
         sources=TarArchiveXSFSourceCollection(archive_path),
         mode="build",
     )
 
-    with pytest.raises(
-        ValueError,
-        match="do not support build_workers > 1",
-    ):
-        dataset.build_database(show_progress=False, build_workers=2)
+    dataset.build_database(show_progress=False, build_workers=2)
+
+    meta0 = dataset.get_entry_metadata(0)
+    meta1 = dataset.get_entry_metadata(1)
+    assert meta0["source_id"] != meta1["source_id"]
+    assert meta0["display_name"] != meta1["display_name"]
+    assert str(meta0["display_name"]).endswith("@member=0")
+    assert str(meta1["display_name"]).endswith("@member=1")
+
+
+def test_hdf5_dataset_parallel_tar_build_matches_serial_persisted_caches(
+    tmp_path: Path,
+):
+    """Parallel streamed tar builds should match serial cache payloads."""
+    archive_path = _write_xsf_tar_bz2(
+        tmp_path / "cache_compare.tar.bz2",
+        structures=[_make_structure(0.0), _make_structure(1.0)],
+    )
+    descriptor = _make_descriptor()
+    serial_db = tmp_path / "cache_compare_serial.h5"
+    parallel_db = tmp_path / "cache_compare_parallel.h5"
+
+    serial_dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=serial_db,
+        sources=TarArchiveXSFSourceCollection(archive_path),
+        mode="build",
+    )
+    parallel_dataset = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=parallel_db,
+        sources=TarArchiveXSFSourceCollection(archive_path),
+        mode="build",
+    )
+
+    serial_dataset.build_database(
+        show_progress=False,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+    parallel_dataset.build_database(
+        show_progress=False,
+        build_workers=2,
+        persist_features=True,
+        persist_force_derivatives=True,
+    )
+
+    assert len(serial_dataset) == len(parallel_dataset) == 2
+    for index in range(len(serial_dataset)):
+        assert serial_dataset.get_entry_metadata(index) == (
+            parallel_dataset.get_entry_metadata(index)
+        )
+        _sample_signatures_match(
+            serial_dataset[index]["features"],
+            parallel_dataset[index]["features"],
+        )
+        _sample_signatures_match(
+            serial_dataset[index]["local_derivatives"],
+            parallel_dataset[index]["local_derivatives"],
+        )
+
+
+def test_hdf5_dataset_parallel_tar_build_preserves_multiframe_member_order(
+    tmp_path: Path,
+):
+    """Parallel tar builds should preserve member/frame ordering."""
+    periodic_path = _fixture_path("periodic.xsf")
+    trajectory_path = _fixture_path("trajectory.xsf")
+    archive_path = _write_tar_bz2_members(
+        tmp_path / "multiframe.tar.bz2",
+        [
+            ("dataset/periodic.xsf", periodic_path.read_bytes()),
+            ("dataset/trajectory.xsf", trajectory_path.read_bytes()),
+        ],
+    )
+    trajectory_atomic = AtomicStructure.from_file(trajectory_path)
+    dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=tmp_path / "multiframe_parallel.h5",
+        sources=TarArchiveXSFSourceCollection(archive_path),
+        mode="build",
+    )
+
+    dataset.build_database(show_progress=False, build_workers=2)
+
+    assert len(dataset) == 1 + trajectory_atomic.nframes
+    metadata = [dataset.get_entry_metadata(index) for index in range(len(dataset))]
+    assert str(metadata[0]["source_id"]).endswith(
+        "::member=0:dataset/periodic.xsf"
+    )
+    assert metadata[0]["frame_idx"] == 0
+    for frame_idx, meta in enumerate(metadata[1:]):
+        assert str(meta["source_id"]).endswith(
+            "::member=1:dataset/trajectory.xsf"
+        )
+        assert meta["frame_idx"] == frame_idx
+
+
+def test_hdf5_dataset_parallel_tar_build_failure_preserves_existing_database(
+    tmp_path: Path,
+):
+    """Failed streamed tar builds should leave the prior database untouched."""
+    initial_archive = _write_xsf_tar_bz2(
+        tmp_path / "initial.tar.bz2",
+        structures=[_make_structure(0.0), _make_structure(1.0)],
+    )
+    db_path = tmp_path / "preserve_existing.h5"
+    initial_dataset = HDF5StructureDataset(
+        descriptor=_make_descriptor(),
+        database_file=db_path,
+        sources=TarArchiveXSFSourceCollection(initial_archive),
+        mode="build",
+    )
+    initial_dataset.build_database(show_progress=False, build_workers=2)
+    initial_dataset.close()
+
+    broken_archive = _write_tar_bz2_members(
+        tmp_path / "broken.tar.bz2",
+        [
+            ("dataset/ok.xsf", _fixture_path("periodic.xsf").read_bytes()),
+            ("dataset/bad.xsf", b"this is not a valid xsf payload"),
+        ],
+    )
+    failing_dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=db_path,
+        sources=TarArchiveXSFSourceCollection(broken_archive),
+        mode="build",
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to load build source"):
+        failing_dataset.build_database(show_progress=False, build_workers=2)
+
+    load_dataset = HDF5StructureDataset(
+        descriptor=_make_descriptor(),
+        database_file=db_path,
+        mode="load",
+    )
+    assert len(load_dataset) == 2

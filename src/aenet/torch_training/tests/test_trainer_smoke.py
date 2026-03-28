@@ -1,10 +1,12 @@
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import tables
 import torch
+from torch.utils.data import Subset
 
 import aenet.torch_training.trainer as trainer_module
 from aenet.geometry import AtomicStructure
@@ -899,6 +901,117 @@ class _StopAfterLoaderConfig(RuntimeError):
 
 
 @pytest.mark.cpu
+def test_find_hdf5_root_datasets_walks_policy_and_subset_wrappers(
+    tmp_path: Path,
+):
+    """HDF5 cleanup should find one root dataset through wrapper layers."""
+    structures = make_simple_structures_H_many(n_structures=4)
+    file_paths = [str(tmp_path / f"s_{idx}.xsf") for idx in range(4)]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    db_path = tmp_path / "worker_cleanup_walk.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        sources=_payload_source_collection(file_paths, structures),
+        mode="build",
+    )
+    build_ds.build_database(show_progress=False)
+    load_ds = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+    wrapped = Subset(
+        _TrainingPolicyDataset(Subset(load_ds, [0, 1, 2]), cfg, split="train"),
+        [0, 1],
+    )
+
+    discovered = trainer_module._find_hdf5_root_datasets(wrapped)
+
+    assert discovered == [load_ds]
+
+
+@pytest.mark.cpu
+def test_register_hdf5_worker_cleanup_closes_reachable_roots(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Worker cleanup registration should close reachable HDF5 roots."""
+    structures = make_simple_structures_H_many(n_structures=3)
+    file_paths = [str(tmp_path / f"s_{idx}.xsf") for idx in range(3)]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    db_path = tmp_path / "worker_cleanup_register.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=descriptor,
+        database_file=str(db_path),
+        sources=_payload_source_collection(file_paths, structures),
+        mode="build",
+    )
+    build_ds.build_database(show_progress=False)
+    load_ds = HDF5StructureDataset(
+        descriptor=make_descriptor_H(dtype=torch.float64),
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+    wrapped = Subset(_TrainingPolicyDataset(load_ds, cfg, split="train"), [0, 1])
+
+    callbacks = []
+    close_calls = []
+
+    monkeypatch.setattr(
+        trainer_module.atexit,
+        "register",
+        lambda callback: callbacks.append(callback),
+    )
+    monkeypatch.setattr(
+        trainer_module.torch.utils.data,
+        "get_worker_info",
+        lambda: SimpleNamespace(dataset=wrapped),
+    )
+    monkeypatch.setattr(load_ds, "close", lambda: close_calls.append("closed"))
+
+    trainer_module._register_hdf5_worker_cleanup(worker_id=0)
+
+    assert len(callbacks) == 1
+    callbacks[0]()
+    assert close_calls == ["closed"]
+
+
+@pytest.mark.cpu
 def test_random_force_resampling_disables_persistent_train_workers(
     monkeypatch,
 ):
@@ -942,6 +1055,7 @@ def test_random_force_resampling_disables_persistent_train_workers(
     assert len(records) == 1
     assert records[0]["num_workers"] == 2
     assert records[0]["persistent_workers"] is False
+    assert callable(records[0]["worker_init_fn"])
 
 
 @pytest.mark.cpu
@@ -984,6 +1098,7 @@ def test_fixed_or_static_force_sampling_keeps_persistent_train_workers(
     assert len(records) == 1
     assert records[0]["num_workers"] == 2
     assert records[0]["persistent_workers"] is True
+    assert callable(records[0]["worker_init_fn"])
 
 
 @pytest.mark.cpu

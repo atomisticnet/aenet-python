@@ -113,6 +113,23 @@ class SourceCollection(Protocol):
         """Yield source records in deterministic build order."""
 
 
+@runtime_checkable
+class _ChunkedSourceCollection(Protocol):
+    """
+    Optional internal protocol for streamed chunked HDF5 builds.
+
+    Sources implementing this protocol can load the next chunk of logical
+    records serially in the parent process and then hand those in-memory
+    records to worker threads for parallel payload preparation.
+    """
+
+    def iter_record_chunks(
+        self,
+        chunk_size: int,
+    ) -> Iterator[list[SourceRecord]]:
+        """Yield deterministic chunks of ready-to-load source records."""
+
+
 class FilePathSourceCollection:
     """
     Source collection backed by ordinary structure files on disk.
@@ -210,11 +227,13 @@ class TarArchiveXSFSourceCollection:
 
     Notes
     -----
-    This adapter is intentionally conservative about capabilities for
-    compressed archives. It supports deterministic repeated traversal by
-    reopening the archive, but it reports ``supports_random_access=False``
-    and ``supports_parallel_build=False`` because individual member loads
-    may require sequential scans through the archive stream.
+    This adapter supports deterministic repeated traversal by reopening the
+    archive. It reports ``supports_random_access=False`` because individual
+    member loads may require sequential scans through the archive stream.
+    For HDF5 builds with ``build_workers > 1``, the adapter exposes an
+    internal chunked-streaming path that reads archive members serially in
+    the parent process and parallelizes only downstream parsing and cache
+    preparation.
     """
 
     def __init__(
@@ -231,7 +250,7 @@ class TarArchiveXSFSourceCollection:
         self._capabilities = SourceCapabilities(
             supports_multiple_passes=True,
             supports_random_access=False,
-            supports_parallel_build=False,
+            supports_parallel_build=True,
         )
 
     @property
@@ -255,6 +274,62 @@ class TarArchiveXSFSourceCollection:
     def __len__(self) -> int:
         """Return the number of matching archive members."""
         return len(self._member_specs)
+
+    def iter_record_chunks(
+        self,
+        chunk_size: int,
+    ) -> Iterator[list[SourceRecord]]:
+        """Yield archive-backed records in deterministic streamed chunks."""
+        chunk_size = int(chunk_size)
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be >= 1")
+
+        if not self._member_specs:
+            return
+
+        spec_iter = iter(self._member_specs)
+        next_spec = next(spec_iter, None)
+        chunk: list[SourceRecord] = []
+        with tarfile.open(self._archive_path, mode="r:*") as archive:
+            for archive_index, member in enumerate(archive):
+                if next_spec is None:
+                    break
+                if archive_index != next_spec.archive_index:
+                    continue
+
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise FileNotFoundError(
+                        f"Archive member {member.name!r} was not found in "
+                        f"{self._archive_path!r}."
+                    )
+                with extracted:
+                    payload_bytes = extracted.read()
+
+                chunk.append(
+                    SourceRecord(
+                        source_id=(
+                            f"{self._archive_path}::member="
+                            f"{next_spec.archive_index}:"
+                            f"{next_spec.member_name}"
+                        ),
+                        loader=self._make_bytes_loader(payload_bytes),
+                        source_kind="tar_xsf_member",
+                        display_name=next_spec.display_name,
+                    )
+                )
+                if len(chunk) >= chunk_size:
+                    yield chunk
+                    chunk = []
+                next_spec = next(spec_iter, None)
+
+        if next_spec is not None:
+            raise FileNotFoundError(
+                f"Archive member #{next_spec.archive_index} was not found in "
+                f"{self._archive_path!r}."
+            )
+        if chunk:
+            yield chunk
 
     def _collect_member_specs(self) -> list[_TarArchiveMemberSpec]:
         """Return matching archive members with deterministic identities."""
@@ -320,6 +395,19 @@ class TarArchiveXSFSourceCollection:
                     encoding="utf-8",
                 ) as text_stream:
                     atomic_struct = XSFParser().read(text_stream)
+            return _normalize_structures(atomic_struct.to_TorchStructure())
+
+        return _load
+
+    @staticmethod
+    def _make_bytes_loader(
+        payload_bytes: bytes,
+    ) -> Callable[[], list[Structure]]:
+        """Create a loader that parses one in-memory XSF payload."""
+
+        def _load() -> list[Structure]:
+            with io.StringIO(payload_bytes.decode("utf-8")) as text_stream:
+                atomic_struct = XSFParser().read(text_stream)
             return _normalize_structures(atomic_struct.to_TorchStructure())
 
         return _load

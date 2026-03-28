@@ -385,11 +385,13 @@ streamed directly:
 
 .. note::
 
-   ``TarArchiveXSFSourceCollection`` is intentionally conservative for
-   compressed tar archives and does not support ``build_workers > 1``.
-   If matching archive members repeat the same member name, the adapter
-   disambiguates them by archive order so persisted source IDs remain
-   unique.
+   ``TarArchiveXSFSourceCollection`` supports ``build_workers > 1`` for
+   compressed tar archives through a streamed build path: the parent process
+   reads archive members sequentially in deterministic chunks, while worker
+   threads parallelize downstream parsing and optional persisted-cache
+   preparation. If matching archive members repeat the same member name, the
+   adapter disambiguates them by archive order so persisted source IDs
+   remain unique.
 
 .. note::
 
@@ -516,7 +518,9 @@ Key HDF5 Features
   in the parent process
 * **Adapter capabilities**: When using ``build_workers > 1``, the selected
   source collection must advertise ``supports_parallel_build=True``. Some
-  adapters, such as compressed tar archives, intentionally do not.
+  adapters parallelize direct record loading, while streamed adapters such as
+  ``TarArchiveXSFSourceCollection`` keep source reads sequential and
+  parallelize only parsing and cache preparation.
 * **Unified persisted cache**: Optional ``/torch_cache/features`` and
   ``/torch_cache/force_derivatives`` sections can be written once and reused
   lazily across later HDF5-backed runs
@@ -641,9 +645,9 @@ Common Pitfalls
 ---------------
 
 1. **Build adapter limitations**: Some source adapters intentionally do not
-   support ``build_workers > 1``. For example,
-   ``TarArchiveXSFSourceCollection`` reports conservative capabilities for
-   compressed tar archives.
+   support ``build_workers > 1``. Check the source collection capabilities
+   rather than assuming all sequential inputs can be parallelized the same
+   way.
 
 2. **Descriptor mismatch**: Ensure descriptor species order matches your dataset. Datasets use ``descriptor.species_to_idx`` for species indexing.
 
