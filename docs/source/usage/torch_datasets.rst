@@ -158,6 +158,36 @@ cache behavior live in ``TorchTrainingConfig``:
 - **cache_neighbors** (bool): Cache neighbor graphs to avoid repeated searches for energy-view reuse and legacy non-graph paths. Supported force training does not require this.
 - **cache_force_triplets** (bool): Cache CSR graphs and triplets instead of rebuilding them on demand.
 
+Filtering Semantics
+~~~~~~~~~~~~~~~~~~~
+
+``StructureDataset`` can apply structure-level filtering when it is
+constructed:
+
+.. code-block:: python
+
+   dataset = StructureDataset(
+       structures=structures,
+       descriptor=descriptor,
+       max_energy=0.2,
+       atomic_energies={"H": 0.0},
+   )
+
+For ``StructureDataset``, ``max_energy`` is interpreted as a threshold on
+referenced cohesive or formation energy per atom when ``atomic_energies`` is
+provided. If ``atomic_energies`` is omitted, the dataset falls back to
+all-zero atomic references and filters the provided per-atom labels as-is.
+
+For prebuilt datasets, ``atomic_energies`` also defines the dataset-owned
+reference-energy convention used later by training targets and non-uniform
+sampling. If you want referenced cohesive or formation-energy semantics when
+calling ``train(dataset=...)`` or ``train(train_dataset=..., test_dataset=...)``,
+set ``atomic_energies`` on the dataset itself.
+
+Because ``StructureDataset`` is already a prebuilt dataset object,
+``TorchTrainingConfig.max_energy`` does not re-filter it later during
+``train()``. Apply any desired energy filtering when constructing the dataset.
+
 Manual Dataset Splitting
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -283,6 +313,30 @@ to take the automatic cached-features path. For an explicit
 ``CachedStructureDataset`` workflow with a fixed split and
 ``predict_dataset()``, see the training notebook linked above.
 
+Filtering Semantics
+~~~~~~~~~~~~~~~~~~~
+
+``CachedStructureDataset`` uses the same construction-time energy filtering
+rules as ``StructureDataset``:
+
+.. code-block:: python
+
+   dataset = CachedStructureDataset(
+       structures=structures,
+       descriptor=descriptor,
+       max_energy=0.2,
+       atomic_energies={"H": 0.0},
+       show_progress=False,
+   )
+
+When ``atomic_energies`` is provided, ``max_energy`` refers to referenced
+cohesive or formation energy per atom. When it is omitted, filtering falls
+back to all-zero atomic references and therefore uses the provided labels
+as-is.
+
+As with any prebuilt dataset object, ``TorchTrainingConfig.max_energy`` is
+ignored later during ``train()``. Filter cached datasets when you build them.
+
 Explicit Fixed Splits with CachedStructureDataset
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -297,11 +351,13 @@ build explicit cached datasets and pass them to ``train()`` directly:
    train_ds = CachedStructureDataset(
        structures=train_structures,
        descriptor=descriptor,
+       atomic_energies={"H": 0.0},
        show_progress=False,
    )
    test_ds = CachedStructureDataset(
        structures=test_structures,
        descriptor=descriptor,
+       atomic_energies={"H": 0.0},
        show_progress=False,
    )
 
@@ -343,6 +399,8 @@ Building the Database
        database_file="datasets/training.h5",
        sources=file_list,
        mode="build",                # Build mode
+       max_energy=0.2,              # optional build-time filter
+       atomic_energies={"H": 0.0},  # dataset-owned reference energies
        in_memory_cache_size=2048,   # LRU cache for unpickled structures
        compression="zlib",
        compression_level=5,
@@ -351,8 +409,6 @@ Building the Database
    db.build_database(
        show_progress=True,
        build_workers=8,                 # optional build-time worker threads
-       max_referenced_energy_per_atom=0.2,  # optional build-time filter
-       atomic_energies={"H": 0.0},      # optional reference energies
        persist_descriptor=True,         # optional descriptor recovery step
        persist_features=True,           # optional persisted raw features
        persist_force_derivatives=True,  # optional sparse derivative cache
@@ -371,11 +427,12 @@ Building the Database
 
 .. note::
 
-   HDF5 energy filtering is explicitly a build-time policy. Use
-   ``max_referenced_energy_per_atom=...`` together with optional
-   ``atomic_energies=...`` on ``build_database()`` if you want the persisted
-   dataset to exclude high-energy entries. ``TorchTrainingConfig.max_energy``
-   does not retroactively filter prebuilt HDF5 datasets at runtime.
+   HDF5 energy filtering is explicitly a build-time policy. Set
+   ``max_energy=...`` and optional ``atomic_energies=...`` on the
+   ``HDF5StructureDataset`` constructor before calling ``build_database()``
+   if you want the persisted dataset to exclude high-energy entries.
+   ``TorchTrainingConfig.max_energy`` does not retroactively filter prebuilt
+   HDF5 datasets at runtime.
 
 For archive-backed datasets, pass an explicit source adapter instead of a
 list of paths. For example, a ``.tar.bz2`` archive of XSF files can be
@@ -514,7 +571,9 @@ Training from HDF5 Database
    such as ``force_fraction``, ``force_sampling``, ``cache_features``,
    ``cache_neighbors``, and ``cache_force_triplets`` belong on
    ``TorchTrainingConfig`` and can be changed between runs over the same
-   dataset object. ``TorchTrainingConfig.max_energy`` is different: it only
+   dataset object. Energy-reference semantics are different: prebuilt
+   datasets own ``atomic_energies`` and any ``max_energy`` filtering that was
+   applied when they were constructed. ``TorchTrainingConfig.max_energy`` only
    applies when the trainer builds datasets from raw ``structures=...`` input
    and is ignored for prebuilt datasets.
 

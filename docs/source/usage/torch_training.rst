@@ -387,9 +387,10 @@ does not replace ``persist_features=True`` or
 ``persist_force_derivatives=True``, which are the build-time options for
 reusing raw features or sparse local derivatives across sessions. See
 :doc:`torch_datasets` for the full cache-precedence workflow. HDF5 energy
-filtering is also a build-time concern: use
-``build_database(max_referenced_energy_per_atom=..., atomic_energies=...)``
-rather than relying on ``TorchTrainingConfig.max_energy`` at runtime.
+filtering is also a build-time concern: set ``max_energy`` and
+``atomic_energies`` on the ``HDF5StructureDataset`` before calling
+``build_database()`` rather than relying on
+``TorchTrainingConfig.max_energy`` at runtime.
 
 Common Pitfalls
 ~~~~~~~~~~~~~~~
@@ -740,10 +741,14 @@ Energy Configuration
 
 **atomic_energies** : dict (default: None)
    Optional atomic reference energies used to convert total energies to
-   cohesive-energy targets during training.
+   cohesive-energy targets during training when the trainer constructs
+   datasets from raw ``structures=...`` input.
    Format: ``{'H': -13.6, 'O': -432.0, ...}`` in eV.
    If omitted, the training target remains the total energy because all atomic
-   reference energies default to 0.0.
+   reference energies default to 0.0. When you pass a prebuilt
+   ``dataset=...`` or explicit ``train_dataset=...``/``test_dataset=...``,
+   the dataset owns ``atomic_energies`` instead; matching config values are
+   allowed, but mismatched values raise an error.
 
 **normalize_features** : bool (default: True)
    Normalize features to zero mean and unit variance. Improves training

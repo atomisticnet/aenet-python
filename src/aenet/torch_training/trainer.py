@@ -230,6 +230,53 @@ def _warn_if_max_energy_is_ignored_for_prebuilt_datasets(
     )
 
 
+def _root_dataset_for_metadata(dataset: Dataset | None) -> Dataset | None:
+    """Resolve known wrapper layers to the dataset that owns metadata."""
+    if dataset is None:
+        return None
+    if isinstance(dataset, _TrainingPolicyDataset):
+        return dataset._root_dataset
+    root_dataset, _ = _flatten_subset_indices(dataset)
+    return root_dataset
+
+
+def _normalize_atomic_energies_dict(
+    atomic_energies,
+) -> dict[str, float] | None:
+    """Normalize optional atomic-energy mappings to plain string/float dicts."""
+    if atomic_energies is None:
+        return None
+    return {
+        str(key): float(value)
+        for key, value in atomic_energies.items()
+    }
+
+
+def _resolve_dataset_owned_atomic_energies(
+    *,
+    train_dataset: Dataset | None,
+    test_dataset: Dataset | None,
+) -> dict[str, float] | None:
+    """Return a shared dataset-owned atomic-energy mapping, if any."""
+    resolved: dict[str, float] | None = None
+    for dataset in (train_dataset, test_dataset):
+        root_dataset = _root_dataset_for_metadata(dataset)
+        current = _normalize_atomic_energies_dict(
+            getattr(root_dataset, "atomic_energies", None)
+        )
+        if current is None:
+            continue
+        if resolved is None:
+            resolved = current
+            continue
+        if resolved != current:
+            raise ValueError(
+                "Training and validation datasets expose conflicting "
+                "atomic_energies."
+            )
+    return resolved
+
+
 class _ErrorWeightedSamplingState:
     """Mutable trainer-owned state for adaptive error-weighted sampling."""
 
@@ -1469,42 +1516,6 @@ class TorchANNPotential:
         # Ensure final placement on resolved device
         self.model.to(device)
 
-        # Atomic reference energy configuration
-        # Default all species to 0.0, then update with user-provided values
-        import warnings
-        atomic_energies_dict: Dict[str, float] = {
-            s: 0.0 for s in self.descriptor.species
-        }
-
-        atomic_energies_cfg = getattr(config, "atomic_energies", None)
-        if atomic_energies_cfg:
-            atomic_energies_dict.update(atomic_energies_cfg)
-            # Store for later prediction/export
-            try:
-                self._atomic_energies = {
-                    str(k): float(v) for k, v in atomic_energies_dict.items()
-                }
-            except Exception:
-                self._atomic_energies = dict(atomic_energies_dict)
-        else:
-            warnings.warn(
-                "No atomic_energies provided. Training on total energies "
-                "(all atomic reference energies set to 0.0). For cohesive "
-                "or explicit formation-energy training, provide atomic "
-                "reference energies in config.atomic_energies. If your "
-                "labels already include an external user-defined reference, "
-                "this zero-reference fallback preserves those semantics.",
-                UserWarning
-            )
-            self._atomic_energies = atomic_energies_dict
-
-        # Convert to tensor indexed by species for efficient lookup
-        e_list: List[float] = [atomic_energies_dict[s]
-                               for s in self.descriptor.species]
-        atomic_energies_by_index = torch.tensor(
-            e_list, dtype=self.dtype, device=device
-        )
-
         # Convert various input types to List[Structure] (torch Structure)
         if structures is not None and len(structures) > 0:
             from .dataset import convert_to_structures
@@ -1615,6 +1626,70 @@ class TorchANNPotential:
                     )
                 else:
                     train_ds, test_ds = full_ds, None
+
+        # Atomic reference energy configuration
+        atomic_energies_dict: Dict[str, float] = {
+            s: 0.0 for s in self.descriptor.species
+        }
+        dataset_atomic_energies = _resolve_dataset_owned_atomic_energies(
+            train_dataset=train_ds,
+            test_dataset=test_ds,
+        )
+        config_atomic_energies = _normalize_atomic_energies_dict(
+            getattr(config, "atomic_energies", None)
+        )
+        using_prebuilt_dataset = (
+            train_dataset is not None or dataset is not None
+        )
+
+        if using_prebuilt_dataset:
+            if (
+                dataset_atomic_energies is not None
+                and config_atomic_energies is not None
+                and dataset_atomic_energies != config_atomic_energies
+            ):
+                raise ValueError(
+                    "Prebuilt datasets own atomic_energies. The selected "
+                    "dataset atomic_energies do not match "
+                    "config.atomic_energies."
+                )
+            if (
+                dataset_atomic_energies is None
+                and config_atomic_energies is not None
+            ):
+                warnings.warn(
+                    "Prebuilt datasets own atomic_energies. The selected "
+                    "dataset does not define them, so "
+                    "config.atomic_energies is ignored and training falls "
+                    "back to all-zero atomic references.",
+                    UserWarning,
+                )
+
+        if dataset_atomic_energies is not None:
+            atomic_energies_dict.update(dataset_atomic_energies)
+            self._atomic_energies = dict(atomic_energies_dict)
+        else:
+            warnings.warn(
+                "No atomic_energies provided. Training on total energies "
+                "(all atomic reference energies set to 0.0). For cohesive "
+                "or explicit formation-energy training, provide atomic "
+                "reference energies in the dataset or in "
+                "config.atomic_energies when using raw structures=... If "
+                "your labels already include an external user-defined "
+                "reference, this zero-reference fallback preserves those "
+                "semantics.",
+                UserWarning
+            )
+            self._atomic_energies = atomic_energies_dict
+
+        # Convert to tensor indexed by species for efficient lookup
+        e_list: List[float] = [
+            atomic_energies_dict[s]
+            for s in self.descriptor.species
+        ]
+        atomic_energies_by_index = torch.tensor(
+            e_list, dtype=self.dtype, device=device
+        )
 
         if _should_wrap_training_policy_dataset(train_ds):
             train_ds = _TrainingPolicyDataset(

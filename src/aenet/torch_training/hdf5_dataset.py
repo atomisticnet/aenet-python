@@ -155,38 +155,36 @@ def _structure_energy_or_nan(struct: Structure) -> float:
 def _should_keep_structure_for_build(
     struct: Structure,
     *,
-    max_referenced_energy_per_atom: float | None,
+    max_energy: float | None,
     atomic_energies: dict[str, float] | None,
 ) -> bool:
     """Return whether a structure passes HDF5 build-time energy filtering."""
-    if max_referenced_energy_per_atom is None:
+    if max_energy is None:
         return True
     return referenced_energy_per_atom(
         struct,
         atomic_energies=atomic_energies,
-    ) <= float(max_referenced_energy_per_atom)
+    ) <= float(max_energy)
 
 
 def _write_energy_filter_metadata(
     h5: tables.File,
     *,
-    max_referenced_energy_per_atom: float | None,
+    max_energy: float | None,
     atomic_energies: dict[str, float] | None,
 ) -> None:
     """Persist HDF5 build-time energy-filter semantics for auditability."""
     attrs = h5.root._v_attrs
     attrs.energy_filter_semantics = "referenced_energy_per_atom"
-    attrs.energy_filter_enabled = bool(
-        max_referenced_energy_per_atom is not None
-    )
+    attrs.energy_filter_enabled = bool(max_energy is not None)
     attrs.energy_filter_reference_mode = (
         "explicit_atomic_references"
         if atomic_energies is not None
         else "zero_reference_fallback"
     )
     attrs.energy_filter_max_referenced_energy_per_atom = (
-        float(max_referenced_energy_per_atom)
-        if max_referenced_energy_per_atom is not None
+        float(max_energy)
+        if max_energy is not None
         else float("nan")
     )
     attrs.energy_filter_atomic_energies_json = (
@@ -194,6 +192,39 @@ def _write_energy_filter_metadata(
         if atomic_energies is not None
         else ""
     )
+
+
+def _read_energy_filter_metadata(
+    h5: tables.File,
+) -> tuple[float | None, dict[str, float] | None]:
+    """Read persisted HDF5 build-time energy-filter metadata if present."""
+    attrs = h5.root._v_attrs
+    if not hasattr(attrs, "energy_filter_enabled"):
+        return None, None
+
+    max_energy = (
+        float(attrs.energy_filter_max_referenced_energy_per_atom)
+        if bool(attrs.energy_filter_enabled)
+        else None
+    )
+    atomic_energies_json = str(
+        getattr(attrs, "energy_filter_atomic_energies_json", "")
+    )
+    if not atomic_energies_json:
+        return max_energy, None
+
+    try:
+        decoded = json.loads(atomic_energies_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Invalid HDF5 energy-filter metadata: malformed "
+            "atomic_energies JSON."
+        ) from exc
+
+    return max_energy, {
+        str(key): float(value)
+        for key, value in decoded.items()
+    }
 
 
 def _decode_meta_text(value: object) -> str:
@@ -328,7 +359,7 @@ def _prepare_build_payloads_for_source_record(
     descriptor,
     persist_features: bool,
     persist_force_derivatives: bool,
-    max_referenced_energy_per_atom: float | None,
+    max_energy: float | None,
     atomic_energies: dict[str, float] | None,
 ) -> list[_BuildEntryPayload]:
     """
@@ -349,7 +380,7 @@ def _prepare_build_payloads_for_source_record(
     for frame_idx, struct in enumerate(structs):
         if not _should_keep_structure_for_build(
             struct,
-            max_referenced_energy_per_atom=max_referenced_energy_per_atom,
+            max_energy=max_energy,
             atomic_energies=atomic_energies,
         ):
             continue
@@ -532,6 +563,17 @@ class HDF5StructureDataset(Dataset):
                    create/overwrite the database.
         - 'load': open in read-only mode immediately; error if missing.
         Default: 'auto'
+    max_energy : float, optional
+        Optional build-time filter threshold on referenced cohesive or
+        formation energy per atom. When ``atomic_energies`` is omitted,
+        all atomic references default to ``0.0`` and the provided per-atom
+        labels are filtered as-is. This value is persisted in the HDF5
+        metadata and restored when the dataset is reopened. Default: None
+    atomic_energies : dict[str, float], optional
+        Optional atomic reference energies owned by this dataset instance.
+        For build-mode HDF5 workflows they define build-time filtering
+        semantics and are persisted into the HDF5 metadata for later
+        training, sampling, and inference semantics. Default: None
     seed : int, optional
         Reserved for deterministic helper utilities. Dataset contents and
         runtime training policy are unaffected by this value. Default: None
@@ -681,6 +723,8 @@ class HDF5StructureDataset(Dataset):
         sources: Sequence[str | os.PathLike] | SourceCollection | None = None,
         mode: str = "auto",
         *,
+        max_energy: float | None = None,
+        atomic_energies: dict[str, float] | None = None,
         seed: int | None = None,
         in_memory_cache_size: int = 2048,
         compression: str = "zlib",
@@ -702,6 +746,17 @@ class HDF5StructureDataset(Dataset):
         self._filters = _FiltersConfig(
             compression=compression,
             compression_level=int(compression_level),
+        )
+        self.max_energy = (
+            None if max_energy is None else float(max_energy)
+        )
+        self.atomic_energies = (
+            {
+                str(key): float(value)
+                for key, value in atomic_energies.items()
+            }
+            if atomic_energies is not None
+            else None
         )
 
         # Runtime state
@@ -742,8 +797,6 @@ class HDF5StructureDataset(Dataset):
         show_progress: bool = True,
         *,
         build_workers: int = 0,
-        max_referenced_energy_per_atom: float | None = None,
-        atomic_energies: dict[str, float] | None = None,
         persist_descriptor: bool = False,
         persist_features: bool = False,
         persist_force_derivatives: bool = False,
@@ -758,6 +811,11 @@ class HDF5StructureDataset(Dataset):
             sparse local derivative payloads
           - Populate force index list for efficient selection
 
+        Build-time energy filtering uses the dataset-owned constructor
+        arguments ``max_energy`` and ``atomic_energies`` rather than
+        per-call overrides, so reopened HDF5 datasets expose the same
+        reference-energy semantics that were used during construction.
+
         Parameters
         ----------
         show_progress : bool
@@ -769,16 +827,6 @@ class HDF5StructureDataset(Dataset):
             deterministic HDF5 entry ordering while keeping all HDF5 writes
             in the parent process. This setting is separate from training-time
             ``num_workers``. Default: ``0``
-        max_referenced_energy_per_atom : float, optional
-            Exclude structures whose referenced cohesive or formation energy
-            per atom exceeds this build-time threshold. Unlike
-            ``TorchTrainingConfig.max_energy``, this applies only while the
-            HDF5 file is being constructed. Default: ``None``
-        atomic_energies : dict[str, float], optional
-            Atomic reference energies used when interpreting
-            ``max_referenced_energy_per_atom``. When omitted, build-time
-            filtering falls back to all-zero references so externally
-            referenced labels are filtered as provided. Default: ``None``
         persist_descriptor : bool
             If True, persist a versioned descriptor manifest that can recover
             supported descriptor objects when the HDF5 dataset is reopened
@@ -807,11 +855,6 @@ class HDF5StructureDataset(Dataset):
             raise ValueError(
                 "The configured sources do not support build_workers > 1."
             )
-        if atomic_energies is not None:
-            atomic_energies = {
-                str(key): float(value)
-                for key, value in atomic_energies.items()
-            }
 
         persist_descriptor = bool(
             persist_descriptor or persist_features or persist_force_derivatives
@@ -872,8 +915,8 @@ class HDF5StructureDataset(Dataset):
                 entries_group, "meta", description=self._MetaRow)
             _write_energy_filter_metadata(
                 h5,
-                max_referenced_energy_per_atom=max_referenced_energy_per_atom,
-                atomic_energies=atomic_energies,
+                max_energy=self.max_energy,
+                atomic_energies=self.atomic_energies,
             )
             if persist_descriptor:
                 self._create_descriptor_manifest_storage(h5)
@@ -910,8 +953,8 @@ class HDF5StructureDataset(Dataset):
                 descriptor=self.descriptor,
                 persist_features=persist_features,
                 persist_force_derivatives=persist_force_derivatives,
-                max_referenced_energy_per_atom=max_referenced_energy_per_atom,
-                atomic_energies=atomic_energies,
+                max_energy=self.max_energy,
+                atomic_energies=self.atomic_energies,
             )
             if build_workers <= 1:
                 payload_batches = map(worker, source_collection.iter_records())
@@ -1431,6 +1474,12 @@ class HDF5StructureDataset(Dataset):
         for i, row in enumerate(meta):  # type: ignore[assignment]
             if bool(row["has_forces"]):
                 self._force_indices_all.append(i)
+
+        loaded_max_energy, loaded_atomic_energies = _read_energy_filter_metadata(
+            self._h5
+        )
+        self.max_energy = loaded_max_energy
+        self.atomic_energies = loaded_atomic_energies
 
         self._initialize_descriptor_manifest_state()
         self._reconcile_descriptor_manifest()

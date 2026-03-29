@@ -540,6 +540,7 @@ def test_hdf5_force_training_random_sampling_initializes_force_selection(
         database_file=str(tmp_path / "force_training_random.h5"),
         sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
+        atomic_energies={"H": 0.0},
     )
     dataset.build_database(
         show_progress=False,
@@ -557,7 +558,6 @@ def test_hdf5_force_training_random_sampling_initializes_force_selection(
         force_sampling="random",
         memory_mode="cpu",
         device="cpu",
-        atomic_energies={"H": 0.0},
         num_workers=0,
         checkpoint_dir=None,
         use_scheduler=False,
@@ -586,6 +586,7 @@ def test_hdf5_force_training_with_worker_restarts_smoke(tmp_path: Path):
         database_file=str(db_path),
         sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
+        atomic_energies={"H": 0.0},
     )
     build_dataset.build_database(
         show_progress=False,
@@ -613,7 +614,6 @@ def test_hdf5_force_training_with_worker_restarts_smoke(tmp_path: Path):
         method=Adam(mu=0.001, batchsize=2),
         memory_mode="cpu",
         device="cpu",
-        atomic_energies={"H": 0.0},
         checkpoint_dir=None,
         use_scheduler=False,
         show_progress=False,
@@ -642,6 +642,7 @@ def test_prebuilt_hdf5_dataset_uses_config_owned_runtime_policy(
         database_file=str(tmp_path / "force_training_mismatch.h5"),
         sources=_source_collection_from_structures(file_paths, structures),
         mode="build",
+        atomic_energies={"H": 0.0},
     )
     dataset.build_database(show_progress=False)
 
@@ -655,7 +656,6 @@ def test_prebuilt_hdf5_dataset_uses_config_owned_runtime_policy(
         cache_force_triplets=True,
         memory_mode="cpu",
         device="cpu",
-        atomic_energies={"H": 0.0},
         num_workers=0,
         checkpoint_dir=None,
         use_scheduler=False,
@@ -681,10 +681,12 @@ def test_persisted_hdf5_force_training_matches_on_the_fly_training(
     train_dataset = StructureDataset(
         structures=train_structs,
         descriptor=descriptor_struct,
+        atomic_energies={"H": 0.0},
     )
     test_dataset = StructureDataset(
         structures=test_structs,
         descriptor=descriptor_struct,
+        atomic_energies={"H": 0.0},
     )
 
     def _build_hdf5_dataset(
@@ -707,6 +709,7 @@ def test_persisted_hdf5_force_training_matches_on_the_fly_training(
                 subset_structures,
             ),
             mode="build",
+            atomic_energies={"H": 0.0},
         )
         dataset.build_database(
             show_progress=False,
@@ -736,7 +739,6 @@ def test_persisted_hdf5_force_training_matches_on_the_fly_training(
         method=Adam(mu=0.001, batchsize=2),
         memory_mode="cpu",
         device="cpu",
-        atomic_energies={"H": 0.0},
         num_workers=0,
         checkpoint_dir=None,
         use_scheduler=False,

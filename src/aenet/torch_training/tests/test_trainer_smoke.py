@@ -1383,6 +1383,100 @@ def test_prebuilt_dataset_warns_that_max_energy_is_ignored(monkeypatch):
 
 
 @pytest.mark.cpu
+def test_prebuilt_dataset_owns_atomic_energies_for_training_targets():
+    """Prebuilt datasets should supply training-time atomic references."""
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    structures = make_simple_structures_H_two()
+    dataset = StructureDataset(
+        structures=structures,
+        descriptor=descriptor,
+        atomic_energies={"H": 2.5},
+    )
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+        normalize_features=False,
+        normalize_energy=False,
+    )
+
+    pot.train(dataset=dataset, config=cfg)
+
+    expected = float(structures[0].energy) - 3.0 * 2.5
+    assert pot.cohesive_energy(structures[0]) == pytest.approx(expected)
+
+
+@pytest.mark.cpu
+def test_prebuilt_dataset_atomic_energies_mismatch_config_raises():
+    """Dataset-owned atomic energies should reject mismatched config values."""
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(
+        structures=make_simple_structures_H_two(),
+        descriptor=descriptor,
+        atomic_energies={"H": 2.5},
+    )
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 0.0},
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="dataset atomic_energies do not match config.atomic_energies",
+    ):
+        pot.train(dataset=dataset, config=cfg)
+
+
+@pytest.mark.cpu
+def test_prebuilt_dataset_without_atomic_energies_ignores_config_shortcut():
+    """Config atomic energies should not be injected into prebuilt datasets."""
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    structures = make_simple_structures_H_two()
+    dataset = StructureDataset(
+        structures=structures,
+        descriptor=descriptor,
+    )
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        atomic_energies={"H": 2.5},
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+        normalize_features=False,
+        normalize_energy=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="config.atomic_energies is ignored",
+    ):
+        pot.train(dataset=dataset, config=cfg)
+
+    assert pot.cohesive_energy(structures[0]) == pytest.approx(
+        float(structures[0].energy)
+    )
+
+
+@pytest.mark.cpu
 def test_error_weighted_sampling_uses_sampler_not_shuffle(monkeypatch):
     """Adaptive error-weighted sampling should use replacement sampling."""
     records = []

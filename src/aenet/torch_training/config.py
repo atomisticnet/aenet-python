@@ -416,9 +416,9 @@ class TorchTrainingConfig:
     device: Optional[str] = None
     # Default numeric precision control for training/inference
     precision: Literal['auto', 'float32', 'float64'] = 'auto'
-    # Atomic reference energies (default to 0.0 for all species)
-    # When provided, training targets are cohesive energies
-    # When not provided, training targets are effectively total energies
+    # Convenience shortcut for raw ``structures=...`` training paths where the
+    # trainer constructs dataset objects. Prebuilt datasets own their
+    # atomic-reference semantics instead.
     atomic_energies: Optional[Dict[str, float]] = None
     # Normalization controls (defaults match aenet-Fortran/PyTorch behavior)
     normalize_features: bool = True

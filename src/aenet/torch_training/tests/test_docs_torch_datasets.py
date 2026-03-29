@@ -195,6 +195,7 @@ def test_cached_dataset_and_predict_dataset_examples(docs_training_structures):
     cached_dataset = CachedStructureDataset(
         structures=docs_training_structures,
         descriptor=descriptor,
+        atomic_energies={"H": 0.0},
         show_progress=False,
     )
 
@@ -219,7 +220,6 @@ def test_cached_dataset_and_predict_dataset_examples(docs_training_structures):
         force_weight=0.0,
         memory_mode="cpu",
         device="cpu",
-        atomic_energies={"H": 0.0},
         normalize_features=False,
         normalize_energy=False,
         checkpoint_dir=None,

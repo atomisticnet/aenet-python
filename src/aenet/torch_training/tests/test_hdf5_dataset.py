@@ -758,6 +758,7 @@ def test_trainer_with_hdf5_dataset_energy_weighted_sampling(tmp_path: Path):
         database_file=str(db_path),
         sources=_payload_source_collection(file_paths, structs),
         mode="build",
+        atomic_energies={"H": 0.0},
     )
     ds.build_database(show_progress=False)
 
@@ -767,7 +768,6 @@ def test_trainer_with_hdf5_dataset_energy_weighted_sampling(tmp_path: Path):
         testpercent=0,
         force_weight=0.0,
         sampling_policy="energy_weighted",
-        atomic_energies={"H": 0.0},
         memory_mode="cpu",
         device="cpu",
         checkpoint_dir=None,
@@ -799,6 +799,7 @@ def test_trainer_with_hdf5_dataset_error_weighted_sampling(tmp_path: Path):
         database_file=str(db_path),
         sources=_payload_source_collection(file_paths, structs),
         mode="build",
+        atomic_energies={"H": 0.0},
     )
     ds.build_database(show_progress=False)
 
@@ -808,7 +809,6 @@ def test_trainer_with_hdf5_dataset_error_weighted_sampling(tmp_path: Path):
         testpercent=0,
         force_weight=0.0,
         sampling_policy="error_weighted",
-        atomic_energies={"H": 0.0},
         memory_mode="cpu",
         device="cpu",
         checkpoint_dir=None,
@@ -862,13 +862,11 @@ def test_hdf5_build_database_filters_on_referenced_energy_per_atom(
         database_file=str(db_path),
         sources=_payload_source_collection(source_ids, structs),
         mode="build",
-    )
-
-    ds.build_database(
-        show_progress=False,
-        max_referenced_energy_per_atom=0.1,
+        max_energy=0.1,
         atomic_energies={"H": 2.0},
     )
+
+    ds.build_database(show_progress=False)
 
     rows = _read_meta_rows(db_path)
     attrs = _read_energy_filter_attrs(db_path)
@@ -920,12 +918,10 @@ def test_hdf5_build_database_filter_uses_zero_reference_fallback(
         database_file=str(db_path),
         sources=_payload_source_collection(source_ids, structs),
         mode="build",
+        max_energy=0.1,
     )
 
-    ds.build_database(
-        show_progress=False,
-        max_referenced_energy_per_atom=0.1,
-    )
+    ds.build_database(show_progress=False)
 
     rows = _read_meta_rows(db_path)
     attrs = _read_energy_filter_attrs(db_path)
@@ -936,6 +932,38 @@ def test_hdf5_build_database_filter_uses_zero_reference_fallback(
     assert attrs["reference_mode"] == "zero_reference_fallback"
     assert attrs["threshold"] == pytest.approx(0.1)
     assert attrs["atomic_energies_json"] == ""
+
+
+@pytest.mark.cpu
+def test_hdf5_load_restores_dataset_owned_atomic_energies_and_max_energy(
+    tmp_path: Path,
+):
+    """Loaded HDF5 datasets should expose the persisted ownership metadata."""
+    structs = [_make_struct(0), _make_struct(1)]
+    file_paths = [str(tmp_path / f"s_restore_{i}") for i in range(len(structs))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    desc = _make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "structures_restore_refs.h5"
+    build_ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        sources=_payload_source_collection(file_paths, structs),
+        mode="build",
+        max_energy=0.2,
+        atomic_energies={"H": -0.5},
+    )
+    build_ds.build_database(show_progress=False)
+
+    load_ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        mode="load",
+    )
+
+    assert load_ds.max_energy == pytest.approx(0.2)
+    assert load_ds.atomic_energies == {"H": -0.5}
 
 
 @pytest.mark.cpu
