@@ -38,6 +38,7 @@ except Exception:
     tqdm = None  # type: ignore
 
 # Refactored modules
+from ._materialization import referenced_energy_per_atom
 from .builders import NetworkBuilder, OptimizerBuilder
 from .config import Structure, TorchTrainingConfig
 from .dataset import (
@@ -120,23 +121,16 @@ def _cohesive_energy_per_atom_for_sampling(
     training targets, namely total energy minus atomic reference energies,
     normalized by atom count.
     """
-    n_atoms = int(structure.n_atoms)
-    if n_atoms <= 0:
-        raise ValueError("Cannot build sampling weights for empty structures.")
-
     try:
-        total_energy = float(structure.energy)
+        return referenced_energy_per_atom(
+            structure,
+            atomic_energies=atomic_energies,
+        )
     except Exception as exc:
         raise ValueError(
             "sampling_policy='energy_weighted' requires finite structure "
             "energies."
         ) from exc
-
-    atomic_reference = sum(
-        float(atomic_energies.get(str(species), 0.0))
-        for species in structure.species
-    )
-    return (total_energy - atomic_reference) / float(n_atoms)
 
 
 def _compute_energy_sampling_weights(
@@ -214,6 +208,26 @@ def _compute_error_sampling_weights(
     if not math.isfinite(mean_weight) or mean_weight <= 0.0:
         return torch.ones_like(weights, dtype=torch.double)
     return weights / mean_weight
+
+
+def _warn_if_max_energy_is_ignored_for_prebuilt_datasets(
+    *,
+    config: TorchTrainingConfig,
+    dataset: Dataset | None,
+    train_dataset: Dataset | None,
+    test_dataset: Dataset | None,
+) -> None:
+    """Warn when ``config.max_energy`` cannot affect prebuilt datasets."""
+    if getattr(config, "max_energy", None) is None:
+        return
+    if dataset is None and train_dataset is None and test_dataset is None:
+        return
+    warnings.warn(
+        "TorchTrainingConfig.max_energy is ignored when using prebuilt "
+        "dataset objects. Apply energy filtering when constructing the "
+        "dataset instead.",
+        UserWarning,
+    )
 
 
 class _ErrorWeightedSamplingState:
@@ -1504,6 +1518,12 @@ class TorchANNPotential:
         # (priority: explicit train/test > dataset > structures)
         train_ds = None
         test_ds = None
+        _warn_if_max_energy_is_ignored_for_prebuilt_datasets(
+            config=config,
+            dataset=dataset,
+            train_dataset=train_dataset,
+            test_dataset=test_dataset,
+        )
 
         if train_dataset is not None:
             train_ds = train_dataset
@@ -1562,6 +1582,7 @@ class TorchANNPotential:
                     descriptor=self.descriptor,
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
+                    atomic_energies=config.atomic_energies,
                     seed=None,
                     show_progress=show_progress,
                 )
@@ -1571,6 +1592,7 @@ class TorchANNPotential:
                         descriptor=self.descriptor,
                         max_energy=config.max_energy,
                         max_forces=config.max_forces,
+                        atomic_energies=config.atomic_energies,
                         seed=None,
                         show_progress=show_progress,
                     )
@@ -1583,6 +1605,7 @@ class TorchANNPotential:
                     descriptor=self.descriptor,
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
+                    atomic_energies=config.atomic_energies,
                     seed=None,
                 )
                 if config.testpercent > 0:

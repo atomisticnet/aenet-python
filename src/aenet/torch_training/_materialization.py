@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -32,12 +32,16 @@ def filter_structures(
     *,
     max_energy: float | None,
     max_forces: float | None,
+    atomic_energies: Mapping[str, float] | None = None,
 ) -> list[Structure]:
     """Apply shared structure-level filtering for torch-training datasets."""
     filtered: list[Structure] = []
     for struct in structures:
         if max_energy is not None:
-            energy_per_atom = struct.energy / struct.n_atoms
+            energy_per_atom = referenced_energy_per_atom(
+                struct,
+                atomic_energies=atomic_energies,
+            )
             if energy_per_atom > max_energy:
                 continue
 
@@ -48,6 +52,38 @@ def filter_structures(
 
         filtered.append(struct)
     return filtered
+
+
+def referenced_energy_per_atom(
+    structure: Structure,
+    *,
+    atomic_energies: Mapping[str, float] | None = None,
+) -> float:
+    """
+    Return referenced cohesive or formation energy per atom.
+
+    When ``atomic_energies`` is omitted, the atomic-reference contribution
+    falls back to zero for every species so externally referenced labels can
+    be filtered as provided.
+    """
+    n_atoms = int(structure.n_atoms)
+    if n_atoms <= 0:
+        raise ValueError("Cannot compute per-atom energy for empty structures.")
+
+    try:
+        total_energy = float(structure.energy)
+    except Exception as exc:
+        raise ValueError(
+            "Referenced per-atom energy calculations require finite "
+            "structure energies."
+        ) from exc
+
+    references = atomic_energies or {}
+    atomic_reference = sum(
+        float(references.get(str(species), 0.0))
+        for species in structure.species
+    )
+    return (total_energy - atomic_reference) / float(n_atoms)
 
 
 def extract_runtime_caches(

@@ -157,6 +157,23 @@ def _read_meta_rows(
         return rows
 
 
+def _read_energy_filter_attrs(db_path: Path) -> dict[str, object]:
+    """Read persisted HDF5 build-time energy-filter metadata."""
+    with tables.open_file(str(db_path), mode="r") as h5:
+        attrs = h5.root._v_attrs
+        return {
+            "enabled": bool(attrs.energy_filter_enabled),
+            "semantics": str(attrs.energy_filter_semantics),
+            "reference_mode": str(attrs.energy_filter_reference_mode),
+            "threshold": float(
+                attrs.energy_filter_max_referenced_energy_per_atom
+            ),
+            "atomic_energies_json": str(
+                attrs.energy_filter_atomic_energies_json
+            ),
+        }
+
+
 def _make_descriptor(dtype=torch.float64) -> ChebyshevDescriptor:
     # Keep orders small to minimize compute; ensure within cutoffs.
     return ChebyshevDescriptor(
@@ -805,6 +822,120 @@ def test_trainer_with_hdf5_dataset_error_weighted_sampling(tmp_path: Path):
 
     assert "RMSE_train" in history.errors.columns
     assert len(history.errors) == 2
+
+
+@pytest.mark.cpu
+def test_hdf5_build_database_filters_on_referenced_energy_per_atom(
+    tmp_path: Path,
+):
+    """HDF5 build-time filtering should use referenced per-atom energies."""
+    structs = [
+        Structure(
+            positions=np.array(
+                [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=6.0,
+            forces=np.zeros((3, 3), dtype=np.float64),
+            name="kept",
+        ),
+        Structure(
+            positions=np.array(
+                [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=9.9,
+            forces=np.zeros((3, 3), dtype=np.float64),
+            name="dropped",
+        ),
+    ]
+    source_ids = [str(tmp_path / "s_keep"), str(tmp_path / "s_drop")]
+    for source_id in source_ids:
+        Path(source_id).write_text("placeholder", encoding="utf-8")
+
+    desc = _make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "structures_filtered_refs.h5"
+    ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        sources=_payload_source_collection(source_ids, structs),
+        mode="build",
+    )
+
+    ds.build_database(
+        show_progress=False,
+        max_referenced_energy_per_atom=0.1,
+        atomic_energies={"H": 2.0},
+    )
+
+    rows = _read_meta_rows(db_path)
+    attrs = _read_energy_filter_attrs(db_path)
+
+    assert len(rows) == 1
+    assert rows[0][0] == source_ids[0]
+    assert attrs["enabled"] is True
+    assert attrs["semantics"] == "referenced_energy_per_atom"
+    assert attrs["reference_mode"] == "explicit_atomic_references"
+    assert attrs["threshold"] == pytest.approx(0.1)
+    assert attrs["atomic_energies_json"] == '{"H":2.0}'
+
+
+@pytest.mark.cpu
+def test_hdf5_build_database_filter_uses_zero_reference_fallback(
+    tmp_path: Path,
+):
+    """Omitting atomic energies should preserve the zero-reference fallback."""
+    structs = [
+        Structure(
+            positions=np.array(
+                [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=0.0,
+            forces=np.zeros((3, 3), dtype=np.float64),
+            name="kept",
+        ),
+        Structure(
+            positions=np.array(
+                [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=6.0,
+            forces=np.zeros((3, 3), dtype=np.float64),
+            name="dropped",
+        ),
+    ]
+    source_ids = [str(tmp_path / "s_keep_zero"), str(tmp_path / "s_drop_zero")]
+    for source_id in source_ids:
+        Path(source_id).write_text("placeholder", encoding="utf-8")
+
+    desc = _make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "structures_filtered_zero_refs.h5"
+    ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        sources=_payload_source_collection(source_ids, structs),
+        mode="build",
+    )
+
+    ds.build_database(
+        show_progress=False,
+        max_referenced_energy_per_atom=0.1,
+    )
+
+    rows = _read_meta_rows(db_path)
+    attrs = _read_energy_filter_attrs(db_path)
+
+    assert len(rows) == 1
+    assert rows[0][0] == source_ids[0]
+    assert attrs["enabled"] is True
+    assert attrs["reference_mode"] == "zero_reference_fallback"
+    assert attrs["threshold"] == pytest.approx(0.1)
+    assert attrs["atomic_energies_json"] == ""
 
 
 @pytest.mark.cpu

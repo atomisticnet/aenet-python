@@ -12,6 +12,7 @@ from aenet.torch_training import (
 from aenet.torch_training.dataset import (
     CachedStructureDataset,
     StructureDataset,
+    train_test_split,
 )
 
 
@@ -39,6 +40,30 @@ def _zero_out_model_weights(pot: TorchANNPotential):
         for p in seq.parameters():
             with torch.no_grad():
                 p.zero_()
+
+
+def _make_three_h_structure(
+    energy: float,
+    *,
+    name: str,
+    offset: float = 0.0,
+) -> Structure:
+    """Create a small three-hydrogen structure for filtering tests."""
+    positions = np.array(
+        [
+            [0.0 + offset, 0.0, 0.0],
+            [0.9 + offset, 0.0, 0.0],
+            [0.0 + offset, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    return Structure(
+        positions=positions,
+        species=["H", "H", "H"],
+        energy=energy,
+        forces=None,
+        name=name,
+    )
 
 
 @pytest.mark.cpu
@@ -144,6 +169,83 @@ def test_cohesive_energy_helper_works_with_internal_atomic_energies():
     expected_coh = E_total - 3 * E_H
     coh = pot.cohesive_energy(s)
     assert pytest.approx(coh, rel=0, abs=1e-12) == expected_coh
+
+
+@pytest.mark.cpu
+def test_structure_dataset_max_energy_uses_atomic_references():
+    descriptor = _make_descriptor(dtype=torch.float64)
+    atomic_energies = {"H": 2.0}
+    kept = _make_three_h_structure(6.0, name="kept.xsf")
+    dropped = _make_three_h_structure(9.9, name="dropped.xsf", offset=0.05)
+
+    dataset = StructureDataset(
+        structures=[kept, dropped],
+        descriptor=descriptor,
+        max_energy=0.1,
+        atomic_energies=atomic_energies,
+    )
+
+    assert len(dataset) == 1
+    assert dataset.get_structure(0).name == "kept.xsf"
+
+
+@pytest.mark.cpu
+def test_cached_dataset_max_energy_uses_atomic_references():
+    descriptor = _make_descriptor(dtype=torch.float64)
+    atomic_energies = {"H": 2.0}
+    kept = _make_three_h_structure(6.0, name="kept.xsf")
+    dropped = _make_three_h_structure(9.9, name="dropped.xsf", offset=0.05)
+
+    dataset = CachedStructureDataset(
+        structures=[kept, dropped],
+        descriptor=descriptor,
+        max_energy=0.1,
+        atomic_energies=atomic_energies,
+        show_progress=False,
+    )
+
+    assert len(dataset) == 1
+    assert dataset.get_structure(0).name == "kept.xsf"
+
+
+@pytest.mark.cpu
+def test_structure_dataset_max_energy_falls_back_to_zero_references():
+    descriptor = _make_descriptor(dtype=torch.float64)
+    kept = _make_three_h_structure(0.0, name="kept.xsf")
+    dropped = _make_three_h_structure(6.0, name="dropped.xsf", offset=0.05)
+
+    dataset = StructureDataset(
+        structures=[kept, dropped],
+        descriptor=descriptor,
+        max_energy=0.1,
+    )
+
+    assert len(dataset) == 1
+    assert dataset.get_structure(0).name == "kept.xsf"
+
+
+@pytest.mark.cpu
+def test_train_test_split_preserves_atomic_energy_filter_configuration():
+    descriptor = _make_descriptor(dtype=torch.float64)
+    atomic_energies = {"H": 2.0}
+    dataset = StructureDataset(
+        structures=[
+            _make_three_h_structure(6.0, name="s0.xsf"),
+            _make_three_h_structure(6.15, name="s1.xsf", offset=0.05),
+        ],
+        descriptor=descriptor,
+        max_energy=0.2,
+        atomic_energies=atomic_energies,
+    )
+
+    train_ds, test_ds = train_test_split(
+        dataset,
+        test_fraction=0.5,
+        seed=7,
+    )
+
+    assert train_ds.atomic_energies == atomic_energies
+    assert test_ds.atomic_energies == atomic_energies
 
 
 @pytest.mark.cpu

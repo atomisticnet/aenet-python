@@ -1286,6 +1286,103 @@ def test_energy_weighted_sampling_warns_and_falls_back_to_zero_references(
 
 
 @pytest.mark.cpu
+def test_train_structures_max_energy_uses_atomic_references(monkeypatch):
+    """Trainer-built datasets should filter using referenced per-atom energy."""
+    recorded_lengths = []
+
+    def _record_train_loader(dataset, *args, **kwargs):
+        recorded_lengths.append(len(dataset))
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        max_energy=0.1,
+        atomic_energies={"H": 2.0},
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+    structures = [
+        Structure(
+            positions=np.array(
+                [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [0.0, 0.9, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=6.0,
+            forces=np.zeros((3, 3), dtype=np.float64),
+        ),
+        Structure(
+            positions=np.array(
+                [[0.1, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H", "H"],
+            energy=9.9,
+            forces=np.zeros((3, 3), dtype=np.float64),
+        ),
+    ]
+
+    with pytest.raises(_StopAfterLoaderConfig):
+        pot.train(
+            structures=structures,
+            config=cfg,
+        )
+
+    assert recorded_lengths == [1]
+
+
+@pytest.mark.cpu
+def test_prebuilt_dataset_warns_that_max_energy_is_ignored(monkeypatch):
+    """Externally constructed datasets should warn when max_energy is set."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(
+        structures=make_simple_structures_H_many(n_structures=4),
+        descriptor=descriptor,
+    )
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        max_energy=0.1,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="max_energy is ignored when using prebuilt dataset objects",
+    ):
+        with pytest.raises(_StopAfterLoaderConfig):
+            pot.train(
+                dataset=dataset,
+                config=cfg,
+            )
+
+    assert len(records) == 1
+
+
+@pytest.mark.cpu
 def test_error_weighted_sampling_uses_sampler_not_shuffle(monkeypatch):
     """Adaptive error-weighted sampling should use replacement sampling."""
     records = []

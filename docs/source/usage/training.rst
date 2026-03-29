@@ -72,7 +72,7 @@ The ``TrainingConfig`` class includes:
 *   ``iterations`` (int): Maximum number of training iterations. Default: ``0``
 *   ``method`` (TrainingMethod): The optimization algorithm to use. Default: ``Adam()``
 *   ``testpercent`` (int): Percentage of data for test set (0-100). Default: ``0``
-*   ``max_energy`` (float, optional): Exclude structures with energy per atom above this threshold. Default: ``None``
+*   ``max_energy`` (float, optional): Exclude structures with referenced cohesive or formation energy per atom above this threshold when the trainer builds datasets from raw ``structures=...`` input. If ``atomic_energies`` is omitted, the filter falls back to all-zero atomic references and uses the provided per-atom labels as-is. Prebuilt datasets must be filtered when they are constructed. Default: ``None``
 *   ``sampling`` (str, optional): Sampling method ('sequential', 'random', 'weighted', 'energy'). Default: ``None``
 *   ``timing`` (bool): Enable detailed timing output. Default: ``False``
 *   ``save_energies`` (bool): Save predicted energies for training/test sets. Default: ``False``

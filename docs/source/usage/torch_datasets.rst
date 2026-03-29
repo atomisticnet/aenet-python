@@ -351,6 +351,8 @@ Building the Database
    db.build_database(
        show_progress=True,
        build_workers=8,                 # optional build-time worker threads
+       max_referenced_energy_per_atom=0.2,  # optional build-time filter
+       atomic_energies={"H": 0.0},      # optional reference energies
        persist_descriptor=True,         # optional descriptor recovery step
        persist_features=True,           # optional persisted raw features
        persist_force_derivatives=True,  # optional sparse derivative cache
@@ -366,6 +368,14 @@ Building the Database
    preparation with worker threads, while the parent process still performs
    all ordered HDF5 writes. This is separate from training-time
    ``num_workers`` on ``TorchTrainingConfig``.
+
+.. note::
+
+   HDF5 energy filtering is explicitly a build-time policy. Use
+   ``max_referenced_energy_per_atom=...`` together with optional
+   ``atomic_energies=...`` on ``build_database()`` if you want the persisted
+   dataset to exclude high-energy entries. ``TorchTrainingConfig.max_energy``
+   does not retroactively filter prebuilt HDF5 datasets at runtime.
 
 For archive-backed datasets, pass an explicit source adapter instead of a
 list of paths. For example, a ``.tar.bz2`` archive of XSF files can be
@@ -504,7 +514,9 @@ Training from HDF5 Database
    such as ``force_fraction``, ``force_sampling``, ``cache_features``,
    ``cache_neighbors``, and ``cache_force_triplets`` belong on
    ``TorchTrainingConfig`` and can be changed between runs over the same
-   dataset object.
+   dataset object. ``TorchTrainingConfig.max_energy`` is different: it only
+   applies when the trainer builds datasets from raw ``structures=...`` input
+   and is ignored for prebuilt datasets.
 
 Key HDF5 Features
 ~~~~~~~~~~~~~~~~~

@@ -346,7 +346,12 @@ class TorchTrainingConfig:
         reserved for a future real mixed-memory implementation and currently
         raises ``NotImplementedError`` when requested. Default: 'gpu'
     max_energy : float, optional
-        Exclude structures with energy per atom above this threshold.
+        Exclude structures with referenced cohesive or formation energy per
+        atom above this threshold when the trainer constructs datasets from
+        raw ``structures=...`` input. If ``atomic_energies`` is omitted, the
+        implementation falls back to all-zero atomic references and filters
+        the provided per-atom labels as-is. Prebuilt dataset objects must
+        apply any comparable filtering at dataset-construction time.
         Default: None
     max_forces : float, optional
         Exclude structures with max force above this threshold. Default: None

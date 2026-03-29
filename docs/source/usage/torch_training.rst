@@ -386,7 +386,10 @@ datasets, ``cache_features=True`` is still only a per-run in-memory layer; it
 does not replace ``persist_features=True`` or
 ``persist_force_derivatives=True``, which are the build-time options for
 reusing raw features or sparse local derivatives across sessions. See
-:doc:`torch_datasets` for the full cache-precedence workflow.
+:doc:`torch_datasets` for the full cache-precedence workflow. HDF5 energy
+filtering is also a build-time concern: use
+``build_database(max_referenced_energy_per_atom=..., atomic_energies=...)``
+rather than relying on ``TorchTrainingConfig.max_energy`` at runtime.
 
 Common Pitfalls
 ~~~~~~~~~~~~~~~
@@ -719,8 +722,13 @@ Data Filtering & Quality Control
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **max_energy** : float (default: None)
-   Exclude structures with energy per atom above this threshold. Useful for
-   removing outliers or unconverged high-energy configurations.
+   Exclude structures with referenced cohesive or formation energy per atom
+   above this threshold when the trainer constructs datasets from raw
+   ``structures=...`` input. If ``atomic_energies`` is omitted, the filter
+   falls back to all-zero atomic references and uses the provided per-atom
+   labels as-is. When you pass a prebuilt ``dataset=...`` or explicit
+   ``train_dataset=...``/``test_dataset=...``, this option is ignored and the
+   trainer emits a warning.
 
 **max_forces** : float (default: None)
    Exclude structures with maximum atomic force magnitude above this threshold.

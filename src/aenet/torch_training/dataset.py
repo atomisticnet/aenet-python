@@ -159,11 +159,16 @@ class StructureDataset(Dataset):
     descriptor : ChebyshevDescriptor
         Descriptor instance for featurization
     max_energy : float, optional
-        Exclude structures with energy per atom above this threshold.
+        Exclude structures with referenced energy per atom above this
+        threshold. When ``atomic_energies`` is omitted, atomic references fall
+        back to zero and the provided labels are filtered as-is.
         Default: None (no filtering)
     max_forces : float, optional
         Exclude structures with max force component above this threshold.
         Default: None (no filtering)
+    atomic_energies : dict[str, float], optional
+        Atomic reference energies used when interpreting ``max_energy``.
+        Missing species default to ``0.0``. Default: None
     seed : int, optional
         Reserved for deterministic helper utilities. Dataset contents and
         runtime training policy are unaffected by this value. Default: None
@@ -184,11 +189,15 @@ class StructureDataset(Dataset):
         descriptor,  # ChebyshevDescriptor - avoid circular import
         max_energy: Optional[float] = None,
         max_forces: Optional[float] = None,
+        atomic_energies: Optional[dict[str, float]] = None,
         seed: Optional[int] = None,
     ):
         self.descriptor = descriptor
         self.max_energy = max_energy
         self.max_forces = max_forces
+        self.atomic_energies = (
+            dict(atomic_energies) if atomic_energies is not None else None
+        )
         self.seed = seed
 
         # Convert input to torch Structure objects if needed
@@ -228,6 +237,7 @@ class StructureDataset(Dataset):
             structures,
             max_energy=self.max_energy,
             max_forces=self.max_forces,
+            atomic_energies=self.atomic_energies,
         )
 
     def get_structure(self, idx: int) -> Structure:
@@ -425,11 +435,16 @@ class CachedStructureDataset(Dataset):
     descriptor : ChebyshevDescriptor
         Descriptor instance for featurization
     max_energy : float, optional
-        Exclude structures with energy per atom above this threshold.
+        Exclude structures with referenced energy per atom above this
+        threshold. When ``atomic_energies`` is omitted, atomic references fall
+        back to zero and the provided labels are filtered as-is.
         Default: None (no filtering)
     max_forces : float, optional
         Exclude structures with max force component above this threshold.
         Default: None (no filtering)
+    atomic_energies : dict[str, float], optional
+        Atomic reference energies used when interpreting ``max_energy``.
+        Missing species default to ``0.0``. Default: None
     seed : int, optional
         Random seed for reproducibility. Default: None
     """
@@ -440,12 +455,16 @@ class CachedStructureDataset(Dataset):
         descriptor,  # ChebyshevDescriptor
         max_energy: Optional[float] = None,
         max_forces: Optional[float] = None,
+        atomic_energies: Optional[dict[str, float]] = None,
         seed: Optional[int] = None,
         show_progress: bool = True,
     ):
         self.descriptor = descriptor
         self.max_energy = max_energy
         self.max_forces = max_forces
+        self.atomic_energies = (
+            dict(atomic_energies) if atomic_energies is not None else None
+        )
         self.seed = seed
 
         if seed is not None:
@@ -460,6 +479,7 @@ class CachedStructureDataset(Dataset):
             structures,
             max_energy=self.max_energy,
             max_forces=self.max_forces,
+            atomic_energies=self.atomic_energies,
         )
 
         # Build cached samples with progress feedback
@@ -575,6 +595,7 @@ def train_test_split(dataset: StructureDataset,
         descriptor=dataset.descriptor,
         max_energy=dataset.max_energy,
         max_forces=dataset.max_forces,
+        atomic_energies=dataset.atomic_energies,
         seed=seed,
     )
 
@@ -583,6 +604,7 @@ def train_test_split(dataset: StructureDataset,
         descriptor=dataset.descriptor,
         max_energy=dataset.max_energy,
         max_forces=dataset.max_forces,
+        atomic_energies=dataset.atomic_energies,
         seed=seed,
     )
 
