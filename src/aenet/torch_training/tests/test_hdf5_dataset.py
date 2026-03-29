@@ -726,6 +726,88 @@ def test_trainer_with_hdf5_dataset_smoke(tmp_path: Path):
 
 
 @pytest.mark.cpu
+def test_trainer_with_hdf5_dataset_energy_weighted_sampling(tmp_path: Path):
+    """Energy-weighted sampling should work with HDF5-backed training."""
+    structs = [_make_struct(0), _make_struct(1)]
+    file_paths = [str(tmp_path / f"s_weighted_{i}") for i in range(len(structs))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    desc = _make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "structures_weighted.h5"
+
+    ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        sources=_payload_source_collection(file_paths, structs),
+        mode="build",
+    )
+    ds.build_database(show_progress=False)
+
+    pot = TorchANNPotential(arch=_make_arch(desc), descriptor=desc)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    history = pot.train(dataset=ds, config=cfg)
+
+    assert "RMSE_train" in history.errors.columns
+    assert len(history.errors) == 1
+
+
+@pytest.mark.cpu
+def test_trainer_with_hdf5_dataset_error_weighted_sampling(tmp_path: Path):
+    """Adaptive error weighting should work with HDF5-backed training."""
+    structs = [_make_struct(0), _make_struct(1)]
+    file_paths = [str(tmp_path / f"s_adaptive_{i}") for i in range(len(structs))]
+    for path in file_paths:
+        Path(path).write_text("placeholder", encoding="utf-8")
+
+    desc = _make_descriptor(dtype=torch.float64)
+    db_path = tmp_path / "structures_adaptive.h5"
+
+    ds = HDF5StructureDataset(
+        descriptor=desc,
+        database_file=str(db_path),
+        sources=_payload_source_collection(file_paths, structs),
+        mode="build",
+    )
+    ds.build_database(show_progress=False)
+
+    pot = TorchANNPotential(arch=_make_arch(desc), descriptor=desc)
+    cfg = TorchTrainingConfig(
+        iterations=2,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="error_weighted",
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    history = pot.train(dataset=ds, config=cfg)
+
+    assert "RMSE_train" in history.errors.columns
+    assert len(history.errors) == 2
+
+
+@pytest.mark.cpu
 def test_hdf5_force_derivative_cache_round_trip(tmp_path: Path):
     """Schema v2 derivative-only caches should round-trip exactly."""
     structs = [_make_struct(0), _make_struct(1)]

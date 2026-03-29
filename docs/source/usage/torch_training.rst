@@ -140,6 +140,98 @@ statistics, and plotting helpers.
    behavior qualitatively.
 
 
+Structure Sampling Policies
+---------------------------
+
+The PyTorch trainer distinguishes three separate concepts that all affect
+training behavior:
+
+* ``use_scheduler`` controls the learning-rate scheduler
+* ``force_sampling`` controls which force-labeled structures contribute force
+  loss in a given epoch window
+* ``sampling_policy`` controls how structures in the training split are drawn
+  into training batches
+
+The default structure-sampling policy is uniform shuffled batching:
+
+.. doctest::
+
+   >>> from aenet.torch_training import TorchTrainingConfig
+   >>> config = TorchTrainingConfig(sampling_policy="uniform")
+   >>> config.sampling_policy
+   'uniform'
+
+Epoch semantics are different for uniform and non-uniform policies:
+
+* ``sampling_policy="uniform"`` uses shuffled batching without replacement,
+  so each training structure appears exactly once per epoch.
+* Non-uniform policies use weighted sampling with replacement and draw
+  ``len(train_split)`` structures per epoch. Some structures may appear
+  multiple times in one epoch and some may not appear at all.
+* ``iterations`` still means training epochs. Under non-uniform sampling,
+  one epoch is not guaranteed to be a full pass over distinct training
+  structures.
+* Validation sampling remains uniform and deterministic.
+
+The static non-uniform option ``sampling_policy="energy_weighted"`` biases
+sampling toward lower cohesive or referenced formation energy per atom:
+
+.. doctest::
+
+   >>> config = TorchTrainingConfig(
+   ...     sampling_policy="energy_weighted",
+   ...     atomic_energies={"H": 0.0},
+   ... )
+   >>> config.sampling_policy
+   'energy_weighted'
+
+When ``atomic_energies`` is provided, the weighting uses the referenced
+cohesive or formation energy per atom implied by those atomic reference
+energies. When ``atomic_energies`` is omitted, training still proceeds with
+all-zero atomic references; in that case, the energy-weighted policy uses the
+provided per-atom labels as-is and emits a warning so the fallback is
+explicit.
+
+The adaptive non-uniform option ``sampling_policy="error_weighted"`` starts
+with uniform epoch-0 sampling and then increases the sampling frequency of
+structures with higher recently observed training loss:
+
+.. doctest::
+
+   >>> config = TorchTrainingConfig(
+   ...     sampling_policy="error_weighted",
+   ...     atomic_energies={"H": 0.0},
+   ... )
+   >>> config.sampling_policy
+   'error_weighted'
+
+Its behavior is:
+
+* Epoch 0 uses uniform weights because no per-structure error history exists
+  yet.
+* After each training epoch, the trainer computes a structure-level score
+  from the sampled training structures and normalizes the next epoch's
+  weights so the mean weight is 1.
+* If a structure is sampled multiple times in an epoch, its next score uses
+  the mean of those sampled occurrences.
+* If a structure is not sampled in an epoch, it keeps its previous score.
+* Resume currently does not persist adaptive sampler state; resumed
+  ``error_weighted`` training therefore bootstraps from uniform sampling
+  again.
+
+The structure-level score used by ``error_weighted`` is:
+
+* energy-only training: absolute energy error per atom for that structure
+* mixed energy/force training: ``(1 - force_weight) * energy_error_per_atom +
+  force_weight * force_rmse_structure`` for force-supervised structures
+* structures that are not force-supervised in a given epoch contribute only
+  their energy-error component in that epoch
+
+For both non-uniform policies, ``force_sampling`` remains a separate control.
+It determines whether a sampled force-labeled structure contributes force
+loss; it does not define how often that structure is drawn into batches.
+
+
 Force Training
 --------------
 

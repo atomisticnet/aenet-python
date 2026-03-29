@@ -139,6 +139,25 @@ def test_force_training_example():
 
 
 @pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_sampling_policy_docs_example():
+    """The docs sampling-policy examples should stay aligned with the API."""
+    uniform_cfg = TorchTrainingConfig(sampling_policy="uniform")
+    weighted_cfg = TorchTrainingConfig(
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": 0.0},
+    )
+    adaptive_cfg = TorchTrainingConfig(
+        sampling_policy="error_weighted",
+        atomic_energies={"H": 0.0},
+    )
+
+    assert uniform_cfg.sampling_policy == "uniform"
+    assert weighted_cfg.sampling_policy == "energy_weighted"
+    assert adaptive_cfg.sampling_policy == "error_weighted"
+
+
+@pytest.mark.cpu
 def test_mutated_mixed_memory_mode_still_fails_fast():
     """Trainer should reject a mixed mode reintroduced after validation."""
     potential = _make_potential()

@@ -305,6 +305,7 @@ def test_checkpoint_metadata_preservation(
         testpercent=0,
         checkpoint_dir=temp_checkpoint_dir,
         checkpoint_interval=1,
+        sampling_policy="energy_weighted",
         atomic_energies={"H": -0.5},
         show_progress=False,
     )
@@ -322,7 +323,106 @@ def test_checkpoint_metadata_preservation(
     assert checkpoint["atomic_energies"]["H"] == -0.5
     assert "normalization" in checkpoint
     assert "training_config" in checkpoint
+    assert checkpoint["training_config"]["sampling_policy"] == "energy_weighted"
     assert "architecture" in checkpoint
+
+
+def test_checkpoint_resume_with_energy_weighted_sampling(
+    temp_checkpoint_dir, simple_structures, descriptor, architecture
+):
+    """Static energy-weighted sampling should resume without extra state."""
+    pot1 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+
+    config1 = TorchTrainingConfig(
+        iterations=3,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": -0.5},
+        checkpoint_dir=temp_checkpoint_dir,
+        checkpoint_interval=1,
+        show_progress=False,
+    )
+
+    pot1.train(structures=simple_structures, config=config1)
+
+    checkpoint_path = sorted(
+        Path(temp_checkpoint_dir).glob("checkpoint_epoch_*.pt")
+    )[-1]
+    payload = torch.load(
+        checkpoint_path, map_location="cpu", weights_only=False
+    )
+    completed_epochs = _completed_epochs_from_payload(payload)
+
+    pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+    config2 = TorchTrainingConfig(
+        iterations=2,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": -0.5},
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        show_progress=False,
+    )
+
+    results = pot2.train(
+        structures=simple_structures,
+        config=config2,
+        resume_from=str(checkpoint_path),
+    )
+
+    assert results is not None
+    assert len(results.errors) == completed_epochs + 2
+
+
+def test_checkpoint_resume_with_error_weighted_sampling(
+    temp_checkpoint_dir, simple_structures, descriptor, architecture
+):
+    """Adaptive sampling should resume by bootstrapping from uniform again."""
+    pot1 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+
+    config1 = TorchTrainingConfig(
+        iterations=3,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        sampling_policy="error_weighted",
+        atomic_energies={"H": -0.5},
+        checkpoint_dir=temp_checkpoint_dir,
+        checkpoint_interval=1,
+        show_progress=False,
+    )
+
+    pot1.train(structures=simple_structures, config=config1)
+
+    checkpoint_path = sorted(
+        Path(temp_checkpoint_dir).glob("checkpoint_epoch_*.pt")
+    )[-1]
+    payload = torch.load(
+        checkpoint_path, map_location="cpu", weights_only=False
+    )
+    completed_epochs = _completed_epochs_from_payload(payload)
+
+    pot2 = TorchANNPotential(arch=architecture, descriptor=descriptor)
+    config2 = TorchTrainingConfig(
+        iterations=2,
+        method=Adam(mu=0.01, batchsize=2),
+        testpercent=0,
+        sampling_policy="error_weighted",
+        atomic_energies={"H": -0.5},
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        show_progress=False,
+    )
+
+    results = pot2.train(
+        structures=simple_structures,
+        config=config2,
+        resume_from=str(checkpoint_path),
+    )
+
+    assert results is not None
+    assert len(results.errors) == completed_epochs + 2
 
 
 def test_checkpoint_resume_different_iterations(

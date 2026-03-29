@@ -18,6 +18,7 @@ Notes
 from __future__ import annotations
 
 import atexit
+import math
 import os
 import random
 import time
@@ -28,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 
 # Progress bar (match aenet.mlip behavior)
 try:
@@ -105,6 +106,188 @@ def _warn_on_small_validation_set(
             "validation split, or an explicit train/test split.",
             UserWarning,
         )
+
+
+def _cohesive_energy_per_atom_for_sampling(
+    structure: Structure,
+    *,
+    atomic_energies: Dict[str, float],
+) -> float:
+    """
+    Return the referenced cohesive or formation energy per atom.
+
+    Sampling policies should use the same per-atom energy semantics as
+    training targets, namely total energy minus atomic reference energies,
+    normalized by atom count.
+    """
+    n_atoms = int(structure.n_atoms)
+    if n_atoms <= 0:
+        raise ValueError("Cannot build sampling weights for empty structures.")
+
+    try:
+        total_energy = float(structure.energy)
+    except Exception as exc:
+        raise ValueError(
+            "sampling_policy='energy_weighted' requires finite structure "
+            "energies."
+        ) from exc
+
+    atomic_reference = sum(
+        float(atomic_energies.get(str(species), 0.0))
+        for species in structure.species
+    )
+    return (total_energy - atomic_reference) / float(n_atoms)
+
+
+def _compute_energy_sampling_weights(
+    dataset: Dataset,
+    *,
+    atomic_energies: Dict[str, float],
+) -> torch.Tensor:
+    """
+    Build deterministic positive structure weights from per-atom energies.
+
+    Lower referenced cohesive or formation energies per atom receive larger
+    weights. The scaling is normalized to the training-split energy range so
+    the policy remains stable across small and large datasets.
+    """
+    if not hasattr(dataset, "get_structure"):
+        raise TypeError(
+            "sampling_policy='energy_weighted' requires a dataset exposing "
+            "get_structure(idx)."
+        )
+
+    per_atom_energies = [
+        _cohesive_energy_per_atom_for_sampling(
+            dataset.get_structure(idx),  # type: ignore[attr-defined]
+            atomic_energies=atomic_energies,
+        )
+        for idx in range(len(dataset))
+    ]
+
+    if not per_atom_energies:
+        raise ValueError(
+            "sampling_policy='energy_weighted' requires at least one "
+            "training structure."
+        )
+
+    min_energy = min(per_atom_energies)
+    deltas = [energy - min_energy for energy in per_atom_energies]
+    max_delta = max(deltas)
+    if max_delta <= 0.0:
+        return torch.ones(len(per_atom_energies), dtype=torch.double)
+
+    weights = [
+        1.0 / (1.0 + (delta / max_delta))
+        for delta in deltas
+    ]
+    return torch.tensor(weights, dtype=torch.double)
+
+
+def _compute_error_sampling_weights(
+    scores: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Convert non-negative structure scores into positive sampling weights.
+
+    The resulting weights are proportional to the most recent structure
+    scores and normalized to unit mean so epoch length remains unchanged
+    while higher-loss structures are drawn more often.
+    """
+    if scores.numel() == 0:
+        raise ValueError(
+            "sampling_policy='error_weighted' requires at least one "
+            "training structure."
+        )
+
+    weights = scores.detach().to(dtype=torch.double, device="cpu").clone()
+    invalid = ~torch.isfinite(weights)
+    if torch.any(invalid):
+        weights[invalid] = 0.0
+    weights.clamp_(min=0.0)
+
+    if torch.count_nonzero(weights) == 0:
+        return torch.ones_like(weights, dtype=torch.double)
+
+    weights.clamp_(min=1e-12)
+    mean_weight = float(weights.mean().item())
+    if not math.isfinite(mean_weight) or mean_weight <= 0.0:
+        return torch.ones_like(weights, dtype=torch.double)
+    return weights / mean_weight
+
+
+class _ErrorWeightedSamplingState:
+    """Mutable trainer-owned state for adaptive error-weighted sampling."""
+
+    def __init__(self, num_structures: int) -> None:
+        if num_structures <= 0:
+            raise ValueError(
+                "sampling_policy='error_weighted' requires at least one "
+                "training structure."
+            )
+        self.scores = torch.ones(num_structures, dtype=torch.double)
+
+    def current_weights(self) -> torch.Tensor:
+        """Return the current normalized sampling weights."""
+        return _compute_error_sampling_weights(self.scores)
+
+    def update_from_epoch(
+        self,
+        structure_scores: dict[int, float],
+    ) -> torch.Tensor:
+        """Update observed scores and return normalized sampler weights."""
+        for idx, score in structure_scores.items():
+            if idx < 0 or idx >= len(self.scores):
+                continue
+            try:
+                score_value = float(score)
+            except Exception:
+                continue
+            if not math.isfinite(score_value) or score_value < 0.0:
+                continue
+            self.scores[idx] = score_value
+        return self.current_weights()
+
+
+def _build_training_sampler(
+    dataset: Dataset,
+    *,
+    config: TorchTrainingConfig,
+    atomic_energies: Dict[str, float],
+) -> tuple[WeightedRandomSampler | None, _ErrorWeightedSamplingState | None]:
+    """Return the training sampler implied by ``config.sampling_policy``."""
+    sampling_policy = str(getattr(config, "sampling_policy", "uniform"))
+    if sampling_policy == "uniform":
+        return None, None
+    if sampling_policy == "energy_weighted":
+        weights = _compute_energy_sampling_weights(
+            dataset,
+            atomic_energies=atomic_energies,
+        )
+        return (
+            WeightedRandomSampler(
+                weights=weights,
+                num_samples=len(weights),
+                replacement=True,
+            ),
+            None,
+        )
+    if sampling_policy == "error_weighted":
+        adaptive_state = _ErrorWeightedSamplingState(len(dataset))
+        weights = adaptive_state.current_weights()
+        return (
+            WeightedRandomSampler(
+                weights=weights,
+                num_samples=len(weights),
+                replacement=True,
+            ),
+            adaptive_state,
+        )
+    raise ValueError(
+        "sampling_policy must be 'uniform', 'energy_weighted', or "
+        "'error_weighted', "
+        f"got '{sampling_policy}'"
+    )
 
 
 class _RuntimeCacheState:
@@ -379,7 +562,7 @@ class _TrainingPolicyDataset(Dataset):
         source_idx = self._source_index(idx)
         struct = self._root_dataset.get_structure(source_idx)
         use_forces = self.should_use_forces(source_idx, struct.has_forces())
-        return self._root_dataset.materialize_sample(
+        sample = self._root_dataset.materialize_sample(
             source_idx,
             use_forces=use_forces,
             cache_state=self._cache_state,
@@ -388,6 +571,9 @@ class _TrainingPolicyDataset(Dataset):
             cache_force_triplets=self.cache_force_triplets,
             load_local_derivatives=use_forces,
         )
+        sample["sample_index"] = int(idx)
+        sample["source_index"] = int(source_idx)
+        return sample
 
     def materialize_uncached_sample(self, idx: int) -> dict:
         """
@@ -400,7 +586,7 @@ class _TrainingPolicyDataset(Dataset):
         source_idx = self._source_index(idx)
         struct = self._root_dataset.get_structure(source_idx)
         use_forces = self.should_use_forces(source_idx, struct.has_forces())
-        return self._root_dataset.materialize_sample(
+        sample = self._root_dataset.materialize_sample(
             source_idx,
             use_forces=use_forces,
             cache_state=None,
@@ -409,6 +595,9 @@ class _TrainingPolicyDataset(Dataset):
             cache_force_triplets=False,
             load_local_derivatives=use_forces,
         )
+        sample["sample_index"] = int(idx)
+        sample["source_index"] = int(source_idx)
+        return sample
 
 
 def _find_hdf5_root_datasets(dataset: Optional[Dataset]) -> list[HDF5StructureDataset]:
@@ -601,6 +790,7 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     species_idx_list: List[torch.Tensor] = []
     n_atoms_list: List[int] = []
     energy_ref_list: List[float] = []
+    sample_index_list: List[int] = []
 
     # For optional force view
     features_f_list: List[torch.Tensor] = []
@@ -608,6 +798,8 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     species_f_names: List[str] = []
     species_idx_f_list: List[torch.Tensor] = []
     forces_f_list: List[torch.Tensor] = []
+    force_sample_index_list: List[int] = []
+    force_n_atoms_list: List[int] = []
     radial_center_parts: List[torch.Tensor] = []
     radial_neighbor_parts: List[torch.Tensor] = []
     radial_grads_parts: List[torch.Tensor] = []
@@ -643,6 +835,7 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         species_idx_list.append(sample["species_indices"])
         n_atoms_list.append(N)
         energy_ref_list.append(float(sample["energy"]))
+        sample_index_list.append(int(sample.get("sample_index", -1)))
         # Count atoms from structures that have force labels
         # (regardless of selection)
         if bool(sample.get("has_forces", False)):
@@ -658,6 +851,7 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
     )
     n_atoms = torch.tensor(n_atoms_list, dtype=torch.long)
     energy_ref = torch.tensor(energy_ref_list, dtype=features.dtype)
+    sample_indices = torch.tensor(sample_index_list, dtype=torch.long)
 
     # Build force-view if any sample is selected for forces
     for sample in batch:
@@ -675,6 +869,8 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         forces_f_list.append(frc)
         species_idx_f_list.append(species_idx)
         species_f_names.extend(species_names)
+        force_sample_index_list.append(int(sample.get("sample_index", -1)))
+        force_n_atoms_list.append(int(pos.shape[0]))
 
         local_derivatives = sample.get("local_derivatives", None)
         if local_derivatives is None:
@@ -828,12 +1024,21 @@ def _collate_fn(batch: List[dict]) -> Dict[str, Any]:
         "species_indices": species_indices,
         "n_atoms": n_atoms,
         "energy_ref": energy_ref,
+        "sample_indices": sample_indices,
         # Force view
         "features_f": features_f,
         "positions_f": positions_f,
         "species_f": species_f_names if force_view_present else None,
         "species_indices_f": species_indices_f,
         "forces_ref_f": forces_ref_f,
+        "force_sample_indices": (
+            torch.tensor(force_sample_index_list, dtype=torch.long)
+            if force_view_present else None
+        ),
+        "force_sample_n_atoms": (
+            torch.tensor(force_n_atoms_list, dtype=torch.long)
+            if force_view_present else None
+        ),
         "local_derivatives_f": local_derivatives_f,
         "graph_f": graph_f,
         "triplets_f": triplets_f,
@@ -1271,8 +1476,10 @@ class TorchANNPotential:
             warnings.warn(
                 "No atomic_energies provided. Training on total energies "
                 "(all atomic reference energies set to 0.0). For cohesive "
-                "energy training, provide atomic reference energies in "
-                "config.atomic_energies.",
+                "or explicit formation-energy training, provide atomic "
+                "reference energies in config.atomic_energies. If your "
+                "labels already include an external user-defined reference, "
+                "this zero-reference fallback preserves those semantics.",
                 UserWarning
             )
             self._atomic_energies = atomic_energies_dict
@@ -1466,10 +1673,19 @@ class TorchANNPotential:
             train_dl_kwargs.update(dict(num_workers=0))
             eval_dl_kwargs.update(dict(num_workers=0))
 
+        train_sampler, adaptive_sampling_state = _build_training_sampler(
+            train_ds,
+            config=config,
+            atomic_energies=atomic_energies_dict,
+        )
+        train_shuffle = train_sampler is None
+        if train_sampler is not None:
+            train_dl_kwargs["sampler"] = train_sampler
+
         train_loader = DataLoader(
             train_ds,
             batch_size=batch_size,
-            shuffle=True,
+            shuffle=train_shuffle,
             collate_fn=_collate_fn,
             **train_dl_kwargs,
         )
@@ -1626,6 +1842,10 @@ class TorchANNPotential:
             if show_progress and tqdm is not None
             else None
         )
+        adaptive_error_sampling = (
+            str(getattr(config, "sampling_policy", "uniform"))
+            == "error_weighted"
+        )
 
         for epoch in range(start_epoch, end_epoch):
             t0 = time.time()
@@ -1646,7 +1866,7 @@ class TorchANNPotential:
 
             # Train one epoch
             (train_energy_rmse, train_energy_mae,
-             train_force_rmse, train_timing
+             train_force_rmse, train_timing, train_structure_scores
              ) = training_loop.run_epoch(
                 loader=train_loader,
                 optimizer=optimizer,
@@ -1656,7 +1876,17 @@ class TorchANNPotential:
                 show_batch_progress=show_batch,
                 force_scale_unbiased=bool(
                     getattr(config, "force_scale_unbiased", False)),
+                collect_structure_scores=adaptive_error_sampling,
             )
+            if (
+                adaptive_error_sampling
+                and adaptive_sampling_state is not None
+                and train_sampler is not None
+                and train_structure_scores is not None
+            ):
+                train_sampler.weights = adaptive_sampling_state.update_from_epoch(
+                    train_structure_scores
+                )
 
             # Validation
             val_energy_rmse = float("nan")
@@ -1665,6 +1895,7 @@ class TorchANNPotential:
             val_timing = {}
             if test_loader is not None:
                 (val_energy_rmse, val_energy_mae, val_force_rmse, val_timing
+                 , _
                  ) = training_loop.run_epoch(
                     loader=test_loader,
                     optimizer=None,
@@ -1674,6 +1905,7 @@ class TorchANNPotential:
                     show_batch_progress=False,
                     force_scale_unbiased=bool(
                         getattr(config, "force_scale_unbiased", False)),
+                    collect_structure_scores=False,
                 )
 
                 # Compute validation loss for monitoring

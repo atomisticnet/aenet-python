@@ -148,6 +148,7 @@ class TestTorchTrainingConfig:
         assert config.testpercent == 10
         assert config.force_weight == 0.0
         assert config.force_fraction == 1.0
+        assert config.sampling_policy == 'uniform'
         assert config.force_sampling == 'random'
         assert config.cache_feature_max_entries == 1024
         assert config.cache_neighbor_max_entries == 512
@@ -165,6 +166,7 @@ class TestTorchTrainingConfig:
             testpercent=20,
             force_weight=0.5,
             force_fraction=0.8,
+            sampling_policy='error_weighted',
             force_sampling='fixed',
             cache_feature_max_entries=32,
             cache_neighbors=True,
@@ -179,6 +181,7 @@ class TestTorchTrainingConfig:
         assert config.testpercent == 20
         assert config.force_weight == 0.5
         assert config.force_fraction == 0.8
+        assert config.sampling_policy == 'error_weighted'
         assert config.force_sampling == 'fixed'
         assert config.cache_feature_max_entries == 32
         assert config.cache_neighbors is True
@@ -222,6 +225,11 @@ class TestTorchTrainingConfig:
         """Test validation of force_sampling."""
         with pytest.raises(ValueError, match="force_sampling must be"):
             TorchTrainingConfig(force_sampling='invalid')
+
+    def test_invalid_sampling_policy(self):
+        """Test validation of sampling_policy."""
+        with pytest.raises(ValueError, match="sampling_policy must be"):
+            TorchTrainingConfig(sampling_policy='invalid')
 
     def test_invalid_memory_mode(self):
         """Test validation of memory_mode."""

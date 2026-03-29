@@ -221,6 +221,37 @@ def test_force_training_full_fraction(tmp_path: Path):
 
 
 @pytest.mark.cpu
+def test_force_training_error_weighted_sampling_produces_valid_rmse():
+    """Adaptive error weighting should remain compatible with force training."""
+    structures = make_structures_with_forces(n_structures=8, n_atoms=3)
+    descriptor = make_descriptor(dtype=torch.float64)
+    arch = make_arch(descriptor)
+
+    pot = TorchANNPotential(arch=arch, descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=2,
+        testpercent=0,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        sampling_policy="error_weighted",
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(structures=structures, config=cfg)
+
+    assert "RMSE_force_train" in result.errors.columns
+    for idx in range(len(result.errors)):
+        force_rmse = result.errors["RMSE_force_train"].iloc[idx]
+        assert not math.isnan(force_rmse)
+        assert force_rmse > 0
+
+
+@pytest.mark.cpu
 def test_force_training_with_resampling(tmp_path: Path):
     """
     Test force training with periodic resampling.

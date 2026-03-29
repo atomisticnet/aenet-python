@@ -86,7 +86,8 @@ class TrainingLoop:
         train: bool = True,
         show_batch_progress: bool = False,
         force_scale_unbiased: bool = False,
-    ) -> Tuple[float, float, float, Dict[str, float]]:
+        collect_structure_scores: bool = False,
+    ) -> Tuple[float, float, float, Dict[str, float], Optional[dict[int, float]]]:
         """
         Run one epoch over loader.
 
@@ -111,6 +112,9 @@ class TrainingLoop:
             force RMSE, where f is the supervised fraction of atoms
             with available force labels. This approximates constant
             loss magnitude when sub-sampling forces.
+        collect_structure_scores : bool
+            If True, accumulate per-structure loss scores for adaptive
+            sampling updates.
 
         Returns
         -------
@@ -123,10 +127,15 @@ class TrainingLoop:
         timing : dict
             Timing breakdown with keys: 'data_loading', 'loss_computation',
             'optimizer', 'total'.
+        structure_scores : dict[int, float] or None
+            Per-structure mean scores keyed by split-local dataset index.
+            Returned only when ``collect_structure_scores=True``.
         """
         energy_losses: List[float] = []
         energy_maes: List[float] = []
         force_losses: List[float] = []
+        structure_score_sums: dict[int, float] = {}
+        structure_score_counts: dict[int, int] = {}
 
         forward_time_total: float = 0.0
         backward_time_total: float = 0.0
@@ -200,9 +209,13 @@ class TrainingLoop:
             # Compute MAE (per atom)
             energy_mae_t = torch.mean(
                 torch.abs((energy_pred - energy_ref) / n_atoms))
+            energy_error_per_structure = torch.abs(
+                (energy_pred - energy_ref) / n_atoms
+            )
 
             # Optional force loss
             force_loss_t: Optional[torch.Tensor] = None
+            force_error_by_structure: dict[int, float] = {}
             if alpha > 0.0 and batch["positions_f"] is not None:
                 features_f = batch.get("features_f", None)
                 positions_f = batch["positions_f"].to(self.device)
@@ -229,7 +242,7 @@ class TrainingLoop:
                     positions_f = positions_f.float()
                     forces_ref_f = forces_ref_f.float()
 
-                force_loss_t, _ = compute_force_loss(
+                force_loss_t, forces_pred = compute_force_loss(
                     positions=positions_f,
                     species=species_f,
                     forces_ref=forces_ref_f,
@@ -265,6 +278,7 @@ class TrainingLoop:
                 # Optional unbiased scaling of RMSE based on
                 # supervised fraction
                 if force_scale_unbiased:
+                    force_score_scale = 1.0
                     try:
                         eff_total = int(batch.get("n_atoms_force_total", 0))
                         eff_supervised = int(
@@ -280,9 +294,38 @@ class TrainingLoop:
                                 # Approximate scaling for RMSE (MSE would
                                 # not require scaling)
                                 force_loss_t = force_loss_t / torch.sqrt(scale)
+                                force_score_scale = float(
+                                    1.0 / torch.sqrt(scale).detach().cpu()
+                                )
                     except Exception:
                         # If bookkeeping not present, skip scaling
                         pass
+                else:
+                    force_score_scale = 1.0
+
+                if collect_structure_scores:
+                    force_sample_indices = batch.get("force_sample_indices", None)
+                    force_sample_n_atoms = batch.get("force_sample_n_atoms", None)
+                    if force_sample_indices is not None and force_sample_n_atoms is not None:
+                        diff_force = forces_pred - forces_ref_f
+                        offset = 0
+                        for sample_idx_t, n_atoms_t in zip(
+                            force_sample_indices.tolist(),
+                            force_sample_n_atoms.tolist(),
+                            strict=True,
+                        ):
+                            n_force_atoms = int(n_atoms_t)
+                            if n_force_atoms <= 0:
+                                continue
+                            stop = offset + n_force_atoms
+                            per_structure_diff = diff_force[offset:stop]
+                            offset = stop
+                            score = torch.sqrt(
+                                torch.mean(per_structure_diff**2)
+                            )
+                            force_error_by_structure[int(sample_idx_t)] = float(
+                                score.detach().cpu() * force_score_scale
+                            )
 
             # Combine losses
             if force_loss_t is None:
@@ -313,6 +356,28 @@ class TrainingLoop:
             energy_maes.append(float(energy_mae_t.detach().cpu()))
             if force_loss_t is not None:
                 force_losses.append(float(force_loss_t.detach().cpu()))
+
+            if collect_structure_scores:
+                sample_indices = batch.get("sample_indices", None)
+                if sample_indices is not None:
+                    energy_scores = energy_error_per_structure.detach().cpu().tolist()
+                    for sample_idx, energy_score in zip(
+                        sample_indices.tolist(),
+                        energy_scores,
+                        strict=True,
+                    ):
+                        structure_score = (1.0 - alpha) * float(energy_score)
+                        if int(sample_idx) in force_error_by_structure:
+                            structure_score += (
+                                alpha * force_error_by_structure[int(sample_idx)]
+                            )
+                        idx = int(sample_idx)
+                        structure_score_sums[idx] = (
+                            structure_score_sums.get(idx, 0.0) + structure_score
+                        )
+                        structure_score_counts[idx] = (
+                            structure_score_counts.get(idx, 0) + 1
+                        )
 
             # Prepare for next batch
             t_batch_start = time.perf_counter()
@@ -346,4 +411,14 @@ class TrainingLoop:
             "total": t_epoch_end - t_epoch_start,
         }
 
-        return energy_rmse, energy_mae, force_rmse, timing
+        structure_scores = None
+        if collect_structure_scores:
+            structure_scores = {
+                idx: (
+                    structure_score_sums[idx]
+                    / max(1, structure_score_counts.get(idx, 0))
+                )
+                for idx in structure_score_sums
+            }
+
+        return energy_rmse, energy_mae, force_rmse, timing, structure_scores

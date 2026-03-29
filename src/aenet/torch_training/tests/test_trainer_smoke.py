@@ -19,7 +19,11 @@ from aenet.torch_training import (
 )
 from aenet.torch_training.dataset import StructureDataset
 from aenet.torch_training.sources import RecordSourceCollection, SourceRecord
-from aenet.torch_training.trainer import _TrainingPolicyDataset
+from aenet.torch_training.trainer import (
+    _compute_energy_sampling_weights,
+    _compute_error_sampling_weights,
+    _TrainingPolicyDataset,
+)
 
 
 def make_simple_structures_H_two():
@@ -901,6 +905,103 @@ class _StopAfterLoaderConfig(RuntimeError):
 
 
 @pytest.mark.cpu
+def test_energy_sampling_weights_use_referenced_per_atom_energies():
+    """Energy weighting should follow referenced per-atom semantics."""
+
+    class _EnergyDataset:
+        def __init__(self, structures):
+            self._structures = list(structures)
+
+        def __len__(self):
+            return len(self._structures)
+
+        def get_structure(self, idx):
+            return self._structures[idx]
+
+    structures = [
+        Structure(
+            positions=np.array([[0.0, 0.0, 0.0]], dtype=np.float64),
+            species=["H"],
+            energy=-1.2,
+        ),
+        Structure(
+            positions=np.array(
+                [[0.0, 0.0, 0.0], [0.8, 0.0, 0.0]],
+                dtype=np.float64,
+            ),
+            species=["H", "H"],
+            energy=-2.0,
+        ),
+    ]
+
+    weights = _compute_energy_sampling_weights(
+        _EnergyDataset(structures),
+        atomic_energies={"H": -1.0},
+    )
+
+    assert weights[0].item() > weights[1].item()
+
+
+@pytest.mark.cpu
+def test_energy_sampling_weights_become_uniform_for_identical_values():
+    """Repeated referenced energies should produce unit weights."""
+
+    class _EnergyDataset:
+        def __init__(self, structures):
+            self._structures = list(structures)
+
+        def __len__(self):
+            return len(self._structures)
+
+        def get_structure(self, idx):
+            return self._structures[idx]
+
+    structures = [
+        Structure(
+            positions=np.array([[0.0, 0.0, 0.0]], dtype=np.float64),
+            species=["H"],
+            energy=-1.0,
+        ),
+        Structure(
+            positions=np.array([[0.2, 0.0, 0.0]], dtype=np.float64),
+            species=["H"],
+            energy=-1.0,
+        ),
+    ]
+
+    weights = _compute_energy_sampling_weights(
+        _EnergyDataset(structures),
+        atomic_energies={"H": -1.0},
+    )
+
+    assert torch.allclose(weights, torch.ones(2, dtype=torch.double))
+
+
+@pytest.mark.cpu
+def test_error_sampling_weights_are_normalized_and_positive():
+    """Adaptive scores should become positive unit-mean sampling weights."""
+    weights = _compute_error_sampling_weights(
+        torch.tensor([4.0, 1.0], dtype=torch.double)
+    )
+
+    assert torch.allclose(
+        weights,
+        torch.tensor([1.6, 0.4], dtype=torch.double),
+    )
+    assert weights.mean().item() == pytest.approx(1.0)
+
+
+@pytest.mark.cpu
+def test_error_sampling_weights_fall_back_to_uniform_for_zero_scores():
+    """Degenerate zero scores should not collapse sampling."""
+    weights = _compute_error_sampling_weights(
+        torch.zeros(3, dtype=torch.double)
+    )
+
+    assert torch.allclose(weights, torch.ones(3, dtype=torch.double))
+
+
+@pytest.mark.cpu
 def test_find_hdf5_root_datasets_walks_policy_and_subset_wrappers(
     tmp_path: Path,
 ):
@@ -1099,6 +1200,193 @@ def test_fixed_or_static_force_sampling_keeps_persistent_train_workers(
     assert records[0]["num_workers"] == 2
     assert records[0]["persistent_workers"] is True
     assert callable(records[0]["worker_init_fn"])
+
+
+@pytest.mark.cpu
+def test_energy_weighted_sampling_uses_sampler_not_shuffle(monkeypatch):
+    """Energy-weighted training should switch to a sampler-based loader."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.raises(_StopAfterLoaderConfig):
+        pot.train(
+            structures=make_simple_structures_H_many(n_structures=6),
+            config=cfg,
+        )
+
+    assert len(records) == 1
+    assert records[0]["shuffle"] is False
+    sampler = records[0]["sampler"]
+    assert isinstance(sampler, torch.utils.data.WeightedRandomSampler)
+    assert sampler.num_samples == 6
+
+
+@pytest.mark.cpu
+def test_energy_weighted_sampling_warns_and_falls_back_to_zero_references(
+    monkeypatch,
+):
+    """Missing atomic energies should warn but still build the sampler."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="energy_weighted",
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(
+        UserWarning,
+        match="No atomic_energies provided",
+    ):
+        with pytest.raises(_StopAfterLoaderConfig):
+            pot.train(
+                structures=make_simple_structures_H_many(n_structures=4),
+                config=cfg,
+            )
+
+    assert len(records) == 1
+    assert isinstance(
+        records[0]["sampler"],
+        torch.utils.data.WeightedRandomSampler,
+    )
+
+
+@pytest.mark.cpu
+def test_error_weighted_sampling_uses_sampler_not_shuffle(monkeypatch):
+    """Adaptive error-weighted sampling should use replacement sampling."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="error_weighted",
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(UserWarning, match="No atomic_energies provided"):
+        with pytest.raises(_StopAfterLoaderConfig):
+            pot.train(
+                structures=make_simple_structures_H_many(n_structures=6),
+                config=cfg,
+            )
+
+    assert len(records) == 1
+    assert records[0]["shuffle"] is False
+    sampler = records[0]["sampler"]
+    assert isinstance(sampler, torch.utils.data.WeightedRandomSampler)
+    assert torch.allclose(
+        sampler.weights.to(torch.double),
+        torch.ones(6, dtype=torch.double),
+    )
+
+
+@pytest.mark.cpu
+def test_error_weighted_sampling_bootstraps_uniform_then_updates(monkeypatch):
+    """Epoch 0 should be uniform, then later epochs use observed scores."""
+    observed_weights = []
+
+    class _FakeTrainingLoop:
+        def __init__(self, *args, **kwargs):
+            self.last_forward_time = 0.0
+            self.last_backward_time = 0.0
+            self.last_data_loading_time = 0.0
+            self.last_loss_computation_time = 0.0
+            self.last_optimizer_time = 0.0
+
+        def run_epoch(
+            self,
+            loader,
+            optimizer,
+            alpha,
+            atomic_energies_by_index=None,
+            train=True,
+            show_batch_progress=False,
+            force_scale_unbiased=False,
+            collect_structure_scores=False,
+        ):
+            if train:
+                observed_weights.append(loader.sampler.weights.clone())
+                return 0.0, 0.0, float("nan"), {}, {0: 4.0, 1: 1.0}
+            return 0.0, 0.0, float("nan"), {}, None
+
+    monkeypatch.setattr(trainer_module, "TrainingLoop", _FakeTrainingLoop)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=2,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="error_weighted",
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.warns(UserWarning, match="No atomic_energies provided"):
+        pot.train(
+            structures=make_simple_structures_H_two(),
+            config=cfg,
+        )
+
+    assert len(observed_weights) == 2
+    assert torch.allclose(
+        observed_weights[0].to(torch.double),
+        torch.ones(2, dtype=torch.double),
+    )
+    assert torch.allclose(
+        observed_weights[1].to(torch.double),
+        torch.tensor([1.6, 0.4], dtype=torch.double),
+    )
 
 
 @pytest.mark.cpu

@@ -269,6 +269,17 @@ class TorchTrainingConfig:
     force_fraction : float, optional
         Fraction of structures to use for force training (0.0-1.0).
         Default: 1.0 (all structures with forces)
+    sampling_policy : {'uniform', 'energy_weighted', 'error_weighted'}, optional
+        Structure-level sampling policy for the training split.
+        ``'uniform'`` preserves standard shuffled batching.
+        ``'energy_weighted'`` biases training-split sampling toward lower
+        cohesive or referenced formation energy per atom, as defined by
+        ``atomic_energies``. If ``atomic_energies`` is not provided, the
+        implementation falls back to all-zero atomic references and therefore
+        uses the provided per-atom labels as-is. ``'error_weighted'`` starts
+        from uniform sampling in epoch 0 and then updates structure sampling
+        weights between epochs based on the most recent observed per-structure
+        training loss. Default: 'uniform'
     force_sampling : str, optional
         Force sampling strategy: 'random' (resample periodically) or 'fixed'
         (fixed subset). Default: 'random'
@@ -363,6 +374,9 @@ class TorchTrainingConfig:
     testpercent: int = 10
     force_weight: float = 0.0
     force_fraction: float = 1.0
+    sampling_policy: Literal[
+        'uniform', 'energy_weighted', 'error_weighted'
+    ] = 'uniform'
     force_sampling: Literal['random', 'fixed'] = 'random'
     # Force subsampling controls
     force_resample_num_epochs: int = 0
@@ -487,6 +501,15 @@ class TorchTrainingConfig:
             raise ValueError(
                 f"force_sampling must be 'random' or 'fixed', "
                 f"got '{self.force_sampling}'"
+            )
+
+        if self.sampling_policy not in [
+            'uniform', 'energy_weighted', 'error_weighted'
+        ]:
+            raise ValueError(
+                "sampling_policy must be 'uniform', 'energy_weighted', or "
+                "'error_weighted', "
+                f"got '{self.sampling_policy}'"
             )
 
         # Validate force_min_structures_per_epoch
