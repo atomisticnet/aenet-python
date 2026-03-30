@@ -2087,6 +2087,72 @@ class TorchANNPotential:
         if pbar is not None:
             pbar.close()
 
+        if n_epochs > 0:
+            final_train_loader = DataLoader(
+                train_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=_collate_fn,
+                **eval_dl_kwargs,
+            )
+            (
+                final_train_energy_rmse,
+                final_train_energy_mae,
+                final_train_force_rmse,
+                _,
+                _,
+            ) = training_loop.run_epoch(
+                loader=final_train_loader,
+                optimizer=None,
+                alpha=alpha,
+                atomic_energies_by_index=atomic_energies_by_index,
+                train=False,
+                show_batch_progress=False,
+                force_scale_unbiased=bool(
+                    getattr(config, "force_scale_unbiased", False)
+                ),
+                collect_structure_scores=False,
+            )
+
+            final_test_energy_rmse = float("nan")
+            final_test_energy_mae = float("nan")
+            final_test_force_rmse = float("nan")
+            if test_ds is not None:
+                final_test_loader = DataLoader(
+                    test_ds,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    collate_fn=_collate_fn,
+                    **eval_dl_kwargs,
+                )
+                (
+                    final_test_energy_rmse,
+                    final_test_energy_mae,
+                    final_test_force_rmse,
+                    _,
+                    _,
+                ) = training_loop.run_epoch(
+                    loader=final_test_loader,
+                    optimizer=None,
+                    alpha=alpha,
+                    atomic_energies_by_index=atomic_energies_by_index,
+                    train=False,
+                    show_batch_progress=False,
+                    force_scale_unbiased=bool(
+                        getattr(config, "force_scale_unbiased", False)
+                    ),
+                    collect_structure_scores=False,
+                )
+
+            self._metrics.replace_latest(
+                train_energy_rmse=float(final_train_energy_rmse),
+                train_energy_mae=float(final_train_energy_mae),
+                train_force_rmse=float(final_train_force_rmse),
+                test_energy_rmse=float(final_test_energy_rmse),
+                test_energy_mae=float(final_test_energy_mae),
+                test_force_rmse=float(final_test_force_rmse),
+            )
+
         # Store optimizer and config for later saving
         self._optimizer = optimizer
         self._training_config = config

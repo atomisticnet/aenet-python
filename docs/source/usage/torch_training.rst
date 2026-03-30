@@ -185,12 +185,55 @@ sampling toward lower cohesive or referenced formation energy per atom:
    >>> config.sampling_policy
    'energy_weighted'
 
-When ``atomic_energies`` is provided, the weighting uses the referenced
-cohesive or formation energy per atom implied by those atomic reference
-energies. When ``atomic_energies`` is omitted, training still proceeds with
-all-zero atomic references; in that case, the energy-weighted policy uses the
-provided per-atom labels as-is and emits a warning so the fallback is
-explicit.
+The weighting always uses the same atomic-reference convention as the
+training targets. When the trainer builds datasets from raw
+``structures=...`` input, that convention comes from
+``TorchTrainingConfig.atomic_energies``. When you pass a prebuilt dataset,
+the dataset owns ``atomic_energies`` and the trainer uses those instead.
+If no atomic references are provided in either path, training still proceeds
+with all-zero atomic references; in that case, the energy-weighted policy
+uses the provided per-atom labels as-is and emits a warning so the fallback
+is explicit.
+
+The exact per-draw sampling probability is determined as follows for a
+training split with ``N`` structures. For structure ``i``:
+
+.. math::
+
+   e_i = \frac{E_i - \sum_{a \in i} E^{\mathrm{atom}}_a}{n_i}
+
+where ``E_i`` is the stored total energy, ``E^{atom}_a`` comes from the
+resolved atomic-reference convention, and ``n_i`` is the atom count. Then:
+
+.. math::
+
+   \Delta_i = e_i - \min_j e_j
+
+.. math::
+
+   \Delta_{\max} = \max_j \Delta_j
+
+If ``\Delta_max <= 0``, all structures receive equal weight:
+
+.. math::
+
+   w_i = 1
+
+Otherwise:
+
+.. math::
+
+   w_i = \frac{1}{1 + \Delta_i / \Delta_{\max}}
+
+The trainer draws with replacement using ``num_samples = N`` per epoch, so
+the probability that a single draw selects structure ``i`` is:
+
+.. math::
+
+   p_i = \frac{w_i}{\sum_j w_j}
+
+This is the full implementation. Lower referenced per-atom energy means
+larger ``w_i`` and therefore larger sampling probability ``p_i``.
 
 The adaptive non-uniform option ``sampling_policy="error_weighted"`` starts
 with uniform epoch-0 sampling and then increases the sampling frequency of
@@ -200,7 +243,6 @@ structures with higher recently observed training loss:
 
    >>> config = TorchTrainingConfig(
    ...     sampling_policy="error_weighted",
-   ...     atomic_energies={"H": 0.0},
    ... )
    >>> config.sampling_policy
    'error_weighted'
@@ -212,6 +254,12 @@ Its behavior is:
 * After each training epoch, the trainer computes a structure-level score
   from the sampled training structures and normalizes the next epoch's
   weights so the mean weight is 1.
+* Those structure-level scores are measured in the same training target space
+  used for the energy loss. If training uses referenced cohesive or formation
+  energies, adaptive sampling uses the same references; if training uses raw
+  total energies, adaptive sampling follows that convention instead.
+* Force losses do not contribute to these adaptive structure scores, even
+  during force training. ``error_weighted`` always uses energy error only.
 * If a structure is sampled multiple times in an epoch, its next score uses
   the mean of those sampled occurrences.
 * If a structure is not sampled in an epoch, it keeps its previous score.
@@ -221,11 +269,68 @@ Its behavior is:
 
 The structure-level score used by ``error_weighted`` is:
 
-* energy-only training: absolute energy error per atom for that structure
-* mixed energy/force training: ``(1 - force_weight) * energy_error_per_atom +
-  force_weight * force_rmse_structure`` for force-supervised structures
-* structures that are not force-supervised in a given epoch contribute only
-  their energy-error component in that epoch
+* all training modes: absolute energy error per atom for that structure
+* force-training settings such as ``force_weight``, ``force_fraction``, and
+  ``force_sampling`` do not change the adaptive structure score definition
+
+The exact adaptive-sampling update is:
+
+1. Epoch 0 starts with uniform structure scores:
+
+   .. math::
+
+      s_i^{(0)} = 1
+
+2. After epoch ``t``, each sampled structure gets an observed score
+   ``\hat{s}_i^{(t)}`` equal to the mean absolute energy error per atom of
+   that structure's sampled occurrences during the epoch. If a structure is
+   not sampled in epoch
+   ``t``, it keeps its previous score:
+
+   .. math::
+
+      s_i^{(t+1)} =
+      \begin{cases}
+      \hat{s}_i^{(t)} & \text{if structure } i \text{ was sampled in epoch } t \\
+      s_i^{(t)} & \text{otherwise}
+      \end{cases}
+
+3. The trainer converts scores into positive sampler weights by first
+   replacing non-finite values with ``0`` and clamping negative values to
+   ``0``:
+
+   .. math::
+
+      u_i = \max(0, s_i)
+
+4. If all ``u_i`` are zero, the sampler falls back to uniform weights:
+
+   .. math::
+
+      w_i = 1
+
+5. Otherwise, the trainer clamps each nonzero weight to at least
+   ``10^{-12}`` and normalizes weights to unit mean:
+
+   .. math::
+
+      \tilde{u}_i = \max(u_i, 10^{-12})
+
+   .. math::
+
+      w_i = \frac{\tilde{u}_i}{\frac{1}{N}\sum_j \tilde{u}_j}
+
+6. As with ``energy_weighted``, sampling is with replacement and
+   ``num_samples = N`` per epoch, so each individual draw uses:
+
+   .. math::
+
+      p_i = \frac{w_i}{\sum_j w_j}
+
+Because dividing by the mean does not change normalized probabilities,
+``error_weighted`` is equivalent to drawing with probability proportional to
+the latest clamped per-structure score. The unit-mean normalization only
+keeps the raw weight magnitudes numerically well scaled.
 
 For both non-uniform policies, ``force_sampling`` remains a separate control.
 It determines whether a sampled force-labeled structure contributes force
@@ -794,7 +899,14 @@ Output & Diagnostics
    Enable detailed timing output for performance profiling.
 
 **show_progress** : bool (default: True)
-   Display epoch-level progress bar.
+   Display epoch-level progress bar. The reported training errors depend on
+   the active sampling strategy: with ``sampling_policy="uniform"``, the
+   epoch training error is computed from one full pass over the training
+   split without replacement; with non-uniform sampling, the displayed
+   training error is computed from that epoch's sampled-with-replacement
+   training draws and may therefore include repeated structures and omit
+   others. The final metrics returned by ``train()`` are recomputed
+   afterwards from a deterministic full pass over the train/test splits.
 
 **show_batch_progress** : bool (default: False)
    Display batch-level progress bar within each epoch. Verbose for large

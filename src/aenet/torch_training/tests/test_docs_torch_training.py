@@ -147,10 +147,7 @@ def test_sampling_policy_docs_example():
         sampling_policy="energy_weighted",
         atomic_energies={"H": 0.0},
     )
-    adaptive_cfg = TorchTrainingConfig(
-        sampling_policy="error_weighted",
-        atomic_energies={"H": 0.0},
-    )
+    adaptive_cfg = TorchTrainingConfig(sampling_policy="error_weighted")
 
     assert uniform_cfg.sampling_policy == "uniform"
     assert weighted_cfg.sampling_policy == "energy_weighted"

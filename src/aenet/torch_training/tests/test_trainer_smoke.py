@@ -1581,6 +1581,117 @@ def test_error_weighted_sampling_bootstraps_uniform_then_updates(monkeypatch):
 
 
 @pytest.mark.cpu
+def test_final_reported_training_metrics_use_full_pass_evaluation(monkeypatch):
+    """Final returned training metrics should come from a full unique pass."""
+
+    class _FakeTrainingLoop:
+        def __init__(self, *args, **kwargs):
+            self.last_forward_time = 0.0
+            self.last_backward_time = 0.0
+            self.last_data_loading_time = 0.0
+            self.last_loss_computation_time = 0.0
+            self.last_optimizer_time = 0.0
+
+        def run_epoch(
+            self,
+            loader,
+            optimizer,
+            alpha,
+            atomic_energies_by_index=None,
+            train=True,
+            show_batch_progress=False,
+            force_scale_unbiased=False,
+            collect_structure_scores=False,
+        ):
+            sampler = loader.sampler
+            if (
+                train
+                and isinstance(sampler, torch.utils.data.WeightedRandomSampler)
+            ):
+                return 9.0, 8.0, float("nan"), {}, None
+            if (
+                not train
+                and not isinstance(
+                    sampler, torch.utils.data.WeightedRandomSampler
+                )
+            ):
+                return 1.5, 1.25, float("nan"), {}, None
+            raise AssertionError("unexpected loader path in fake training loop")
+
+    monkeypatch.setattr(trainer_module, "TrainingLoop", _FakeTrainingLoop)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="energy_weighted",
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    result = pot.train(
+        structures=make_simple_structures_H_many(n_structures=4),
+        config=cfg,
+    )
+
+    assert len(result.errors) == 1
+    assert result.errors["RMSE_train"].iloc[-1] == pytest.approx(1.5)
+    assert result.errors["MAE_train"].iloc[-1] == pytest.approx(1.25)
+
+
+@pytest.mark.cpu
+def test_prebuilt_dataset_error_weighted_sampling_uses_dataset_atomic_energies(
+    monkeypatch,
+):
+    """Adaptive sampling should accept dataset-owned atomic references."""
+    records = []
+
+    def _record_train_loader(*args, **kwargs):
+        records.append(kwargs)
+        raise _StopAfterLoaderConfig
+
+    monkeypatch.setattr(trainer_module, "DataLoader", _record_train_loader)
+
+    descriptor = make_descriptor_H(dtype=torch.float64)
+    dataset = StructureDataset(
+        structures=make_simple_structures_H_many(n_structures=4),
+        descriptor=descriptor,
+        atomic_energies={"H": 0.0},
+    )
+    pot = TorchANNPotential(arch=make_arch_H(descriptor), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=0,
+        force_weight=0.0,
+        sampling_policy="error_weighted",
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        use_scheduler=False,
+        show_progress=False,
+    )
+
+    with pytest.raises(_StopAfterLoaderConfig):
+        pot.train(dataset=dataset, config=cfg)
+
+    assert len(records) == 1
+    assert records[0]["shuffle"] is False
+    assert isinstance(
+        records[0]["sampler"],
+        torch.utils.data.WeightedRandomSampler,
+    )
+
+
+@pytest.mark.cpu
 def test_cache_warmup_is_disabled_by_default(monkeypatch):
     """Stats collection should not prefill runtime caches by default."""
     structures = make_simple_structures_H_many(n_structures=4)

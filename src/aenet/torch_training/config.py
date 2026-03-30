@@ -273,13 +273,18 @@ class TorchTrainingConfig:
         Structure-level sampling policy for the training split.
         ``'uniform'`` preserves standard shuffled batching.
         ``'energy_weighted'`` biases training-split sampling toward lower
-        cohesive or referenced formation energy per atom, as defined by
-        ``atomic_energies``. If ``atomic_energies`` is not provided, the
-        implementation falls back to all-zero atomic references and therefore
-        uses the provided per-atom labels as-is. ``'error_weighted'`` starts
-        from uniform sampling in epoch 0 and then updates structure sampling
-        weights between epochs based on the most recent observed per-structure
-        training loss. Default: 'uniform'
+        cohesive or referenced formation energy per atom, using the same
+        atomic-reference convention as the training targets. For raw
+        ``structures=...`` inputs, that convention comes from
+        ``config.atomic_energies``. For prebuilt datasets, it comes from the
+        dataset-owned ``atomic_energies``. If no atomic references are
+        provided, the implementation falls back to all-zero atomic references
+        and therefore uses the provided per-atom labels as-is.
+        ``'error_weighted'`` starts from uniform sampling in epoch 0 and then
+        updates structure sampling weights between epochs based on the most
+        recent observed per-structure energy error per atom in that same
+        target space. Force losses do not affect adaptive structure weights.
+        Default: 'uniform'
     force_sampling : str, optional
         Force sampling strategy: 'random' (resample periodically) or 'fixed'
         (fixed subset). Default: 'random'

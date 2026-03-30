@@ -145,6 +145,51 @@ class MetricsTracker:
         """
         return self.history
 
+    def replace_latest(
+        self,
+        train_energy_rmse: float,
+        train_energy_mae: float,
+        train_force_rmse: float,
+        test_energy_rmse: float,
+        test_energy_mae: float,
+        test_force_rmse: float,
+    ) -> None:
+        """
+        Replace the latest stored metric values.
+
+        This is used when the trainer wants to recompute final epoch metrics
+        with a deterministic full-pass evaluation after the optimization loop
+        has finished.
+
+        Parameters
+        ----------
+        train_energy_rmse : float
+            Replacement training energy RMSE.
+        train_energy_mae : float
+            Replacement training energy MAE.
+        train_force_rmse : float
+            Replacement training force RMSE.
+        test_energy_rmse : float
+            Replacement validation energy RMSE.
+        test_energy_mae : float
+            Replacement validation energy MAE.
+        test_force_rmse : float
+            Replacement validation force RMSE.
+        """
+        replacements = {
+            "train_energy_rmse": float(train_energy_rmse),
+            "train_energy_mae": float(train_energy_mae),
+            "train_force_rmse": float(train_force_rmse),
+            "test_energy_rmse": float(test_energy_rmse),
+            "test_energy_mae": float(test_energy_mae),
+            "test_force_rmse": float(test_force_rmse),
+        }
+        for key, value in replacements.items():
+            if key not in self.history or len(self.history[key]) == 0:
+                self.history.setdefault(key, []).append(value)
+            else:
+                self.history[key][-1] = value
+
     def get_latest(self, metric: str) -> float:
         """
         Get the latest value for a specific metric.

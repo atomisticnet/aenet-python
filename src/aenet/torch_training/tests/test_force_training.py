@@ -22,6 +22,7 @@ from aenet.torch_training import (
 )
 from aenet.torch_training.dataset import StructureDataset
 from aenet.torch_training.sources import RecordSourceCollection, SourceRecord
+from aenet.torch_training.training.normalization import NormalizationManager
 
 
 def make_structures_with_forces(n_structures=10, n_atoms=5):
@@ -249,6 +250,70 @@ def test_force_training_error_weighted_sampling_produces_valid_rmse():
         force_rmse = result.errors["RMSE_force_train"].iloc[idx]
         assert not math.isnan(force_rmse)
         assert force_rmse > 0
+
+
+@pytest.mark.cpu
+def test_error_weighted_structure_scores_ignore_force_error(monkeypatch):
+    """Adaptive scores should use only per-structure energy error."""
+
+    def _fake_compute_energy_loss(**kwargs):
+        energy_pred = torch.tensor([2.0], dtype=torch.float64)
+        return torch.tensor(0.0, dtype=torch.float64), energy_pred
+
+    def _fake_compute_force_loss(**kwargs):
+        forces_pred = torch.full((2, 3), 10.0, dtype=torch.float64)
+        return torch.tensor(100.0, dtype=torch.float64), forces_pred
+
+    monkeypatch.setattr(
+        training_loop_module,
+        "compute_energy_loss",
+        _fake_compute_energy_loss,
+    )
+    monkeypatch.setattr(
+        training_loop_module,
+        "compute_force_loss",
+        _fake_compute_force_loss,
+    )
+
+    loop = training_loop_module.TrainingLoop(
+        model=object(),
+        descriptor=object(),
+        normalizer=NormalizationManager(
+            normalize_features=False,
+            normalize_energy=False,
+            dtype=torch.float64,
+            device=torch.device("cpu"),
+        ),
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+
+    batch = {
+        "features": torch.zeros((2, 1), dtype=torch.float64),
+        "species_indices": torch.tensor([0, 0], dtype=torch.long),
+        "n_atoms": torch.tensor([2], dtype=torch.long),
+        "energy_ref": torch.tensor([0.0], dtype=torch.float64),
+        "positions_f": torch.zeros((2, 3), dtype=torch.float64),
+        "forces_ref_f": torch.zeros((2, 3), dtype=torch.float64),
+        "species_indices_f": torch.tensor([0, 0], dtype=torch.long),
+        "species_f": ["H", "H"],
+        "local_derivatives_f": torch.zeros((1,), dtype=torch.float64),
+        "graph_f": None,
+        "sample_indices": torch.tensor([0], dtype=torch.long),
+        "force_sample_indices": torch.tensor([0], dtype=torch.long),
+        "force_sample_n_atoms": torch.tensor([2], dtype=torch.long),
+    }
+
+    _, _, _, _, structure_scores = loop.run_epoch(
+        loader=[batch],
+        optimizer=None,
+        alpha=0.5,
+        train=False,
+        collect_structure_scores=True,
+    )
+
+    assert structure_scores is not None
+    assert structure_scores[0] == pytest.approx(1.0)
 
 
 @pytest.mark.cpu
