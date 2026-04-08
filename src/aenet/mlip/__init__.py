@@ -4,7 +4,9 @@ Machine-learning interatomic potential (MLIP) interfaces.
 This module provides interfaces to aenet neural network potentials:
 - ANNPotential: Main class for training and prediction (subprocess-based)
 - LibAenetInterface: High-level library interface for direct libaenet calls
+- AenetEnsembleInterface: Committee-based libaenet inference
 - AenetCalculator: ASE Calculator integration (optional)
+- AenetEnsembleCalculator: ASE committee-based inference
 
 """
 
@@ -24,8 +26,8 @@ from .potential import (
 )
 
 # Import library interface and ASE calculator
-from .interface import LibAenetInterface
-from .calculator import AenetCalculator
+from .interface import LibAenetInterface, AenetEnsembleInterface
+from .calculator import AenetCalculator, AenetEnsembleCalculator
 
 # Legacy re-exports expected by tests and downstream callers
 from ..trainset import TrnSet
@@ -44,7 +46,9 @@ __all__ = [
     "Activation",
     "ANNArchitecture",
     "LibAenetInterface",
+    "AenetEnsembleInterface",
     "AenetCalculator",
+    "AenetEnsembleCalculator",
     "TrnSet",
     "cfg",
 ]

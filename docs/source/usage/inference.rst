@@ -237,30 +237,69 @@ To enable MPI parallelization, pass the ``num_processes`` parameter:
 Ensemble Predictions
 --------------------
 
-For uncertainty quantification, you can run predictions with multiple
-potentials (e.g., from different training runs) and analyze the ensemble:
+For uncertainty quantification, you can evaluate a committee of
+independently trained potentials through the direct ``libaenet`` interfaces.
+The default aggregation reports the ensemble mean energy and forces, together
+with standard deviations and per-atom force uncertainties.
 
 .. code-block:: python
 
-    from aenet.io.predict import PredictOut, PredictOutAnalyzer
+    from aenet.geometry import AtomicStructure
+    from aenet.mlip import AenetEnsembleInterface
 
-    # Run predictions with multiple potentials
-    results_list = []
-    for i in range(5):  # 5 ensemble members
-        potential = ANNPotential.from_files({
-            'Ti': f'Ti.nn.{i}',
-            'O': f'O.nn.{i}'
-        })
-        results = potential.predict(structures, eval_forces=True)
-        results_list.append(results)
+    members = [
+        {'Ti': 'Ti.nn.0', 'O': 'O.nn.0'},
+        {'Ti': 'Ti.nn.1', 'O': 'O.nn.1'},
+        {'Ti': 'Ti.nn.2', 'O': 'O.nn.2'},
+    ]
+    ensemble = AenetEnsembleInterface(members)
 
-    # Analyze ensemble
-    analyzer = PredictOutAnalyzer(results_list)
+    structure = AtomicStructure.from_file('structure.xsf')
+    result = ensemble.predict(structure, forces=True)
 
-    # Get energy statistics
-    E_min, E_max, E_mean, E_std = analyzer.energy_stats(0)  # structure 0
-    print(f"Energy: {E_mean:.6f} ± {E_std:.6f} eV/atom")
+    print(f"Energy: {result.energy_mean:.6f} ± {result.energy_std:.6f} eV")
+    print(f"Max force uncertainty: {result.force_uncertainty.max():.6f} eV/Å")
 
-    # Get force uncertainties
-    force_uncertainty = analyzer.force_uncertainty(0)  # per-atom
-    print(f"Max force uncertainty: {force_uncertainty.max():.6f} eV/Å")
+If you need continuity with an existing production model, you can keep one
+member as the reported predictor while still computing committee statistics:
+
+.. code-block:: python
+
+    ensemble = AenetEnsembleInterface(
+        members,
+        aggregation='reference',
+        reference_member=0,
+    )
+    result = ensemble.predict(structure, forces=True)
+
+    # Reported values come from member 0
+    print(result.energy)
+    print(result.forces)
+
+    # Committee statistics are still available
+    print(result.energy_mean, result.energy_std)
+
+ASE Ensemble Calculator
+~~~~~~~~~~~~~~~~~~~~~~~
+
+For ASE-driven simulations, ``AenetEnsembleCalculator`` reuses ASE's neighbor
+list and exposes the ensemble result through the standard calculator API.
+
+.. code-block:: python
+
+    import ase.io
+    from aenet.mlip import AenetEnsembleCalculator
+
+    atoms = ase.io.read('structure.xsf')
+    atoms.calc = AenetEnsembleCalculator(members, aggregation='mean')
+
+    energy = atoms.get_potential_energy()
+    forces = atoms.get_forces()
+
+    print(atoms.calc.results['energy_std'])
+    print(atoms.calc.results['force_uncertainty'].max())
+
+The standard ASE properties ``energy`` and ``forces`` contain the aggregated
+output. Additional uncertainty information is available in
+``atoms.calc.results`` through the keys ``energy_mean``, ``energy_std``,
+``forces_mean``, ``forces_std``, and ``force_uncertainty``.

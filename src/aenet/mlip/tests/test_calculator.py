@@ -8,10 +8,11 @@ the direct LibAenetInterface.
 
 import os
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from aenet.mlip import AenetCalculator, libaenet
+from aenet.mlip import AenetCalculator, AenetEnsembleCalculator, libaenet
 
 # Check if ASE is available
 try:
@@ -251,6 +252,141 @@ class TestAenetCalculatorErrors(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             atoms.get_potential_energy()
+
+
+@unittest.skipIf(not ASE_AVAILABLE, "ASE not available")
+class TestAenetEnsembleCalculator(unittest.TestCase):
+    """Test cases for AenetEnsembleCalculator."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up shared test data paths."""
+        test_dir = os.path.dirname(__file__)
+        cls.data_dir = os.path.join(test_dir, '../../tests/data')
+        cls.potential_paths = {
+            'Ti': os.path.join(cls.data_dir, 'Ti.nn'),
+            'O': os.path.join(cls.data_dir, 'O.nn')
+        }
+        cls.has_potentials = all(
+            os.path.exists(path) for path in cls.potential_paths.values()
+        )
+        cls.xsf_dir = os.path.join(cls.data_dir, 'xsf-TiO2')
+        cls.has_structures = os.path.exists(cls.xsf_dir)
+
+    def setUp(self):
+        """Set up each test."""
+        if not self.has_potentials:
+            self.skipTest("Test potentials not available")
+        if not self.has_structures:
+            self.skipTest("Test structures not available")
+
+    def tearDown(self):
+        """Clean up after each test."""
+        libaenet.cleanup_sessions()
+
+    def test_single_member_matches_aenet_calculator(self):
+        """Single-member ensemble should match AenetCalculator."""
+        xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
+        atoms_single = ase.io.read(xsf_file)
+        atoms_ensemble = ase.io.read(xsf_file)
+
+        calc_single = AenetCalculator(self.potential_paths)
+        calc_ensemble = AenetEnsembleCalculator([self.potential_paths])
+        atoms_single.calc = calc_single
+        atoms_ensemble.calc = calc_ensemble
+
+        energy_single = atoms_single.get_potential_energy()
+        forces_single = atoms_single.get_forces()
+        energy_ensemble = atoms_ensemble.get_potential_energy()
+        forces_ensemble = atoms_ensemble.get_forces()
+
+        self.assertAlmostEqual(energy_ensemble, energy_single, places=12)
+        self.assertAlmostEqual(
+            calc_ensemble.results['energy_std'],
+            0.0,
+            places=12,
+        )
+        np.testing.assert_allclose(forces_ensemble, forces_single, atol=1e-12)
+        np.testing.assert_allclose(
+            calc_ensemble.results['force_uncertainty'],
+            np.zeros(len(atoms_ensemble)),
+            atol=1e-12,
+        )
+
+    def test_duplicate_members_have_zero_uncertainty(self):
+        """Duplicate calculator members should produce zero spread."""
+        xsf_file = os.path.join(self.xsf_dir, 'structure-001.xsf')
+        atoms = ase.io.read(xsf_file)
+        calc = AenetEnsembleCalculator(
+            [self.potential_paths, self.potential_paths]
+        )
+        atoms.calc = calc
+
+        _ = atoms.get_forces()
+
+        self.assertAlmostEqual(calc.results['energy_std'], 0.0, places=12)
+        np.testing.assert_allclose(
+            calc.results['forces_std'],
+            np.zeros_like(calc.results['forces_std']),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            calc.results['force_uncertainty'],
+            np.zeros(len(atoms)),
+            atol=1e-12,
+        )
+
+    def test_reference_aggregation_uses_reference_member(self):
+        """Reference aggregation should expose the selected member output."""
+        atoms = ase.Atoms(
+            'Ti',
+            positions=[[0.0, 0.0, 0.0]],
+            cell=[10.0, 10.0, 10.0],
+            pbc=True,
+        )
+        calc = AenetEnsembleCalculator(
+            members=[{'Ti': 'member-0.nn'}, {'Ti': 'member-1.nn'}],
+            aggregation='reference',
+            reference_member=1,
+        )
+
+        force0 = np.array([[1.0, 2.0, 3.0]])
+        force1 = np.array([[4.0, 5.0, 6.0]])
+        with patch.object(
+            calc,
+            '_get_cutoff_radius',
+            return_value=(0.0, 3.5),
+        ), patch.object(
+            calc,
+            '_predict_member',
+            side_effect=[(1.0, force0), (3.0, force1)],
+        ):
+            atoms.calc = calc
+            reported_forces = atoms.get_forces()
+
+        self.assertAlmostEqual(calc.results['energy'], 3.0, places=12)
+        self.assertAlmostEqual(calc.results['energy_mean'], 2.0, places=12)
+        self.assertAlmostEqual(calc.results['energy_std'], 1.0, places=12)
+        np.testing.assert_allclose(reported_forces, force1, atol=1e-12)
+        np.testing.assert_allclose(
+            calc.results['forces_mean'],
+            np.array([[2.5, 3.5, 4.5]]),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            calc.results['force_uncertainty'],
+            np.array([1.5]),
+            atol=1e-12,
+        )
+
+    def test_invalid_reference_member_raises(self):
+        """Invalid reference member indices should raise an error."""
+        with self.assertRaises(ValueError):
+            AenetEnsembleCalculator(
+                members=[{'Ti': 'member-0.nn'}],
+                aggregation='reference',
+                reference_member=2,
+            )
 
 
 if __name__ == '__main__':

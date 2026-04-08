@@ -6,11 +6,12 @@ It handles the CFFI interface, type conversions, and error handling.
 
 """
 
-import os
-import numpy as np
-import threading
 import logging
-from typing import Tuple, List, Optional, Dict
+import os
+import threading
+from typing import Optional
+
+import numpy as np
 from cffi import FFI
 
 from .. import config as cfg
@@ -95,6 +96,10 @@ class SessionHandle:
         self.release()
         return False
 
+    def is_current(self) -> bool:
+        """Return True if this handle still refers to the active session."""
+        return self.manager.is_session_current(self.config, self.generation)
+
 
 class LibAenetSessionManager:
     """
@@ -119,8 +124,8 @@ class LibAenetSessionManager:
 
     def acquire_session(
         self,
-        atom_types: List[str],
-        potential_paths: Dict[str, str],
+        atom_types: list[str],
+        potential_paths: dict[str, str],
         potential_format: Optional[str] = None
     ) -> SessionHandle:
         """
@@ -239,10 +244,31 @@ class LibAenetSessionManager:
         with self._lock:
             return self._initialized and self._ref_count > 0
 
-    def _initialize_impl(self, atom_types: List[str]):
+    def is_session_current(self, config: tuple, generation: int) -> bool:
         """
-        Internal initialization that bypasses the already-initialized check.
+        Check whether a session handle still matches the active library state.
+
+        Parameters
+        ----------
+        config : tuple
+            Configuration tuple from a SessionHandle.
+        generation : int
+            Generation stamp from a SessionHandle.
+
+        Returns
+        -------
+        bool
+            True if the handle still points to the currently active session.
         """
+        with self._lock:
+            return (
+                self._initialized
+                and generation == self._generation
+                and config == self._current_config
+            )
+
+    def _initialize_impl(self, atom_types: list[str]):
+        """Internal initialization that bypasses the initialized check."""
         global _initialized, _atom_types_map
 
         lib = _get_library()
@@ -346,7 +372,7 @@ def _check_status(stat: int, operation: str = "aenet operation"):
     raise AenetError(f"{operation} failed: {error_msg}", stat)
 
 
-def initialize(atom_types: List[str]):
+def initialize(atom_types: list[str]):
     """
     Initialize the aenet library with atom types.
 
@@ -577,7 +603,7 @@ def atomic_energy_and_forces(
     index_j: np.ndarray,
     natoms: int,
     forces: Optional[np.ndarray] = None
-) -> Tuple[float, np.ndarray]:
+) -> tuple[float, np.ndarray]:
     """
     Calculate atomic energy and forces for a single atom.
 
@@ -664,7 +690,7 @@ def is_initialized() -> bool:
     return _initialized
 
 
-def get_atom_types() -> List[str]:
+def get_atom_types() -> list[str]:
     """Get the list of initialized atom types."""
     return list(_atom_types_map.keys())
 
@@ -696,7 +722,7 @@ def get_type_id(atom_type: str) -> int:
     return _atom_types_map[atom_type]
 
 
-def get_cutoff_radius() -> Tuple[float, float]:
+def get_cutoff_radius() -> tuple[float, float]:
     """
     Get the minimum and maximum cutoff radii.
 

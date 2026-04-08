@@ -5,11 +5,21 @@ This module provides AenetCalculator, which uses ASE's native neighbor
 lists and directly interfaces with libaenet for fast calculations.
 
 """
+from typing import Optional
 
-from typing import Dict, List, Optional
 import numpy as np
 
 from . import libaenet
+from ._evaluation import (
+    evaluate_prepared_structure,
+    prepare_ase_atoms,
+    validate_atom_types,
+)
+from .ensemble import (
+    AenetEnsembleResult,
+    normalize_ensemble_members,
+    validate_aggregation_mode,
+)
 
 __author__ = "The aenet developers"
 __email__ = "aenet@atomistic.net"
@@ -79,7 +89,7 @@ class AenetCalculator(Calculator):
 
     def __init__(
         self,
-        potential_paths: Dict[str, str],
+        potential_paths: dict[str, str],
         potential_format: Optional[str] = None,
         skin: float = 0.5,
         **kwargs
@@ -105,7 +115,9 @@ class AenetCalculator(Calculator):
 
     def _ensure_session(self):
         """Acquire libaenet session if needed."""
-        if self._session is None:
+        if self._session is None or not self._session.is_current():
+            if self._session is not None:
+                self._session.release()
             self._session = libaenet._session_manager.acquire_session(
                 self._atom_types,
                 self.potential_paths,
@@ -115,8 +127,8 @@ class AenetCalculator(Calculator):
     def calculate(
         self,
         atoms: Optional['Atoms'] = None,
-        properties: List[str] = ['energy'],
-        system_changes: List[str] = all_changes
+        properties: list[str] = ['energy'],
+        system_changes: list[str] = all_changes
     ):
         """
         Calculate properties using ASE neighbor lists.
@@ -136,23 +148,14 @@ class AenetCalculator(Calculator):
         self._ensure_session()
 
         # Get structure info
-        positions = self.atoms.get_positions()
         symbols = self.atoms.get_chemical_symbols()
-        cell = self.atoms.get_cell()
         natoms = len(self.atoms)
 
         # Validate atom types
-        unknown = sorted(set(symbols) - set(self._atom_types))
-        if len(unknown) > 0:
-            raise ValueError(
-                f"Structure contains unknown atom types: {unknown}"
-            )
-
-        # Map symbols to type IDs
-        type_ids = [libaenet.get_type_id(sym) for sym in symbols]
+        validate_atom_types(symbols, self._atom_types)
 
         # Get cutoff radius from libaenet
-        Rc_min, Rc_max = libaenet.get_cutoff_radius()
+        _, Rc_max = libaenet.get_cutoff_radius()
 
         # Build or reuse ASE neighbor list with caching
         from ase.neighborlist import NeighborList
@@ -184,73 +187,216 @@ class AenetCalculator(Calculator):
         # Determine if forces are needed
         calc_forces = 'forces' in properties
 
-        # Initialize results
-        total_energy = 0.0
-        if calc_forces:
-            total_forces = np.zeros((natoms, 3), dtype=np.float64)
-        else:
-            total_forces = None
-
-        # Calculate energy and forces for each atom
-        for i in range(natoms):
-            # Get neighbors from ASE
-            indices, offsets = nl.get_neighbors(i)
-            n_neighbors = len(indices)
-
-            # Prepare neighbor data
-            coo_i = positions[i]
-            type_i = type_ids[i]
-
-            if n_neighbors == 0:
-                neighbor_coords = np.empty((0, 3), dtype=np.float64)
-                neighbor_types = np.empty((0,), dtype=np.int32)
-                neighbor_indices = np.empty((0,), dtype=np.int32)
-            else:
-                # Compute neighbor positions (with PBC shifts)
-                neighbor_coords = positions[indices] + offsets @ cell.array
-                neighbor_coords = np.asarray(
-                    neighbor_coords, dtype=np.float64
-                )
-                neighbor_types = np.array(
-                    [type_ids[j] for j in indices], dtype=np.int32
-                )
-                neighbor_indices = np.array(
-                    indices, dtype=np.int32
-                ) + 1  # 1-based for Fortran
-
-            # Call libaenet
-            if calc_forces:
-                E_i, F = libaenet.atomic_energy_and_forces(
-                    coo_i,
-                    type_i,
-                    i + 1,
-                    neighbor_coords,
-                    neighbor_types,
-                    neighbor_indices,
-                    natoms,
-                    forces=total_forces
-                )
-                total_energy += E_i
-                total_forces = F
-            else:
-                E_i, _ = libaenet.atomic_energy_and_forces(
-                    coo_i,
-                    type_i,
-                    i + 1,
-                    neighbor_coords,
-                    neighbor_types,
-                    neighbor_indices,
-                    natoms,
-                    forces=None
-                )
-                total_energy += E_i
+        prepared = prepare_ase_atoms(self.atoms, nl)
+        prediction = evaluate_prepared_structure(prepared, forces=calc_forces)
 
         # Store results
+        if calc_forces:
+            total_energy, total_forces = prediction
+        else:
+            total_energy = prediction
+            total_forces = None
+
         self.results['energy'] = total_energy
         if calc_forces:
             self.results['forces'] = total_forces
 
     def __del__(self):
         """Cleanup."""
-        if self._session is not None:
-            self._session.release()
+        session = getattr(self, "_session", None)
+        if session is not None:
+            session.release()
+
+
+class AenetEnsembleCalculator(Calculator):
+    """
+    ASE Calculator interface for committee-based aenet inference.
+
+    Parameters
+    ----------
+    members : List[Dict[str, str]]
+        Per-member mappings from element symbols to potential file paths.
+    potential_format : str, optional
+        Format of potential files: 'ascii' or None (binary).
+    aggregation : {"mean", "reference"}, optional
+        Aggregation mode for reported energy and forces.
+    reference_member : int, optional
+        Member index used when ``aggregation='reference'``.
+    skin : float, optional
+        ASE neighbor-list skin distance in Angstrom.
+    **kwargs
+        Additional ASE calculator keyword arguments.
+    """
+
+    implemented_properties = ['energy', 'forces']
+
+    def __init__(
+        self,
+        members: list[dict[str, str]],
+        potential_format: Optional[str] = None,
+        aggregation: str = "mean",
+        reference_member: int = 0,
+        skin: float = 0.5,
+        **kwargs
+    ):
+        if not ASE_AVAILABLE:
+            raise ImportError(
+                "ASE is required for AenetEnsembleCalculator. "
+                "Install with: pip install aenet[ase]"
+            )
+
+        Calculator.__init__(self, **kwargs)
+
+        self.members = normalize_ensemble_members(members)
+        self.potential_format = potential_format
+        self.aggregation = aggregation
+        self.reference_member = reference_member
+        validate_aggregation_mode(
+            aggregation=self.aggregation,
+            reference_member=self.reference_member,
+            num_members=len(self.members),
+        )
+
+        self.skin = skin
+        self._atom_types = list(self.members[0].keys())
+        self._session = None
+        self._active_member_index = None
+        self._cutoff_radius = None
+
+        self._neighbor_list = None
+        self._nl_cutoffs = None
+        self._nl_natoms = None
+
+    def _activate_member(self, member_index: int):
+        """Load the requested ensemble member into libaenet."""
+        if (
+            self._session is None
+            or not self._session.is_current()
+            or self._active_member_index != member_index
+        ):
+            if self._session is not None:
+                self._session.release()
+            self._session = libaenet._session_manager.acquire_session(
+                self._atom_types,
+                self.members[member_index],
+                self.potential_format,
+            )
+            self._active_member_index = member_index
+
+    def _get_cutoff_radius(self) -> tuple[float, float]:
+        """
+        Get the shared cutoff radius for all ensemble members.
+
+        Raises
+        ------
+        ValueError
+            If ensemble members use different cutoff radii.
+        """
+        if self._cutoff_radius is not None:
+            return self._cutoff_radius
+
+        cutoffs = []
+        for member_index in range(len(self.members)):
+            self._activate_member(member_index)
+            cutoffs.append(libaenet.get_cutoff_radius())
+
+        reference_cutoff = cutoffs[0]
+        for cutoff in cutoffs[1:]:
+            if not np.allclose(cutoff, reference_cutoff, atol=0.0, rtol=0.0):
+                raise ValueError(
+                    "All ensemble members must have identical cutoff radii."
+                )
+
+        self._cutoff_radius = reference_cutoff
+        return self._cutoff_radius
+
+    def _predict_member(self, prepared, member_index: int, forces: bool = False):
+        """Evaluate a prepared ASE structure with a specific member."""
+        self._activate_member(member_index)
+        return evaluate_prepared_structure(prepared, forces=forces)
+
+    def calculate(
+        self,
+        atoms: Optional['Atoms'] = None,
+        properties: list[str] = ['energy'],
+        system_changes: list[str] = all_changes
+    ):
+        """
+        Calculate ensemble predictions using ASE neighbor lists.
+
+        Parameters
+        ----------
+        atoms : ase.Atoms, optional
+            Atoms object to calculate properties for.
+        properties : list of str
+            Requested properties, e.g. ``['energy', 'forces']``.
+        system_changes : list of str
+            ASE change markers since the last calculation.
+        """
+        Calculator.calculate(self, atoms, properties, system_changes)
+
+        symbols = self.atoms.get_chemical_symbols()
+        natoms = len(self.atoms)
+        validate_atom_types(symbols, self._atom_types)
+
+        _, Rc_max = self._get_cutoff_radius()
+
+        from ase.neighborlist import NeighborList
+        cutoffs = [Rc_max / 2.0] * natoms
+        rebuild_needed = (
+            self._neighbor_list is None or
+            self._nl_natoms != natoms or
+            self._nl_cutoffs != cutoffs or
+            'numbers' in system_changes or
+            'cell' in system_changes or
+            'pbc' in system_changes
+        )
+
+        if rebuild_needed:
+            self._neighbor_list = NeighborList(
+                cutoffs, skin=self.skin, sorted=False, self_interaction=False,
+                bothways=True
+            )
+            self._nl_cutoffs = cutoffs
+            self._nl_natoms = natoms
+
+        self._neighbor_list.update(self.atoms)
+        prepared = prepare_ase_atoms(self.atoms, self._neighbor_list)
+        calc_forces = 'forces' in properties
+
+        member_energies = []
+        member_forces = [] if calc_forces else None
+        for member_index in range(len(self.members)):
+            prediction = self._predict_member(
+                prepared,
+                member_index=member_index,
+                forces=calc_forces,
+            )
+            if calc_forces:
+                energy, force_array = prediction
+                member_energies.append(energy)
+                member_forces.append(force_array)
+            else:
+                member_energies.append(prediction)
+
+        result = AenetEnsembleResult.from_member_predictions(
+            member_energies=member_energies,
+            member_forces=member_forces,
+            aggregation=self.aggregation,
+            reference_member=self.reference_member,
+        )
+
+        self.results['energy'] = result.energy
+        self.results['energy_mean'] = result.energy_mean
+        self.results['energy_std'] = result.energy_std
+        if calc_forces:
+            self.results['forces'] = result.forces
+            self.results['forces_mean'] = result.forces_mean
+            self.results['forces_std'] = result.forces_std
+            self.results['force_uncertainty'] = result.force_uncertainty
+
+    def __del__(self):
+        """Cleanup."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            session.release()

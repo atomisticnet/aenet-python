@@ -9,11 +9,17 @@ the subprocess-based ANNPotential.predict() method.
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from aenet.geometry import AtomicStructure
-from aenet.mlip import ANNPotential, LibAenetInterface, libaenet
+from aenet.mlip import (
+    AenetEnsembleInterface,
+    ANNPotential,
+    LibAenetInterface,
+    libaenet,
+)
 
 
 class TestLibAenetInterface(unittest.TestCase):
@@ -262,6 +268,144 @@ class TestLibAenetInterfaceErrors(unittest.TestCase):
         # Should raise ValueError
         with self.assertRaises(ValueError):
             lib.predict(structure)
+
+
+class TestAenetEnsembleInterface(unittest.TestCase):
+    """Test cases for AenetEnsembleInterface."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up shared test data paths."""
+        test_dir = os.path.dirname(__file__)
+        cls.data_dir = os.path.join(test_dir, '../../tests/data')
+        cls.potential_paths = {
+            'Ti': os.path.join(cls.data_dir, 'Ti.nn'),
+            'O': os.path.join(cls.data_dir, 'O.nn')
+        }
+        cls.has_potentials = all(
+            os.path.exists(path) for path in cls.potential_paths.values()
+        )
+        cls.xsf_dir = os.path.join(cls.data_dir, 'xsf-TiO2')
+        cls.has_structures = os.path.exists(cls.xsf_dir)
+
+    def setUp(self):
+        """Set up each test."""
+        if not self.has_potentials:
+            self.skipTest("Test potentials not available")
+        if not self.has_structures:
+            self.skipTest("Test structures not available")
+
+    def tearDown(self):
+        """Clean up after each test."""
+        libaenet.cleanup_sessions()
+
+    def test_single_member_matches_lib_interface(self):
+        """Single-member ensembles should match LibAenetInterface."""
+        from aenet.formats.xsf import XSFParser
+
+        parser = XSFParser()
+        structure = parser.read(
+            os.path.join(self.xsf_dir, 'structure-001.xsf')
+        )
+
+        single = LibAenetInterface(self.potential_paths)
+        ensemble = AenetEnsembleInterface([self.potential_paths])
+
+        single_energy, single_forces = single.predict(structure, forces=True)
+        result = ensemble.predict(structure, forces=True)
+
+        self.assertAlmostEqual(result.energy, single_energy, places=12)
+        self.assertAlmostEqual(result.energy_mean, single_energy, places=12)
+        self.assertAlmostEqual(result.energy_std, 0.0, places=12)
+        np.testing.assert_allclose(result.forces, single_forces, atol=1e-12)
+        np.testing.assert_allclose(
+            result.force_uncertainty,
+            np.zeros(structure.natoms),
+            atol=1e-12,
+        )
+
+    def test_duplicate_members_have_zero_uncertainty(self):
+        """Duplicate members should produce zero energy/force spread."""
+        from aenet.formats.xsf import XSFParser
+
+        parser = XSFParser()
+        structure = parser.read(
+            os.path.join(self.xsf_dir, 'structure-001.xsf')
+        )
+
+        ensemble = AenetEnsembleInterface(
+            [self.potential_paths, self.potential_paths]
+        )
+        result = ensemble.predict(structure, forces=True)
+
+        self.assertAlmostEqual(result.energy_std, 0.0, places=12)
+        np.testing.assert_allclose(
+            result.forces_std,
+            np.zeros_like(result.forces_std),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            result.force_uncertainty,
+            np.zeros(structure.natoms),
+            atol=1e-12,
+        )
+
+    def test_reference_aggregation_uses_reference_member(self):
+        """Reference aggregation should report the selected member output."""
+        structure = AtomicStructure(
+            coords=np.array([[0.0, 0.0, 0.0]]),
+            types=['Ti'],
+            avec=np.eye(3) * 10.0,
+        )
+        ensemble = AenetEnsembleInterface(
+            members=[{'Ti': 'member-0.nn'}, {'Ti': 'member-1.nn'}],
+            aggregation='reference',
+            reference_member=1,
+        )
+
+        force0 = np.array([[1.0, 2.0, 3.0]])
+        force1 = np.array([[4.0, 5.0, 6.0]])
+        with patch.object(
+            ensemble,
+            '_get_cutoff_radius',
+            return_value=(0.0, 3.5),
+        ), patch.object(
+            ensemble,
+            '_predict_member',
+            side_effect=[(1.0, force0), (3.0, force1)],
+        ):
+            result = ensemble.predict(structure, forces=True)
+
+        self.assertAlmostEqual(result.energy, 3.0, places=12)
+        self.assertAlmostEqual(result.energy_mean, 2.0, places=12)
+        self.assertAlmostEqual(result.energy_std, 1.0, places=12)
+        np.testing.assert_allclose(result.forces, force1, atol=1e-12)
+        np.testing.assert_allclose(
+            result.forces_mean,
+            np.array([[2.5, 3.5, 4.5]]),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            result.force_uncertainty,
+            np.array([1.5]),
+            atol=1e-12,
+        )
+
+    def test_invalid_reference_member_raises(self):
+        """Invalid reference member indices should raise an error."""
+        with self.assertRaises(ValueError):
+            AenetEnsembleInterface(
+                members=[{'Ti': 'member-0.nn'}],
+                aggregation='reference',
+                reference_member=2,
+            )
+
+    def test_inconsistent_member_atom_types_raise(self):
+        """All members must define the same atom types."""
+        with self.assertRaises(ValueError):
+            AenetEnsembleInterface(
+                members=[{'Ti': 'member-0.nn'}, {'O': 'member-1.nn'}]
+            )
 
 
 if __name__ == '__main__':
