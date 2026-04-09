@@ -10,6 +10,7 @@ This section provides detailed API documentation for the aenet-python package.
    transformations
    torch_featurize
    torch_training_builders
+   torch_training_committee
    torch_training_training
    torch_training_inference
 
@@ -42,6 +43,11 @@ PyTorch Training (Modular Components)
 :doc:`torch_training_builders`
    Network and optimizer builder utilities for constructing training components
    from configuration specifications.
+
+:doc:`torch_training_committee`
+   Committee-training orchestration for training multiple seeded PyTorch
+   members with shared settings, reloadable metadata, PyTorch-side
+   aggregation, and ASCII export interoperability.
 
 :doc:`torch_training_training`
    Core training loop components including checkpoint management, metrics tracking,

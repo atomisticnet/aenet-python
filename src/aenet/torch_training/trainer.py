@@ -28,6 +28,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 
@@ -62,6 +63,31 @@ def _resolve_device(config: TorchTrainingConfig) -> torch.device:
     if config.device is not None:
         return torch.device(config.device)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _offset_seed(seed: Optional[int], offset: int) -> Optional[int]:
+    """Return a deterministic offset from ``seed`` when a seed is set."""
+    if seed is None:
+        return None
+    return int(seed) + int(offset)
+
+
+def _set_global_seeds(seed: int) -> None:
+    """Seed the trainer's Python, NumPy, and PyTorch RNG state."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _make_torch_generator(seed: Optional[int]) -> Optional[torch.Generator]:
+    """Build a dedicated torch generator when a deterministic seed is set."""
+    if seed is None:
+        return None
+    generator = torch.Generator()
+    generator.manual_seed(int(seed))
+    return generator
 
 
 _SMALL_VALIDATION_WARNING_THRESHOLD = 10
@@ -315,9 +341,11 @@ def _build_training_sampler(
     *,
     config: TorchTrainingConfig,
     atomic_energies: Dict[str, float],
+    seed: Optional[int] = None,
 ) -> tuple[WeightedRandomSampler | None, _ErrorWeightedSamplingState | None]:
     """Return the training sampler implied by ``config.sampling_policy``."""
     sampling_policy = str(getattr(config, "sampling_policy", "uniform"))
+    sampler_generator = _make_torch_generator(seed)
     if sampling_policy == "uniform":
         return None, None
     if sampling_policy == "energy_weighted":
@@ -330,6 +358,7 @@ def _build_training_sampler(
                 weights=weights,
                 num_samples=len(weights),
                 replacement=True,
+                generator=sampler_generator,
             ),
             None,
         )
@@ -341,6 +370,7 @@ def _build_training_sampler(
                 weights=weights,
                 num_samples=len(weights),
                 replacement=True,
+                generator=sampler_generator,
             ),
             adaptive_state,
         )
@@ -473,6 +503,13 @@ class _TrainingPolicyDataset(Dataset):
         self.force_min_structures_per_epoch = getattr(
             config, "force_min_structures_per_epoch", None
         )
+        base_seed = getattr(config, "seed", None)
+        split_offset = 0 if split == "train" else 1
+        self._sampling_rng = (
+            random.Random(_offset_seed(base_seed, split_offset))
+            if base_seed is not None
+            else None
+        )
         self.selected_force_indices: Optional[List[int]] = None
 
         force_indices_all = list(self._root_dataset.get_force_indices())
@@ -538,7 +575,9 @@ class _TrainingPolicyDataset(Dataset):
         n_force = min(n_force, n_force_total)
         if n_force <= 0:
             return []
-        return random.sample(self._force_indices, n_force)
+        if self._sampling_rng is None:
+            return random.sample(self._force_indices, n_force)
+        return self._sampling_rng.sample(self._force_indices, n_force)
 
     def initialize_force_sampling(self) -> None:
         """Populate the initial random force subset before epoch 0."""
@@ -1158,19 +1197,7 @@ class TorchANNPotential:
         self.dtype = descriptor.dtype
 
         # Build underlying network and adapter using NetworkBuilder
-        builder = NetworkBuilder(descriptor=descriptor,
-                                 device=self.device,
-                                 dtype=self.dtype)
-        net = builder.build_network(arch=self.arch)
-        self.net = net
-        self.model = EnergyModelAdapter(
-            net=net, n_species=len(descriptor.species))
-        # Ensure adapter on same device/dtype
-        if self.dtype == torch.float64:
-            self.model = self.model.double()
-        else:
-            self.model = self.model.float()
-        self.model.to(self.device)
+        self._rebuild_model()
 
         # Training state - use MetricsTracker
         self._metrics = MetricsTracker(track_detailed_timing=True)
@@ -1193,6 +1220,22 @@ class TorchANNPotential:
 
         # Metadata from loaded model files
         self._metadata: Optional[Dict[str, Any]] = None
+
+    def _rebuild_model(self) -> None:
+        """Rebuild the per-species network and adapter from ``self.arch``."""
+        builder = NetworkBuilder(descriptor=self.descriptor,
+                                 device=self.device,
+                                 dtype=self.dtype)
+        net = builder.build_network(arch=self.arch)
+        self.net = net
+        self.model = EnergyModelAdapter(
+            net=net, n_species=len(self.descriptor.species))
+        # Ensure adapter on same device/dtype
+        if self.dtype == torch.float64:
+            self.model = self.model.double()
+        else:
+            self.model = self.model.float()
+        self.model.to(self.device)
 
     @property
     def history(self) -> Dict[str, List[float]]:
@@ -1494,6 +1537,11 @@ class TorchANNPotential:
         if config is None:
             config = TorchTrainingConfig()
 
+        run_seed = getattr(config, "seed", None)
+        split_seed = getattr(config, "split_seed", None)
+        if run_seed is not None:
+            _set_global_seeds(int(run_seed))
+
         # Resolve device/dtype and memory mode
         device = _resolve_device(config)
         self.device = device  # sync trainer device with resolved device
@@ -1506,6 +1554,11 @@ class TorchANNPotential:
                 "mixed-memory execution mode and is not implemented yet. "
                 "Use memory_mode='cpu' or memory_mode='gpu' for now."
             )
+
+        if run_seed is not None and resume_from is None:
+            # Fresh seeded runs must rebuild after seeding so parameter
+            # initialization is controlled by ``config.seed``.
+            self._rebuild_model()
 
         # Ensure model on device/dtype
         self.model.to(device)
@@ -1545,14 +1598,16 @@ class TorchANNPotential:
                 test_fraction = config.testpercent / 100.0
                 if train_test_split_dataset is not None:
                     train_ds, test_ds = train_test_split_dataset(
-                        base_ds, test_fraction=test_fraction
+                        base_ds,
+                        test_fraction=test_fraction,
+                        seed=split_seed,
                     )
                 else:
                     # Generic fallback split using Subset
-                    import random as _rand
                     n = len(base_ds)
                     indices = list(range(n))
-                    _rand.shuffle(indices)
+                    rng = random.Random(split_seed)
+                    rng.shuffle(indices)
                     n_test = int(n * test_fraction)
                     test_idx = indices[:n_test]
                     train_idx = indices[n_test:]
@@ -1573,9 +1628,9 @@ class TorchANNPotential:
                 structures_all = structures
                 if config.testpercent > 0:
                     test_fraction = config.testpercent / 100.0
-                    import random as _rand
                     idx = list(range(len(structures_all)))
-                    _rand.shuffle(idx)
+                    rng = random.Random(split_seed)
+                    rng.shuffle(idx)
                     n_test = int(len(idx) * test_fraction)
                     test_idx = set(idx[:n_test])
                     train_idx = set(idx[n_test:])
@@ -1594,7 +1649,7 @@ class TorchANNPotential:
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
                     atomic_energies=config.atomic_energies,
-                    seed=None,
+                    seed=split_seed,
                     show_progress=show_progress,
                 )
                 test_ds = (
@@ -1604,7 +1659,7 @@ class TorchANNPotential:
                         max_energy=config.max_energy,
                         max_forces=config.max_forces,
                         atomic_energies=config.atomic_energies,
-                        seed=None,
+                        seed=split_seed,
                         show_progress=show_progress,
                     )
                     if (config.testpercent > 0 and len(test_structs) > 0)
@@ -1617,12 +1672,14 @@ class TorchANNPotential:
                     max_energy=config.max_energy,
                     max_forces=config.max_forces,
                     atomic_energies=config.atomic_energies,
-                    seed=None,
+                    seed=split_seed,
                 )
                 if config.testpercent > 0:
                     test_fraction = config.testpercent / 100.0
                     train_ds, test_ds = train_test_split(
-                        full_ds, test_fraction=test_fraction
+                        full_ds,
+                        test_fraction=test_fraction,
+                        seed=split_seed,
                     )
                 else:
                     train_ds, test_ds = full_ds, None
@@ -1775,10 +1832,16 @@ class TorchANNPotential:
             train_ds,
             config=config,
             atomic_energies=atomic_energies_dict,
+            seed=_offset_seed(run_seed, 100),
         )
         train_shuffle = train_sampler is None
         if train_sampler is not None:
             train_dl_kwargs["sampler"] = train_sampler
+        train_loader_generator = _make_torch_generator(
+            _offset_seed(run_seed, 200)
+        )
+        if train_loader_generator is not None:
+            train_dl_kwargs["generator"] = train_loader_generator
 
         train_loader = DataLoader(
             train_ds,

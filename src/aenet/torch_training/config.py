@@ -6,6 +6,7 @@ the API design of aenet.mlip while adding PyTorch-specific features.
 """
 
 from dataclasses import dataclass
+from numbers import Integral
 from typing import Any, Dict, Literal, Optional
 
 import numpy as np
@@ -263,6 +264,15 @@ class TorchTrainingConfig:
         Default: None (will use Adam with defaults)
     testpercent : int, optional
         Percentage of data for validation set (0-100). Default: 10
+    seed : int, optional
+        Run-level stochastic seed for single-model training. When set, this
+        controls model initialization, DataLoader shuffling, weighted sampling,
+        force-subset sampling, and other trainer-local stochastic behavior.
+        Default: None
+    split_seed : int, optional
+        Seed for trainer-owned train/validation partitioning. This affects
+        only the split decision when the trainer owns that split, for example
+        from ``structures=...`` or ``dataset=...`` input. Default: None
     force_weight : float, optional
         Weight for force loss (alpha parameter). 0 = energy only, 1 = force
         only. Default: 0.0
@@ -382,6 +392,8 @@ class TorchTrainingConfig:
     iterations: int = 100
     method: Optional[TrainingMethod] = None
     testpercent: int = 10
+    seed: Optional[int] = None
+    split_seed: Optional[int] = None
     force_weight: float = 0.0
     force_fraction: float = 1.0
     sampling_policy: Literal[
@@ -493,6 +505,16 @@ class TorchTrainingConfig:
             raise ValueError(
                 f"testpercent must be 0-100, got {self.testpercent}"
             )
+
+        for field_name in ("seed", "split_seed"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                raise ValueError(
+                    f"{field_name} must be an integer or None, got {value!r}"
+                )
+            setattr(self, field_name, int(value))
 
         # Validate force_weight
         if not 0.0 <= self.force_weight <= 1.0:

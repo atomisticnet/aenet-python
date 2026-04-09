@@ -146,6 +146,8 @@ class TestTorchTrainingConfig:
 
         assert config.iterations == 100
         assert config.testpercent == 10
+        assert config.seed is None
+        assert config.split_seed is None
         assert config.force_weight == 0.0
         assert config.force_fraction == 1.0
         assert config.sampling_policy == 'uniform'
@@ -164,6 +166,8 @@ class TestTorchTrainingConfig:
             iterations=500,
             method=SGD(lr=0.1),
             testpercent=20,
+            seed=11,
+            split_seed=7,
             force_weight=0.5,
             force_fraction=0.8,
             sampling_policy='error_weighted',
@@ -179,6 +183,8 @@ class TestTorchTrainingConfig:
         assert config.iterations == 500
         assert isinstance(config.method, SGD)
         assert config.testpercent == 20
+        assert config.seed == 11
+        assert config.split_seed == 7
         assert config.force_weight == 0.5
         assert config.force_fraction == 0.8
         assert config.sampling_policy == 'error_weighted'
@@ -215,6 +221,14 @@ class TestTorchTrainingConfig:
 
         with pytest.raises(ValueError, match="force_weight must be"):
             TorchTrainingConfig(force_weight=-0.1)
+
+    def test_invalid_seed_values(self):
+        """Run-level and split seeds must be integers when provided."""
+        with pytest.raises(ValueError, match="seed must be an integer"):
+            TorchTrainingConfig(seed=1.5)
+
+        with pytest.raises(ValueError, match="split_seed must be an integer"):
+            TorchTrainingConfig(split_seed="abc")
 
     def test_invalid_force_fraction(self):
         """Test validation of force_fraction."""

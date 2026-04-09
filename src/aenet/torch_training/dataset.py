@@ -10,7 +10,6 @@ import os
 import random
 from typing import Optional, Union
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -446,7 +445,8 @@ class CachedStructureDataset(Dataset):
         Atomic reference energies used when interpreting ``max_energy``.
         Missing species default to ``0.0``. Default: None
     seed : int, optional
-        Random seed for reproducibility. Default: None
+        Reserved for deterministic helper utilities. Cached dataset contents
+        are unaffected by this value. Default: None
     """
 
     def __init__(
@@ -466,10 +466,6 @@ class CachedStructureDataset(Dataset):
             dict(atomic_energies) if atomic_energies is not None else None
         )
         self.seed = seed
-
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
 
         # Convert input to torch Structure objects if needed
         structures = convert_to_structures(structures)
@@ -569,12 +565,10 @@ def train_test_split(dataset: StructureDataset,
     test_dataset : StructureDataset
         Test dataset
     """
-    if seed is not None:
-        random.seed(seed)
-
     # Shuffle indices
     indices = list(range(len(dataset.structures)))
-    random.shuffle(indices)
+    rng = random.Random(seed)
+    rng.shuffle(indices)
 
     # Split
     n_test = int(len(indices) * test_fraction)

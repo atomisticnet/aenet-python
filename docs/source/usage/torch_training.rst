@@ -40,7 +40,7 @@ directory within the repository.
 
 For the maintained PyTorch training walkthrough, including the file-backed TiO2
 workflow, explicit ``CachedStructureDataset`` usage, fixed train/test splits,
-and dataset-backed prediction, see
+dataset-backed prediction, and committee training, see
 `example-05-torch-training.ipynb
 <https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-05-torch-training.ipynb>`_.
 
@@ -138,6 +138,145 @@ statistics, and plotting helpers.
    ``use_scheduler=True`` and ``save_best=True``. On very small validation
    splits, these controls can react to noisy metrics and change the training
    behavior qualitatively.
+
+
+Reproducibility Controls
+------------------------
+
+The PyTorch trainer separates run-level stochastic behavior from split
+selection:
+
+.. doctest::
+
+   >>> from aenet.torch_training import TorchTrainingConfig
+   >>> config = TorchTrainingConfig(seed=11, split_seed=7)
+   >>> (config.seed, config.split_seed)
+   (11, 7)
+
+Use ``split_seed`` when you want the trainer-owned train/validation partition
+to stay fixed across runs. Use ``seed`` when you want model initialization,
+training-shuffle order, weighted sampling, and random force-subset selection
+to be reproducible. Committee workflows typically keep ``split_seed`` shared
+across members while varying ``seed`` per member.
+
+
+Committee Training
+------------------
+
+Phase 2 committee support adds a trainer-side orchestration layer on top of
+the single-member ``TorchANNPotential`` workflow:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from aenet.torch_training import (
+       Adam,
+       TorchCommitteeConfig,
+       TorchCommitteePotential,
+       TorchTrainingConfig,
+   )
+
+   committee = TorchCommitteePotential(arch, descriptor=descriptor)
+   train_config = TorchTrainingConfig(
+       iterations=1,
+       method=Adam(mu=0.001, batchsize=1),
+       testpercent=50,
+       split_seed=7,
+       atomic_energies={"H": 0.0},
+       normalize_features=False,
+       normalize_energy=False,
+       memory_mode="cpu",
+       device="cpu",
+       checkpoint_dir=None,
+       checkpoint_interval=0,
+       max_checkpoints=None,
+       save_best=False,
+       use_scheduler=False,
+   )
+   committee_config = TorchCommitteeConfig(
+       num_members=2,
+       base_seed=11,
+       max_parallel=1,
+       output_dir=Path("committee_run"),
+   )
+
+   result = committee.train(
+       structures=structures,
+       config=train_config,
+       committee_config=committee_config,
+   )
+   print(result.metadata_path)
+   print([member.seed for member in result.members])
+
+Committee runs materialize a stable output layout:
+
+.. code-block:: text
+
+   committee_run/
+     committee_metadata.json
+     member_000/
+       model.pt
+       history.json
+       history.csv
+       summary.json
+     member_001/
+       model.pt
+       history.json
+       history.csv
+       summary.json
+
+The committee layer computes any trainer-owned train/validation split once in
+the parent process and reuses that split across all members. In the first
+committee implementation, the main reproducibility pattern is a shared
+``split_seed`` with distinct per-member ``seed`` values derived from
+``base_seed`` or from ``member_seeds``.
+
+Committee Inference and ASCII Export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Phase 3 adds committee-level loading, aggregated prediction, and a
+committee-wide ASCII export helper:
+
+.. code-block:: python
+
+   reloaded = TorchCommitteePotential.from_directory(result.output_dir)
+   predictions = reloaded.predict(structures, eval_forces=False)
+   first_result = predictions[0]
+
+   print(first_result.energy_mean, first_result.energy_std)
+   print(first_result.member_energies)
+
+   members = reloaded.to_aenet_ascii(
+       Path("ascii_committee"),
+       prefix="committee",
+       structures=structures,
+   )
+   print(members[0])
+
+``predict()`` returns one
+:class:`aenet.mlip.ensemble.AenetEnsembleResult` per input structure and
+reuses the same ``aggregation='mean'`` / ``aggregation='reference'``
+semantics as the existing Fortran-backed ensemble interfaces.
+
+The maintained notebook ``notebooks/example-05-torch-training.ipynb`` now
+includes a TiO2 committee-training example that trains a small committee,
+reloads it from ``committee_metadata.json``, inspects aggregated uncertainty,
+and exports the member manifest for later Fortran-backed ensemble inference.
+
+``to_aenet_ascii()`` exports each committee member into a stable layout and
+returns the member manifest expected by
+``AenetEnsembleInterface`` and ``AenetEnsembleCalculator``:
+pass ``structures=...`` or explicit ``descriptor_stats=...`` when exact
+descriptor statistics must be written into the ASCII files.
+
+.. code-block:: text
+
+   ascii_committee/
+     member_000/
+       committee.H.nn.ascii
+     member_001/
+       committee.H.nn.ascii
 
 
 Structure Sampling Policies

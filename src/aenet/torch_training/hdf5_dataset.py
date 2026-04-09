@@ -2268,12 +2268,10 @@ def train_test_split_dataset(
     test_subset : Dataset
         A Subset instance containing the test indices.
     """
-    if seed is not None:
-        random.seed(seed)
-
     n = len(dataset)
     indices = list(range(n))
-    random.shuffle(indices)
+    rng = random.Random(seed)
+    rng.shuffle(indices)
 
     n_test = int(n * float(test_fraction))
     test_idx = indices[:n_test]

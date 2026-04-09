@@ -10,8 +10,11 @@ from aenet.geometry import AtomicStructure
 from aenet.mlip import PredictionConfig
 from aenet.torch_featurize import ChebyshevDescriptor
 from aenet.torch_training import (
+    Adam,
     Structure,
     TorchANNPotential,
+    TorchCommitteeConfig,
+    TorchCommitteePotential,
     TorchTrainingConfig,
 )
 from aenet.torch_training.dataset import CachedStructureDataset
@@ -184,3 +187,48 @@ def test_cached_dataset_inference_example(tmp_path):
     assert results.forces is None
     assert results.coords[0].shape == (3, 3)
     assert results.atom_types[0] == ["H", "H", "H"]
+
+
+@pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_committee_ascii_export_example(tmp_path):
+    """The committee export example in the inference docs should stay runnable."""
+    structures = _make_structures()
+    committee = TorchCommitteePotential(_make_arch(), descriptor=_make_descriptor())
+    result = committee.train(
+        structures=structures,
+        config=TorchTrainingConfig(
+            iterations=0,
+            method=Adam(mu=0.001, batchsize=1),
+            testpercent=0,
+            force_weight=0.0,
+            memory_mode="cpu",
+            device="cpu",
+            atomic_energies={"H": 0.0},
+            normalize_features=False,
+            normalize_energy=False,
+            checkpoint_dir=None,
+            checkpoint_interval=0,
+            max_checkpoints=None,
+            save_best=False,
+            use_scheduler=False,
+            show_progress=False,
+        ),
+        committee_config=TorchCommitteeConfig(
+            num_members=2,
+            base_seed=11,
+            max_parallel=1,
+            output_dir=tmp_path / "committee_run",
+        ),
+    )
+
+    reloaded = TorchCommitteePotential.from_directory(result.output_dir)
+    manifest = reloaded.to_aenet_ascii(
+        tmp_path / "ascii_committee",
+        prefix="committee",
+        structures=structures,
+    )
+
+    assert len(manifest) == 2
+    assert (tmp_path / "ascii_committee" / "member_000" / "committee.H.nn.ascii").exists()
+    assert (tmp_path / "ascii_committee" / "member_001" / "committee.H.nn.ascii").exists()

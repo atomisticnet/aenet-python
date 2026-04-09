@@ -9,6 +9,8 @@ from aenet.torch_training import (
     Adam,
     Structure,
     TorchANNPotential,
+    TorchCommitteeConfig,
+    TorchCommitteePotential,
     TorchTrainingConfig,
 )
 
@@ -152,6 +154,111 @@ def test_sampling_policy_docs_example():
     assert uniform_cfg.sampling_policy == "uniform"
     assert weighted_cfg.sampling_policy == "energy_weighted"
     assert adaptive_cfg.sampling_policy == "error_weighted"
+
+
+@pytest.mark.cpu
+def test_reproducibility_controls_docs_example():
+    """The docs reproducibility example should stay aligned with the API."""
+    config = TorchTrainingConfig(seed=11, split_seed=7)
+
+    assert config.seed == 11
+    assert config.split_seed == 7
+
+
+@pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_committee_training_docs_example(tmp_path):
+    """The committee-training docs example should stay runnable."""
+    committee = TorchCommitteePotential(
+        {"H": [(4, "tanh")]},
+        descriptor=_make_descriptor(),
+    )
+    train_config = TorchTrainingConfig(
+        iterations=1,
+        method=Adam(mu=0.001, batchsize=1),
+        testpercent=50,
+        split_seed=7,
+        atomic_energies={"H": 0.0},
+        normalize_features=False,
+        normalize_energy=False,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+    committee_config = TorchCommitteeConfig(
+        num_members=2,
+        base_seed=11,
+        max_parallel=1,
+        output_dir=tmp_path / "committee_run",
+    )
+
+    result = committee.train(
+        structures=_make_structures(include_forces=False),
+        config=train_config,
+        committee_config=committee_config,
+    )
+
+    assert result.metadata_path.exists()
+    assert [member.seed for member in result.members] == [11, 12]
+
+
+@pytest.mark.cpu
+@pytest.mark.docs_examples
+def test_committee_inference_docs_example(tmp_path):
+    """The committee inference/export docs example should stay runnable."""
+    structures = _make_structures(include_forces=False)
+    committee = TorchCommitteePotential(
+        {"H": [(4, "tanh")]},
+        descriptor=_make_descriptor(),
+    )
+    train_config = TorchTrainingConfig(
+        iterations=1,
+        method=Adam(mu=0.001, batchsize=1),
+        testpercent=50,
+        split_seed=7,
+        atomic_energies={"H": 0.0},
+        normalize_features=False,
+        normalize_energy=False,
+        memory_mode="cpu",
+        device="cpu",
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+    )
+    result = committee.train(
+        structures=structures,
+        config=train_config,
+        committee_config=TorchCommitteeConfig(
+            num_members=2,
+            base_seed=11,
+            max_parallel=1,
+            output_dir=tmp_path / "committee_run",
+        ),
+    )
+
+    reloaded = TorchCommitteePotential.from_directory(result.output_dir)
+    predictions = reloaded.predict(
+        structures,
+        eval_forces=False,
+    )
+    manifest = reloaded.to_aenet_ascii(
+        tmp_path / "ascii_committee",
+        prefix="committee",
+        structures=structures,
+    )
+
+    assert len(predictions) == 2
+    assert predictions[0].num_members == 2
+    assert len(manifest) == 2
+    assert (tmp_path / "ascii_committee" / "member_000" / "committee.H.nn.ascii").exists()
 
 
 @pytest.mark.cpu

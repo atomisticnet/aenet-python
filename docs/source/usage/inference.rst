@@ -242,6 +242,37 @@ independently trained potentials through the direct ``libaenet`` interfaces.
 The default aggregation reports the ensemble mean energy and forces, together
 with standard deviations and per-atom force uncertainties.
 
+If the committee members were trained with the PyTorch backend, you can
+export the full committee into this same manifest format with
+``TorchCommitteePotential.to_aenet_ascii(...)`` and pass the returned
+member list directly into ``AenetEnsembleInterface``.
+
+.. code-block:: python
+
+    from pathlib import Path
+
+    from aenet.geometry import AtomicStructure
+    from aenet.mlip import AenetEnsembleInterface
+    from aenet.torch_training import Structure, TorchCommitteePotential
+
+    training_structures = [
+        Structure.from_AtomicStructure(AtomicStructure.from_file("train-0.xsf")),
+        Structure.from_AtomicStructure(AtomicStructure.from_file("train-1.xsf")),
+    ]
+
+    committee = TorchCommitteePotential.from_directory("committee_run")
+    members = committee.to_aenet_ascii(
+        Path("ascii_committee"),
+        prefix="committee",
+        structures=training_structures,
+    )
+
+    ensemble = AenetEnsembleInterface(members)
+    structure = AtomicStructure.from_file("structure.xsf")
+    result = ensemble.predict(structure, forces=True)
+
+    print(result.energy_mean, result.energy_std)
+
 .. code-block:: python
 
     from aenet.geometry import AtomicStructure

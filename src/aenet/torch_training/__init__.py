@@ -22,6 +22,10 @@ __all__ = [
     "TrainingMethod",
     "Adam",
     "SGD",
+    "TorchCommitteeConfig",
+    "TorchCommitteeMemberResult",
+    "TorchCommitteeTrainResult",
+    "TorchCommitteePotential",
     # Datasets and helpers
     "StructureDataset",
     "train_test_split",
@@ -52,6 +56,13 @@ _NAME_TO_SPEC: dict[str, tuple[str, str]] = {
     "Structure": (".config", "Structure"),
     "TorchTrainingConfig": (".config", "TorchTrainingConfig"),
     "TrainingMethod": (".config", "TrainingMethod"),
+    # committee
+    "TorchCommitteeConfig": (".committee", "TorchCommitteeConfig"),
+    "TorchCommitteeMemberResult": (
+        ".committee", "TorchCommitteeMemberResult"
+    ),
+    "TorchCommitteeTrainResult": (".committee", "TorchCommitteeTrainResult"),
+    "TorchCommitteePotential": (".committee", "TorchCommitteePotential"),
     # dataset
     "StructureDataset": (".dataset", "StructureDataset"),
     "train_test_split": (".dataset", "train_test_split"),
