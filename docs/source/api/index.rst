@@ -6,6 +6,7 @@ This section provides detailed API documentation for the aenet-python package.
 .. toctree::
    :maxdepth: 2
 
+   reference_energies
    trainset
    transformations
    torch_featurize
@@ -13,6 +14,13 @@ This section provides detailed API documentation for the aenet-python package.
    torch_training_committee
    torch_training_training
    torch_training_inference
+
+Reference Energies
+------------------
+
+:doc:`reference_energies`
+   Helper API for constructing atomic reference energies from regression and
+   other supported workflows.
 
 Training Set Management
 -----------------------

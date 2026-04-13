@@ -44,6 +44,15 @@ dataset-backed prediction, and committee training, see
 `example-05-torch-training.ipynb
 <https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-05-torch-training.ipynb>`_.
 
+If you need to construct ``atomic_energies`` programmatically before
+training or before building a large HDF5 dataset, see
+:class:`aenet.reference_energies.ReferenceEnergies`. Its regression helper
+accepts lazy ``(composition, energy)`` samples directly, and its
+reference-compound helper selects the lowest-energy sample for each requested
+composition before solving the constrained system. The module also provides a
+file-path iterator backed by ``aenet.io.structure`` for streaming-friendly
+preprocessing.
+
 
 Energy-Only Training
 --------------------
