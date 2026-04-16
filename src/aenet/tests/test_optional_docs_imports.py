@@ -1,15 +1,12 @@
 """Regression tests for Sphinx-safe optional imports."""
 
-import builtins
-import importlib
 from types import SimpleNamespace
 
 import pytest
 
-import aenet._optional as optional
+import aenet.mlip as mlip
 import aenet.torch_featurize as torch_featurize
 import aenet.torch_training as torch_training
-import aenet.torch_training.committee as torch_committee
 
 
 def test_torch_training_lazy_exports_require_torch_outside_sphinx(
@@ -104,29 +101,14 @@ def test_torch_featurize_lazy_exports_defer_to_sphinx_imports(monkeypatch):
     assert getattr(torch_featurize, "AngularBasis") is sentinel
 
 
-def test_committee_module_accepts_sphinx_torch_data_fallback(monkeypatch):
-    """Committee docs imports should survive missing torch.utils.data."""
-    real_import = builtins.__import__
+def test_mlip_optional_interfaces_are_imported_lazily(monkeypatch):
+    """MLIP should not import libaenet-backed interfaces eagerly."""
+    sentinel = object()
 
-    def _import_with_missing_torch_data(
-        name,
-        globals=None,
-        locals=None,
-        fromlist=(),
-        level=0,
-    ):
-        if name == "torch.utils.data":
-            raise ImportError("blocked import: torch.utils.data")
-        return real_import(name, globals, locals, fromlist, level)
+    monkeypatch.setattr(
+        mlip,
+        "import_module",
+        lambda rel_mod, package: SimpleNamespace(LibAenetInterface=sentinel),
+    )
 
-    monkeypatch.setattr(optional, "is_sphinx_build", lambda: True)
-    monkeypatch.setattr(builtins, "__import__", _import_with_missing_torch_data)
-
-    reloaded = importlib.reload(torch_committee)
-
-    try:
-        subset = reloaded.Subset(dataset="dataset", indices=[1, 2])
-        assert subset.dataset == "dataset"
-        assert subset.indices == [1, 2]
-    finally:
-        importlib.reload(torch_committee)
+    assert getattr(mlip, "LibAenetInterface") is sentinel

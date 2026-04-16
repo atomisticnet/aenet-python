@@ -10,28 +10,25 @@ This module provides interfaces to aenet neural network potentials:
 
 """
 
+from importlib import import_module
+
+from .. import config as cfg
+from ..trainset import TrnSet
+
 # Import main classes from potential module for backward compatibility
 from .potential import (
+    BFGS,
+    EKF,
+    LM,
+    Activation,
+    Adam,
+    ANNArchitecture,
     ANNPotential,
+    OnlineSD,
     PredictionConfig,
     TrainingConfig,
     TrainingMethod,
-    OnlineSD,
-    Adam,
-    EKF,
-    LM,
-    BFGS,
-    Activation,
-    ANNArchitecture,
 )
-
-# Import library interface and ASE calculator
-from .interface import LibAenetInterface, AenetEnsembleInterface
-from .calculator import AenetCalculator, AenetEnsembleCalculator
-
-# Legacy re-exports expected by tests and downstream callers
-from ..trainset import TrnSet
-from .. import config as cfg
 
 __all__ = [
     "ANNPotential",
@@ -52,3 +49,22 @@ __all__ = [
     "TrnSet",
     "cfg",
 ]
+
+_LAZY_EXPORTS = {
+    "LibAenetInterface": (".interface", "LibAenetInterface"),
+    "AenetEnsembleInterface": (".interface", "AenetEnsembleInterface"),
+    "AenetCalculator": (".calculator", "AenetCalculator"),
+    "AenetEnsembleCalculator": (
+        ".calculator",
+        "AenetEnsembleCalculator",
+    ),
+}
+
+
+def __getattr__(name):
+    """Lazily import optional libaenet-backed interfaces."""
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        module = import_module(module_name, __name__)
+        return getattr(module, attr_name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
