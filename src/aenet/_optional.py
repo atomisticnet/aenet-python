@@ -15,6 +15,8 @@ PyG-backed features additionally require `torch-scatter` and
 
 from __future__ import annotations
 
+import sys
+
 PYG_WHEEL_INDEX = "https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html"
 TORCH_INSTALL_HINT = "pip install 'aenet[torch]'"
 TORCH_STACK_INSTALL_HINT = (
@@ -93,6 +95,18 @@ def torch_stack_status() -> tuple[bool, str]:
             + " (ensure torch/CPU/CUDA wheels match your system)",
         )
     return True, ""
+
+
+def is_sphinx_build() -> bool:
+    """
+    Return whether execution is happening inside a Sphinx build.
+
+    Sphinx autodoc/autosummary can provide mocked optional dependencies.
+    Package-level lazy exports should defer to those mocks instead of raising
+    an eager ImportError before autodoc gets a chance to import the target
+    module.
+    """
+    return "sphinx" in sys.modules
 
 
 def require_torch(feature: str = "this feature") -> None:

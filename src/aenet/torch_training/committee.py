@@ -15,7 +15,24 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from torch.utils.data import Dataset, Subset
+
+from .._optional import is_sphinx_build
+
+try:
+    from torch.utils.data import Dataset, Subset
+except Exception:  # pragma: no cover - exercised via docs-only fallback test
+    if not is_sphinx_build():
+        raise
+
+    class Dataset:
+        """Minimal torch.utils.data.Dataset stub for Sphinx builds."""
+
+    class Subset(Dataset):
+        """Minimal torch.utils.data.Subset stub for Sphinx builds."""
+
+        def __init__(self, dataset=None, indices=None):
+            self.dataset = dataset
+            self.indices = indices
 
 from ..mlip.ensemble import AenetEnsembleResult, normalize_ensemble_members
 from .config import Structure, TorchTrainingConfig

@@ -16,7 +16,11 @@ symbols will raise a clear ImportError with installation guidance.
 from importlib import import_module
 from typing import Any
 
-from .._optional import TORCH_STACK_INSTALL_HINT, torch_stack_status
+from .._optional import (
+    TORCH_STACK_INSTALL_HINT,
+    is_sphinx_build,
+    torch_stack_status,
+)
 
 __all__ = [
     "TorchNeighborList",
@@ -50,13 +54,14 @@ _NAME_TO_SPEC: dict[str, tuple[str, str]] = {
 
 def __getattr__(name: str) -> Any:  # PEP 562 lazy attribute access
     if name in _NAME_TO_SPEC:
-        ok, reason = torch_stack_status()
-        if not ok:
-            raise ImportError(
-                f"{name} requires the PyTorch extras. {reason} "
-                + TORCH_STACK_INSTALL_HINT
-            )
         rel_mod, attr = _NAME_TO_SPEC[name]
+        if not is_sphinx_build():
+            ok, reason = torch_stack_status()
+            if not ok:
+                raise ImportError(
+                    f"{name} requires the PyTorch extras. {reason} "
+                    + TORCH_STACK_INSTALL_HINT
+                )
         mod = import_module(rel_mod, __name__)
         return getattr(mod, attr)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

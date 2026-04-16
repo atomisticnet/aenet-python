@@ -14,7 +14,7 @@ extensions (`torch-scatter` and `torch-cluster`) used by
 from importlib import import_module
 from typing import Any
 
-from .._optional import require_torch
+from .._optional import is_sphinx_build, require_torch
 
 __all__ = [
     "Structure",
@@ -91,9 +91,10 @@ _NAME_TO_SPEC: dict[str, tuple[str, str]] = {
 
 def __getattr__(name: str) -> Any:  # PEP 562 lazy attribute access
     if name in _NAME_TO_SPEC:
-        # Only core torch is required for training
-        require_torch(feature=f"{name}")
         rel_mod, attr = _NAME_TO_SPEC[name]
+        if not is_sphinx_build():
+            # Only core torch is required for training.
+            require_torch(feature=f"{name}")
         mod = import_module(rel_mod, __name__)
         return getattr(mod, attr)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
