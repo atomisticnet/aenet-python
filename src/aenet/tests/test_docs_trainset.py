@@ -20,6 +20,7 @@ def test_hdf5_trainset_inspection_example():
     with TrnSet.from_file(SAMPLE_H5) as trnset:
         struct = trnset[0]
 
+        assert trnset.schema == "trnset_hdf5"
         assert trnset.num_structures == 5
         assert trnset.atom_types == ["Ti", "O"]
         assert struct.num_atoms == 23

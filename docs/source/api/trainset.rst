@@ -101,12 +101,17 @@ workflows.
    from aenet.trainset import TrnSet
 
    with TrnSet.from_file("sample.h5") as trnset:
+       print(trnset.schema)
        print(trnset.num_structures)
        print(trnset.atom_types)
 
        struct = trnset[0]
        print(struct.num_atoms)
        print(struct.atom_features.shape)
+
+For HDF5 inputs, ``trnset.schema`` reports which on-disk schema was read.
+Current values are ``"trnset_hdf5"`` for featurizer-generated training sets
+and ``"torch_training_hdf5"`` for ``HDF5StructureDataset`` files.
 
 Comparing HDF5 and ASCII Readers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

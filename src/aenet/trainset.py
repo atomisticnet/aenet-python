@@ -5,9 +5,11 @@ Currently, only training set fuiles in ASCII format are supported.
 
 """
 
-from typing import List
+import json
 import os
+import pickle
 import subprocess
+from typing import List
 import warnings
 
 import numpy as np
@@ -345,7 +347,10 @@ class TrnSet(object):
                  E_min: float, E_max: float, E_av: float,
                  filename: os.PathLike = None,
                  fileformat: str = 'ascii',
-                 origin: os.PathLike = None, **kwargs):
+                 schema: str = None,
+                 origin: os.PathLike = None,
+                 has_persisted_features: bool = False,
+                 **kwargs):
         for arg in kwargs:
             TypeError("Unexpected keyword argument '{}'.".format(arg))
         if fileformat not in ["ascii", "hdf5"]:
@@ -360,7 +365,11 @@ class TrnSet(object):
         self.num_structures = num_structures
         self.E_min, self.E_max, self.E_av = (E_min, E_max, E_av)
         self.origin = origin
+        self.schema = schema or ('ascii' if fileformat == 'ascii'
+                                 else 'trnset_hdf5')
         self.opened = False
+        self._torch_has_persisted_features = bool(has_persisted_features)
+        self._torch_feature_rows_by_entry = {}
         if filename is not None:
             self.filename = filename
             self.format = fileformat
@@ -523,23 +532,52 @@ class TrnSet(object):
 
     @classmethod
     def from_hdf5_file(cls, hdf5_file: os.PathLike, **kwargs):
-        h5file = tb.open_file(hdf5_file, mode='r')
-        metadata = h5file.root.metadata[0]
-        name = metadata['name'].decode('utf-8')
-        normalized = metadata['normalized']
-        scale = metadata['scale']
-        shift = metadata['shift']
-        atom_types = [t.decode('utf-8') for t in metadata['atom_types']]
-        atomic_energy = metadata['atomic_energy']
-        num_atoms_tot = metadata['num_atoms_tot']
-        num_structures = metadata['num_structures']
-        E_min = metadata['E_min']
-        E_max = metadata['E_max']
-        E_av = metadata['E_av']
-        h5file.close()
+        with tb.open_file(hdf5_file, mode='r') as h5file:
+            if cls._is_trnset_hdf5(h5file):
+                metadata = h5file.root.metadata[0]
+                name = metadata['name'].decode('utf-8')
+                normalized = metadata['normalized']
+                scale = metadata['scale']
+                shift = metadata['shift']
+                atom_types = [t.decode('utf-8') for t in metadata['atom_types']]
+                atomic_energy = metadata['atomic_energy']
+                num_atoms_tot = metadata['num_atoms_tot']
+                num_structures = metadata['num_structures']
+                E_min = metadata['E_min']
+                E_max = metadata['E_max']
+                E_av = metadata['E_av']
+                schema = 'trnset_hdf5'
+                has_persisted_features = True
+            elif cls._is_torch_training_hdf5(h5file):
+                metadata = cls._read_torch_training_hdf5_metadata(h5file)
+                name = metadata['name']
+                normalized = metadata['normalized']
+                scale = metadata['scale']
+                shift = metadata['shift']
+                atom_types = metadata['atom_types']
+                atomic_energy = metadata['atomic_energy']
+                num_atoms_tot = metadata['num_atoms_tot']
+                num_structures = metadata['num_structures']
+                E_min = metadata['E_min']
+                E_max = metadata['E_max']
+                E_av = metadata['E_av']
+                schema = 'torch_training_hdf5'
+                has_persisted_features = metadata['has_persisted_features']
+            else:
+                raise ValueError(
+                    f"Unsupported HDF5 training-set schema in '{hdf5_file}'."
+                )
+        if schema == 'torch_training_hdf5' and not has_persisted_features:
+            warnings.warn(
+                "The HDF5StructureDataset file does not contain persisted "
+                "features. TrnSet will expose empty per-atom fingerprints.",
+                stacklevel=2,
+            )
         return cls(name, normalized, scale, shift, atom_types,
                    atomic_energy, num_atoms_tot, num_structures, E_min,
                    E_max, E_av, filename=hdf5_file, fileformat='hdf5',
+                   schema=schema,
+                   has_persisted_features=has_persisted_features,
                    **kwargs)
 
     @property
@@ -554,7 +592,7 @@ class TrnSet(object):
             True if neighbor information is available (only for HDF5 format),
             False otherwise.
         """
-        if self.format != 'hdf5':
+        if self.format != 'hdf5' or self.schema != 'trnset_hdf5':
             return False
 
         if not self.opened:
@@ -672,6 +710,8 @@ class TrnSet(object):
             self._fp = tb.open_file(self.filename)
             self.opened = True
             self._istruc = 0
+            if self.schema == 'torch_training_hdf5':
+                self._initialize_torch_training_hdf5_state()
 
     def close(self):
         if self.opened:
@@ -729,6 +769,12 @@ class TrnSet(object):
             raise ValueError("Unknown format: {}".format(self.format))
 
     def _read_structure_hdf5(self, idx, read_coords, read_forces):
+        if self.schema == 'torch_training_hdf5':
+            return self._read_structure_hdf5_torch_training(
+                idx, read_coords, read_forces)
+        return self._read_structure_hdf5_trnset(idx, read_coords, read_forces)
+
+    def _read_structure_hdf5_trnset(self, idx, read_coords, read_forces):
         row = self._fp.root.structures.info[idx]
         path = row['path'].decode('utf-8')
         if self.origin is not None:
@@ -766,6 +812,40 @@ class TrnSet(object):
         return FeaturizedAtomicStructure(
             path, energy, self.atom_types, atoms,
             neighbor_info=neighbor_info, cell=cell, pbc=pbc)
+
+    def _read_structure_hdf5_torch_training(self, idx, read_coords,
+                                            read_forces):
+        meta_row = self._fp.root.entries.meta[idx]
+        struct = self._load_torch_training_structure(idx)
+        path = self._torch_training_structure_path(meta_row, idx)
+
+        positions = np.asarray(struct.positions)
+        if struct.forces is None:
+            forces = np.zeros_like(positions)
+        else:
+            forces = np.asarray(struct.forces)
+
+        feature_matrix = self._read_torch_training_features(idx, struct.n_atoms)
+        atoms = []
+        for i, atom_type in enumerate(struct.species):
+            atoms.append({
+                "type": atom_type,
+                "fingerprint": feature_matrix[i],
+                "coords": positions[i] if read_coords else None,
+                "forces": forces[i] if read_forces else None,
+            })
+
+        cell = np.asarray(struct.cell) if struct.cell is not None else None
+        pbc = bool(np.all(struct.pbc)) if struct.pbc is not None else False
+        return FeaturizedAtomicStructure(
+            path,
+            float(struct.energy),
+            self.atom_types,
+            atoms,
+            neighbor_info=None,
+            cell=cell,
+            pbc=pbc,
+        )
 
     def _read_neighbor_info_hdf5(self, structure_idx: int,
                                  num_atoms: int) -> dict:
@@ -853,6 +933,157 @@ class TrnSet(object):
         s = self._read_structure_hdf5(self._istruc, read_coords, read_forces)
         self._istruc += 1
         return s
+
+    @staticmethod
+    def _is_trnset_hdf5(h5file) -> bool:
+        return hasattr(h5file.root, 'metadata') and hasattr(h5file.root,
+                                                            'structures')
+
+    @staticmethod
+    def _is_torch_training_hdf5(h5file) -> bool:
+        return (hasattr(h5file.root, 'entries')
+                and hasattr(h5file.root.entries, 'structures')
+                and hasattr(h5file.root.entries, 'meta'))
+
+    @staticmethod
+    def _decode_hdf5_text(value) -> str:
+        if isinstance(value, bytes):
+            return value.decode('utf-8').rstrip('\x00')
+        return str(value).rstrip('\x00')
+
+    @classmethod
+    def _read_torch_training_hdf5_metadata(cls, h5file) -> dict:
+        meta = h5file.root.entries.meta
+        num_structures = len(meta)
+        num_atoms_tot = int(sum(int(row['n_atoms']) for row in meta))
+        atomic_energies = cls._read_torch_training_atomic_energies(h5file)
+        atom_types = cls._read_torch_training_atom_types(h5file)
+        atomic_energy = np.array(
+            [atomic_energies.get(atom_type, 0.0) for atom_type in atom_types],
+            dtype=np.float64,
+        )
+
+        normalized_energies = []
+        for idx, row in enumerate(meta):
+            struct = cls._load_torch_training_structure_from_handle(h5file, idx)
+            total_energy = float(row['energy'])
+            atomic_contribution = sum(
+                atomic_energies.get(atom_type, 0.0) for atom_type in struct.species
+            )
+            normalized_energies.append(
+                (total_energy - atomic_contribution)/max(struct.n_atoms, 1)
+            )
+        if len(normalized_energies) == 0:
+            E_min = E_max = E_av = 0.0
+        else:
+            E_min = float(np.min(normalized_energies))
+            E_max = float(np.max(normalized_energies))
+            E_av = float(np.mean(normalized_energies))
+
+        has_persisted_features = cls._torch_training_has_persisted_features(
+            h5file
+        )
+        return {
+            'name': "Torch training HDF5 dataset",
+            'normalized': False,
+            'scale': 1.0,
+            'shift': 0.0,
+            'atom_types': atom_types,
+            'atomic_energy': atomic_energy,
+            'num_atoms_tot': num_atoms_tot,
+            'num_structures': num_structures,
+            'E_min': E_min,
+            'E_max': E_max,
+            'E_av': E_av,
+            'has_persisted_features': has_persisted_features,
+        }
+
+    @classmethod
+    def _read_torch_training_atomic_energies(cls, h5file) -> dict:
+        attrs = h5file.root._v_attrs
+        if not hasattr(attrs, 'energy_filter_atomic_energies_json'):
+            return {}
+        payload = str(attrs.energy_filter_atomic_energies_json)
+        if len(payload) == 0:
+            return {}
+        decoded = json.loads(payload)
+        return {str(key): float(value) for key, value in decoded.items()}
+
+    @classmethod
+    def _read_torch_training_atom_types(cls, h5file) -> List[str]:
+        if hasattr(h5file.root, 'descriptor_manifest'):
+            attrs = h5file.root.descriptor_manifest._v_attrs
+            config = json.loads(str(attrs.config_json))
+            species = [str(species) for species in config.get('species', [])]
+            if len(species) > 0:
+                return species
+
+        atom_types = []
+        seen = set()
+        for idx in range(len(h5file.root.entries.meta)):
+            struct = cls._load_torch_training_structure_from_handle(h5file, idx)
+            for atom_type in struct.species:
+                if atom_type not in seen:
+                    atom_types.append(atom_type)
+                    seen.add(atom_type)
+        return atom_types
+
+    @staticmethod
+    def _torch_training_has_persisted_features(h5file) -> bool:
+        if not hasattr(h5file.root, 'torch_cache'):
+            return False
+        cache_group = h5file.root.torch_cache
+        contains_features = bool(
+            getattr(cache_group._v_attrs, 'contains_features', False)
+        )
+        if not contains_features or not hasattr(cache_group, 'features'):
+            return False
+        return (hasattr(cache_group.features, 'index')
+                and hasattr(cache_group.features, 'values'))
+
+    @classmethod
+    def _load_torch_training_structure_from_handle(cls, h5file, idx: int):
+        data = np.array(h5file.root.entries.structures[idx], copy=False)
+        return pickle.loads(data.tobytes())
+
+    def _initialize_torch_training_hdf5_state(self):
+        self._torch_feature_rows_by_entry = {}
+        if not self._torch_has_persisted_features:
+            return
+        index = self._fp.root.torch_cache.features.index
+        for row in index:
+            self._torch_feature_rows_by_entry[int(row['entry_idx'])] = int(
+                row['cache_row']
+            )
+
+    def _load_torch_training_structure(self, idx: int):
+        return self._load_torch_training_structure_from_handle(self._fp, idx)
+
+    def _torch_training_structure_path(self, row, idx: int) -> str:
+        base = (
+            self._decode_hdf5_text(row['display_name'])
+            or self._decode_hdf5_text(row['source_id'])
+            or self._decode_hdf5_text(row['name'])
+            or f"structure_{idx:06d}"
+        )
+        frame_idx = int(row['frame_idx'])
+        path = base if frame_idx == 0 else f"{base}#frame={frame_idx}"
+        if self.origin is not None and not os.path.isabs(path):
+            path = os.path.abspath(os.path.join(self.origin, path))
+        return path
+
+    def _read_torch_training_features(self, idx: int, n_atoms: int) -> np.ndarray:
+        if not self._torch_has_persisted_features:
+            return np.empty((n_atoms, 0), dtype=np.float64)
+        cache_row = self._torch_feature_rows_by_entry.get(int(idx))
+        if cache_row is None:
+            return np.empty((n_atoms, 0), dtype=np.float64)
+        row = self._fp.root.torch_cache.features.index[cache_row]
+        n_features = int(row['n_features'])
+        values = np.asarray(
+            self._fp.root.torch_cache.features.values[cache_row]
+        )
+        return values.reshape(n_atoms, n_features)
 
     def _read_next_structure_ascii(self, read_coords, read_forces):
         """

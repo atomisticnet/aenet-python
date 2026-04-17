@@ -27,6 +27,8 @@ transparently:
 
 This opens the training set file ``data.train`` which can be in any of
 the three supported formats (Fortran binary, ASCII text, or HDF5).
+For HDF5 inputs, ``ts.schema`` reports whether the file uses the classic
+``TrnSet`` layout or the ``HDF5StructureDataset`` layout.
 
 API Reference
 """""""""""""""
