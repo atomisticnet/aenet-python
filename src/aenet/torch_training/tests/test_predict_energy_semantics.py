@@ -358,6 +358,120 @@ def test_predict_dataset_supports_subset():
 
 
 @pytest.mark.cpu
+def test_predict_dataset_force_fallback_supports_subset():
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+            [0.0, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    s1 = Structure(positions=positions, species=["H", "H", "H"],
+                   energy=1.0, forces=None, name="s1.xsf")
+    s2 = Structure(positions=positions + 0.05, species=["H", "H", "H"],
+                   energy=1.5, forces=None, name="s2.xsf")
+
+    descriptor = _make_descriptor(dtype=torch.float64)
+    pot = TorchANNPotential(arch=_make_arch(), descriptor=descriptor)
+
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        normalize_features=False,
+        normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+    pot.train(structures=[s1, s2], config=cfg)
+
+    ds = CachedStructureDataset(
+        structures=[s1, s2],
+        descriptor=descriptor,
+        show_progress=False,
+    )
+    subset = Subset(ds, [1])
+
+    direct = pot.predict([s2], eval_forces=True)
+    via_dataset = pot.predict_dataset(subset, eval_forces=True)
+
+    assert len(via_dataset.total_energy) == 1
+    assert via_dataset.paths == ["s2.xsf"]
+    assert via_dataset.forces is not None
+    assert via_dataset.forces[0].shape == (3, 3)
+    np.testing.assert_allclose(
+        via_dataset.total_energy,
+        direct.total_energy,
+        atol=1.0e-10,
+        rtol=0.0,
+    )
+    np.testing.assert_allclose(
+        via_dataset.forces[0],
+        direct.forces[0],
+        atol=1.0e-10,
+        rtol=0.0,
+    )
+
+
+@pytest.mark.cpu
+def test_predict_dataset_force_fallback_requires_materializable_structures():
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+            [0.0, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    structure = Structure(
+        positions=positions,
+        species=["H", "H", "H"],
+        energy=1.0,
+        forces=None,
+        name="s1.xsf",
+    )
+    descriptor = _make_descriptor(dtype=torch.float64)
+    pot = TorchANNPotential(arch=_make_arch(), descriptor=descriptor)
+    cfg = TorchTrainingConfig(
+        iterations=0,
+        testpercent=0,
+        force_weight=0.0,
+        memory_mode="cpu",
+        device="cpu",
+        normalize_features=False,
+        normalize_energy=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+    )
+    pot.train(structures=[structure], config=cfg)
+    cached = CachedStructureDataset(
+        structures=[structure],
+        descriptor=descriptor,
+        show_progress=False,
+    )
+    sample = cached[0]
+
+    class FeatureOnlyDataset(torch.utils.data.Dataset):
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index: int):
+            return sample
+
+    with pytest.raises(ValueError, match="requires a dataset"):
+        pot.predict_dataset(FeatureOnlyDataset(), eval_forces=True)
+
+
+@pytest.mark.cpu
 def test_cached_dataset_matches_structure_dataset_energy_materialization():
     positions = np.array(
         [

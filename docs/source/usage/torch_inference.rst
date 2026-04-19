@@ -112,10 +112,14 @@ home for the longer file-backed TiO2 workflow.
 This is useful when the dataset already stores precomputed ``features``.
 For example, ``CachedStructureDataset`` can reuse cached feature tensors and
 avoid featurizing the structures again during energy-only inference.
+When ``eval_forces=True`` is requested, ``predict_dataset()`` falls back to
+materialized structures and calls the ordinary force-prediction path, because
+force evaluation requires coordinate derivatives rather than only cached
+energy features.
 
 Notes:
 
 * ``predict_dataset()`` is available only for ``TorchANNPotential``.
-* The current implementation supports energy-only inference
-  (``eval_forces=False``).
+* ``eval_forces=True`` requires a dataset that can expose raw structures via
+  ``get_structure()``, ``structures``, or a supported ``Subset`` wrapper.
 * The return type is still :class:`~aenet.io.predict.PredictOut`.

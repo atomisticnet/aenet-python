@@ -2394,8 +2394,9 @@ class TorchANNPotential:
             ``n_atoms``, and ``species`` fields. ``Subset`` wrappers are
             supported.
         eval_forces : bool, optional
-            Force prediction is not currently implemented for dataset-backed
-            inference. Default: False.
+            If False, use the dataset-backed cached-feature inference path.
+            If True, materialize raw structures from the dataset and delegate
+            to ``predict(..., eval_forces=True)``. Default: False.
         config : PredictionConfig, optional
             Prediction configuration. If None, uses defaults. Default: None
 
@@ -2412,6 +2413,29 @@ class TorchANNPotential:
 
         if config is None:
             config = PC()
+
+        if eval_forces:
+            structures = self._structures_from_dataset(dataset)
+            if structures is None:
+                raise ValueError(
+                    "predict_dataset(eval_forces=True) requires a dataset "
+                    "that can expose raw structures via get_structure(), "
+                    "structures, or a supported Subset wrapper."
+                )
+            result = self.predict(
+                structures,
+                eval_forces=True,
+                config=config,
+            )
+            names = [
+                str(struct.name) if struct.name not in (None, "") else None
+                for struct in structures
+            ]
+            if result.structure_paths is None and any(
+                name is not None for name in names
+            ):
+                result.structure_paths = names
+            return result
 
         changed_options = config.user_changed()
         unsupported = (set(changed_options.keys()) -

@@ -25,6 +25,7 @@ __all__ = [
     "TorchCommitteeConfig",
     "TorchCommitteeMemberResult",
     "TorchCommitteeTrainResult",
+    "TorchCommitteePredictResult",
     "TorchCommitteePotential",
     # Datasets and helpers
     "StructureDataset",
@@ -62,6 +63,9 @@ _NAME_TO_SPEC: dict[str, tuple[str, str]] = {
         ".committee", "TorchCommitteeMemberResult"
     ),
     "TorchCommitteeTrainResult": (".committee", "TorchCommitteeTrainResult"),
+    "TorchCommitteePredictResult": (
+        ".committee", "TorchCommitteePredictResult"
+    ),
     "TorchCommitteePotential": (".committee", "TorchCommitteePotential"),
     # dataset
     "StructureDataset": (".dataset", "StructureDataset"),

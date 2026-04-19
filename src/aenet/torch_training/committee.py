@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 
 from .._optional import is_sphinx_build
+from ..io.predict import PredictOut
+from ..io.train import TrainOut
 
 try:
     from torch.utils.data import Dataset, Subset
@@ -54,6 +56,7 @@ __all__ = [
     "TorchCommitteeConfig",
     "TorchCommitteeMemberResult",
     "TorchCommitteeTrainResult",
+    "TorchCommitteePredictResult",
     "TorchCommitteePotential",
 ]
 
@@ -138,6 +141,28 @@ class TorchCommitteeMemberResult:
     metrics: dict[str, float | None]
     error: str | None = None
 
+    @property
+    def stats(self) -> dict[str, float]:
+        """Return TrainOut-style final metrics for this committee member."""
+        return _normalize_member_stats(self.metrics)
+
+    @property
+    def trainout(self) -> TrainOut | None:
+        """
+        Return this member's TrainOut result, loaded from history.json.
+
+        The top-level committee metadata stores compact summaries only.
+        Member histories are persisted separately, so this property rebuilds
+        the familiar single-network TrainOut view lazily when it is available.
+        """
+        if self.status != "completed" or self.history_json_path is None:
+            return None
+        if not self.history_json_path.exists():
+            return None
+        with self.history_json_path.open("r", encoding="utf-8") as handle:
+            history = json.load(handle)
+        return TrainOut.from_torch_history(history)
+
     def to_metadata(self) -> dict[str, Any]:
         """Return a JSON-serializable metadata view."""
         return {
@@ -188,6 +213,220 @@ class TorchCommitteeTrainResult:
         return [
             member for member in self.members if member.status != "completed"
         ]
+
+    @property
+    def completed_members(self) -> list[TorchCommitteeMemberResult]:
+        """Return successfully trained committee members."""
+        return [
+            member for member in self.members if member.status == "completed"
+        ]
+
+    def to_dataframe(self):
+        """Return one row per member with status, paths, and final metrics."""
+        import pandas as pd
+
+        rows: list[dict[str, Any]] = []
+        for member in self.members:
+            row: dict[str, Any] = {
+                "member": member.member_index,
+                "seed": member.seed,
+                "split_seed": member.split_seed,
+                "device": member.device,
+                "status": member.status,
+                "model_path": member.model_path,
+                "history_json_path": member.history_json_path,
+                "history_csv_path": member.history_csv_path,
+                "summary_path": member.summary_path,
+                "checkpoint_dir": member.checkpoint_dir,
+                "error": member.error,
+            }
+            row.update(member.stats)
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    @property
+    def trainouts(self) -> list[TrainOut]:
+        """Return TrainOut objects for completed members with histories."""
+        return [
+            trainout for member in self.completed_members
+            if (trainout := member.trainout) is not None
+        ]
+
+    @property
+    def stats(self) -> dict[str, dict[str, float | int]]:
+        """Return aggregate statistics over completed committee members."""
+        values_by_metric: dict[str, list[float]] = {}
+        for member in self.completed_members:
+            for key, value in member.stats.items():
+                numeric = _finite_metric_value(value)
+                if numeric is None:
+                    continue
+                values_by_metric.setdefault(key, []).append(numeric)
+
+        stats: dict[str, dict[str, float | int]] = {}
+        for key, values in values_by_metric.items():
+            array = np.asarray(values, dtype=np.float64)
+            stats[key] = {
+                "mean": float(np.mean(array)),
+                "std": float(np.std(array, ddof=0)),
+                "min": float(np.min(array)),
+                "max": float(np.max(array)),
+                "n": int(len(values)),
+            }
+        return stats
+
+    def __str__(self) -> str:
+        """Return a TrainOut-like committee statistics summary."""
+        lines = ["Training statistics:"]
+        aggregate_stats = self.stats
+        printed: set[str] = set()
+
+        for key in _COMMITTEE_STATS_PRINT_ORDER:
+            if key not in aggregate_stats:
+                continue
+            entry = aggregate_stats[key]
+            lines.append(
+                f"  {key}: {_format_mean_std(entry['mean'], entry['std'])}"
+            )
+            printed.add(key)
+
+        for key in sorted(aggregate_stats):
+            if key in printed:
+                continue
+            entry = aggregate_stats[key]
+            lines.append(
+                f"  {key}: {_format_mean_std(entry['mean'], entry['std'])}"
+            )
+
+        lines.append(f"  completed_members: {len(self.completed_members)}")
+        lines.append(f"  failed_members: {len(self.failed_members)}")
+        lines.append(f"  execution_mode: {self.execution_mode}")
+        lines.append(f"  output_dir: {self.output_dir}")
+        return "\n".join(lines) + "\n"
+
+
+@dataclass
+class TorchCommitteePredictResult:
+    """List-like committee prediction result with per-member PredictOuts."""
+
+    predictions: list[AenetEnsembleResult]
+    member_outputs: list[PredictOut]
+    indices: list[int]
+    source_indices: list[int | None]
+    identifiers: list[str | None]
+
+    def __len__(self) -> int:
+        """Return the number of predicted structures."""
+        return len(self.predictions)
+
+    def __iter__(self):
+        """Iterate over aggregated per-structure ensemble predictions."""
+        return iter(self.predictions)
+
+    def __getitem__(self, index):
+        """Return one aggregated prediction or a slice of predictions."""
+        return self.predictions[index]
+
+    @property
+    def energy(self) -> np.ndarray:
+        """Reported aggregate energies for all structures."""
+        return np.array([prediction.energy for prediction in self.predictions])
+
+    @property
+    def energy_mean(self) -> np.ndarray:
+        """Mean committee energies for all structures."""
+        return np.array([
+            prediction.energy_mean for prediction in self.predictions
+        ])
+
+    @property
+    def energy_std(self) -> np.ndarray:
+        """Committee energy standard deviations for all structures."""
+        return np.array([
+            prediction.energy_std for prediction in self.predictions
+        ])
+
+    @property
+    def max_force_uncertainty(self) -> np.ndarray:
+        """Maximum per-atom force uncertainty for each structure."""
+        return np.array([
+            np.nan
+            if prediction.force_uncertainty is None
+            else float(np.max(prediction.force_uncertainty))
+            for prediction in self.predictions
+        ])
+
+    @property
+    def mean_force_uncertainty(self) -> np.ndarray:
+        """Mean per-atom force uncertainty for each structure."""
+        return np.array([
+            np.nan
+            if prediction.force_uncertainty is None
+            else float(np.mean(prediction.force_uncertainty))
+            for prediction in self.predictions
+        ])
+
+    def to_dataframe(self):
+        """Return one row per predicted structure with uncertainty metrics."""
+        import pandas as pd
+
+        rows: list[dict[str, Any]] = []
+        for row_index, prediction in enumerate(self.predictions):
+            force_uncertainty = prediction.force_uncertainty
+            rows.append(
+                {
+                    "index": self.indices[row_index],
+                    "source_index": self.source_indices[row_index],
+                    "identifier": self.identifiers[row_index],
+                    "energy": prediction.energy,
+                    "energy_mean": prediction.energy_mean,
+                    "energy_std": prediction.energy_std,
+                    "member_energies": prediction.member_energies,
+                    "max_force_uncertainty": (
+                        None
+                        if force_uncertainty is None
+                        else float(np.max(force_uncertainty))
+                    ),
+                    "mean_force_uncertainty": (
+                        None
+                        if force_uncertainty is None
+                        else float(np.mean(force_uncertainty))
+                    ),
+                    "num_members": prediction.num_members,
+                    "aggregation": prediction.aggregation,
+                    "reference_member": prediction.reference_member,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def sort_by(
+        self,
+        column: str = "energy_std",
+        *,
+        ascending: bool = False,
+    ):
+        """Return ``to_dataframe()`` sorted by one uncertainty column."""
+        return self.to_dataframe().sort_values(
+            column,
+            ascending=ascending,
+        )
+
+    def top_uncertain(
+        self,
+        n: int = 10,
+        *,
+        metric: str = "energy_std",
+    ):
+        """Return the top ``n`` most uncertain structures as a DataFrame."""
+        return self.sort_by(metric, ascending=False).head(int(n))
+
+    def __str__(self) -> str:
+        """Return a compact prediction-result summary."""
+        return (
+            f"TorchCommitteePredictResult("
+            f"num_structures={len(self)}, "
+            f"num_members={len(self.member_outputs)})"
+        )
 
 
 @dataclass
@@ -327,23 +566,142 @@ def _final_metric(
     values = history.get(key, [])
     if not values:
         return None
-    return float(values[-1])
+    return _finite_metric_value(values[-1])
+
+
+_HISTORY_TO_TRAINOUT_METRICS: tuple[tuple[str, str], ...] = (
+    ("final_MAE_train", "train_energy_mae"),
+    ("final_RMSE_train", "train_energy_rmse"),
+    ("final_MAE_test", "test_energy_mae"),
+    ("final_RMSE_test", "test_energy_rmse"),
+    ("final_RMSE_force_train", "train_force_rmse"),
+    ("final_RMSE_force_test", "test_force_rmse"),
+)
+
+_LEGACY_MEMBER_METRIC_ALIASES: dict[str, str] = {
+    "train_energy_rmse": "final_RMSE_train",
+    "test_energy_rmse": "final_RMSE_test",
+    "train_force_rmse": "final_RMSE_force_train",
+    "test_force_rmse": "final_RMSE_force_test",
+}
+
+_COMMITTEE_STATS_PRINT_ORDER: tuple[str, ...] = (
+    "final_MAE_train",
+    "final_RMSE_train",
+    "final_MAE_test",
+    "final_RMSE_test",
+    "min_RMSE_test",
+    "epoch_min_RMSE_test",
+    "final_RMSE_force_train",
+    "final_RMSE_force_test",
+    "min_RMSE_force_test",
+    "epoch_min_RMSE_force_test",
+    "best_val_loss",
+    "epochs_recorded",
+)
+
+
+def _finite_metric_value(value: Any) -> float | None:
+    """Return a finite float metric value, or None for unavailable values."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _format_mean_std(mean: float | int, std: float | int) -> str:
+    """Format an aggregate committee metric as mean plus/minus std."""
+    return f"{float(mean):.6g} \u00b1 {float(std):.6g}"
+
+
+def _min_metric(history: dict[str, list[float]], key: str) -> float | None:
+    """Return the minimum finite recorded value for a metric key."""
+    values = [
+        numeric for value in history.get(key, [])
+        if (numeric := _finite_metric_value(value)) is not None
+    ]
+    if not values:
+        return None
+    return float(min(values))
+
+
+def _epoch_min_metric(history: dict[str, list[float]], key: str) -> float | None:
+    """Return the 1-based epoch of the minimum finite metric value."""
+    best_epoch: int | None = None
+    best_value: float | None = None
+    for epoch, value in enumerate(history.get(key, []), start=1):
+        numeric = _finite_metric_value(value)
+        if numeric is None:
+            continue
+        if best_value is None or numeric < best_value:
+            best_value = numeric
+            best_epoch = epoch
+    return None if best_epoch is None else float(best_epoch)
+
+
+def _normalize_member_stats(
+    metrics: dict[str, float | None],
+) -> dict[str, float]:
+    """Return finite per-member metrics with TrainOut-compatible names."""
+    stats: dict[str, float] = {}
+    for key, value in metrics.items():
+        if (
+            key.startswith("final_")
+            or key.startswith("min_")
+            or key.startswith("epoch_min_")
+            or key in {"best_val_loss", "epochs_recorded"}
+        ):
+            numeric = _finite_metric_value(value)
+            if numeric is not None:
+                stats[key] = numeric
+
+    for legacy_key, trainout_key in _LEGACY_MEMBER_METRIC_ALIASES.items():
+        if trainout_key in stats:
+            continue
+        numeric = _finite_metric_value(metrics.get(legacy_key))
+        if numeric is not None:
+            stats[trainout_key] = numeric
+    return stats
 
 
 def _history_summary(history: dict[str, list[float]]) -> dict[str, float | None]:
     """Build the compact per-member metric summary written to metadata."""
-    return {
-        "train_energy_rmse": _final_metric(history, "train_energy_rmse"),
-        "test_energy_rmse": _final_metric(history, "test_energy_rmse"),
-        "train_force_rmse": _final_metric(history, "train_force_rmse"),
-        "test_force_rmse": _final_metric(history, "test_force_rmse"),
-        "best_val_loss": _final_metric(history, "test_energy_rmse"),
+    metrics = {
+        trainout_key: _final_metric(history, history_key)
+        for trainout_key, history_key in _HISTORY_TO_TRAINOUT_METRICS
+    }
+    metrics.update(
+        {
+            "min_RMSE_test": _min_metric(history, "test_energy_rmse"),
+            "epoch_min_RMSE_test": _epoch_min_metric(
+                history,
+                "test_energy_rmse",
+            ),
+            "min_RMSE_force_test": _min_metric(history, "test_force_rmse"),
+            "epoch_min_RMSE_force_test": _epoch_min_metric(
+                history,
+                "test_force_rmse",
+            ),
+        }
+    )
+    metrics.update({
+        "train_energy_rmse": metrics["final_RMSE_train"],
+        "test_energy_rmse": metrics["final_RMSE_test"],
+        "train_force_rmse": metrics["final_RMSE_force_train"],
+        "test_force_rmse": metrics["final_RMSE_force_test"],
+        "best_val_loss": metrics["min_RMSE_test"],
         "epochs_recorded": (
             None
             if len(history.get("train_energy_rmse", [])) == 0
             else float(len(history["train_energy_rmse"]))
         ),
-    }
+    })
+    return metrics
 
 
 @contextmanager
@@ -556,9 +914,7 @@ def _run_member_task(
             )
 
             metrics = _history_summary(trainer.history)
-            metrics["best_val_loss"] = (
-                None if trainer.best_val is None else float(trainer.best_val)
-            )
+            metrics["best_val_loss"] = _finite_metric_value(trainer.best_val)
             summary_payload = {
                 "member_index": task.member_index,
                 "seed": task.seed,
@@ -660,6 +1016,157 @@ def _task_result_from_payload(payload: dict[str, Any]) -> TorchCommitteeMemberRe
 
 
 StructureInput = list[Structure] | list[Any] | list[os.PathLike]
+
+
+def _flatten_dataset_indices(dataset: Dataset) -> tuple[Dataset, list[int] | None]:
+    """Resolve nested Subset wrappers to a root dataset and root indices."""
+    current: Dataset = dataset
+    index_map: list[int] | None = None
+
+    while isinstance(current, Subset):
+        current_indices = [int(index) for index in current.indices]
+        if index_map is None:
+            index_map = current_indices
+        else:
+            index_map = [current_indices[index] for index in index_map]
+        current = current.dataset
+
+    return current, index_map
+
+
+def _dataset_identifier(
+    dataset: Dataset,
+    index: int,
+) -> str | None:
+    """Return the preferred identifier for one dataset entry, if available."""
+    getter = getattr(dataset, "get_structure_identifier", None)
+    if callable(getter):
+        identifier = getter(index)
+        if identifier not in (None, ""):
+            return str(identifier)
+
+    get_structure = getattr(dataset, "get_structure", None)
+    if callable(get_structure):
+        structure = get_structure(index)
+        name = getattr(structure, "name", None)
+        if name not in (None, ""):
+            return str(name)
+
+    structures = getattr(dataset, "structures", None)
+    if structures is not None:
+        name = getattr(structures[index], "name", None)
+        if name not in (None, ""):
+            return str(name)
+
+    return None
+
+
+def _prediction_metadata_from_dataset(
+    dataset: Dataset,
+) -> tuple[list[int], list[int | None], list[str | None]]:
+    """Return local indices, root/source indices, and identifiers."""
+    root_dataset, root_indices = _flatten_dataset_indices(dataset)
+    indices = list(range(len(dataset)))
+    source_indices = (
+        [int(index) for index in root_indices]
+        if root_indices is not None
+        else list(indices)
+    )
+    identifiers = [
+        _dataset_identifier(root_dataset, source_index)
+        for source_index in source_indices
+    ]
+    return indices, source_indices, identifiers
+
+
+def _prediction_metadata_from_structures(
+    structures: StructureInput,
+    first_output: PredictOut,
+) -> tuple[list[int], list[int | None], list[str | None]]:
+    """Return local indices and best-effort identifiers for raw inputs."""
+    indices = list(range(first_output.num_structures))
+    source_indices = [None] * len(indices)
+
+    if first_output.structure_paths is not None:
+        identifiers = [str(path) for path in first_output.structure_paths]
+        return indices, source_indices, identifiers
+
+    identifiers: list[str | None] = []
+    for item in structures:
+        name = getattr(item, "name", None)
+        if name in (None, ""):
+            identifiers.append(None)
+        else:
+            identifiers.append(str(name))
+
+    if len(identifiers) != len(indices):
+        identifiers = [None] * len(indices)
+    return indices, source_indices, identifiers
+
+
+def _committee_predict_result_from_member_outputs(
+    member_outputs: list[PredictOut],
+    *,
+    indices: list[int],
+    source_indices: list[int | None],
+    identifiers: list[str | None],
+    eval_forces: bool,
+    aggregation: str,
+    reference_member: int,
+) -> TorchCommitteePredictResult:
+    """Aggregate member PredictOut objects into a committee result."""
+    if not member_outputs:
+        return TorchCommitteePredictResult(
+            predictions=[],
+            member_outputs=[],
+            indices=[],
+            source_indices=[],
+            identifiers=[],
+        )
+
+    num_structures = len(member_outputs[0].total_energy)
+    for output in member_outputs[1:]:
+        if len(output.total_energy) != num_structures:
+            raise RuntimeError(
+                "Committee members returned different numbers of "
+                "predictions."
+            )
+
+    if not (
+        len(indices) == len(source_indices) == len(identifiers) == num_structures
+    ):
+        raise RuntimeError(
+            "Committee prediction metadata length does not match predictions."
+        )
+
+    predictions: list[AenetEnsembleResult] = []
+    for structure_index in range(num_structures):
+        member_energies = [
+            float(output.total_energy[structure_index])
+            for output in member_outputs
+        ]
+        member_forces = None
+        if eval_forces:
+            member_forces = [
+                np.asarray(output.forces[structure_index], dtype=np.float64)
+                for output in member_outputs
+            ]
+        predictions.append(
+            AenetEnsembleResult.from_member_predictions(
+                member_energies=member_energies,
+                member_forces=member_forces,
+                aggregation=aggregation,
+                reference_member=reference_member,
+            )
+        )
+
+    return TorchCommitteePredictResult(
+        predictions=predictions,
+        member_outputs=member_outputs,
+        indices=indices,
+        source_indices=source_indices,
+        identifiers=identifiers,
+    )
 
 
 def _resolve_metadata_path(path: os.PathLike | str) -> Path:
@@ -925,9 +1432,9 @@ class TorchCommitteePotential:
 
         Returns
         -------
-        list[AenetEnsembleResult]
-            Aggregated ensemble results in the same order as the input
-            structures.
+        TorchCommitteePredictResult
+            List-like committee result containing aggregate per-structure
+            predictions and the per-member ``PredictOut`` objects.
         """
         members = self.load_members()
         member_outputs = [
@@ -938,38 +1445,76 @@ class TorchCommitteePotential:
             )
             for member in members
         ]
-        if not member_outputs:
-            return []
+        indices, source_indices, identifiers = _prediction_metadata_from_structures(
+            structures,
+            member_outputs[0],
+        )
+        return _committee_predict_result_from_member_outputs(
+            member_outputs,
+            indices=indices,
+            source_indices=source_indices,
+            identifiers=identifiers,
+            eval_forces=eval_forces,
+            aggregation=aggregation,
+            reference_member=reference_member,
+        )
 
-        num_structures = len(member_outputs[0].total_energy)
-        for output in member_outputs[1:]:
-            if len(output.total_energy) != num_structures:
-                raise RuntimeError(
-                    "Committee members returned different numbers of "
-                    "predictions."
-                )
+    def predict_dataset(
+        self,
+        dataset: Dataset,
+        eval_forces: bool = False,
+        config: Any | None = None,
+        aggregation: str = "mean",
+        reference_member: int = 0,
+    ) -> TorchCommitteePredictResult:
+        """
+        Predict committee energies and uncertainties for a dataset.
 
-        results: list[AenetEnsembleResult] = []
-        for structure_index in range(num_structures):
-            member_energies = [
-                float(output.total_energy[structure_index])
-                for output in member_outputs
-            ]
-            member_forces = None
-            if eval_forces:
-                member_forces = [
-                    np.asarray(output.forces[structure_index], dtype=np.float64)
-                    for output in member_outputs
-                ]
-            results.append(
-                AenetEnsembleResult.from_member_predictions(
-                    member_energies=member_energies,
-                    member_forces=member_forces,
-                    aggregation=aggregation,
-                    reference_member=reference_member,
-                )
+        Parameters
+        ----------
+        dataset : torch.utils.data.Dataset
+            Dataset accepted by ``TorchANNPotential.predict_dataset``.
+            ``Subset`` wrappers are supported and source indices are tracked
+            back to the root dataset.
+        eval_forces : bool, optional
+            Dataset-backed force prediction is currently limited by
+            ``TorchANNPotential.predict_dataset`` and is not implemented.
+        config : PredictionConfig, optional
+            Prediction configuration passed through to each member.
+        aggregation : {"mean", "reference"}, optional
+            Aggregation mode for the reported energy and forces.
+        reference_member : int, optional
+            Reference member index used when
+            ``aggregation='reference'``.
+
+        Returns
+        -------
+        TorchCommitteePredictResult
+            List-like committee result containing aggregate per-structure
+            predictions, per-member ``PredictOut`` objects, and dataset
+            indices/identifiers.
+        """
+        members = self.load_members()
+        member_outputs = [
+            member.predict_dataset(
+                dataset=dataset,
+                eval_forces=eval_forces,
+                config=config,
             )
-        return results
+            for member in members
+        ]
+        indices, source_indices, identifiers = _prediction_metadata_from_dataset(
+            dataset
+        )
+        return _committee_predict_result_from_member_outputs(
+            member_outputs,
+            indices=indices,
+            source_indices=source_indices,
+            identifiers=identifiers,
+            eval_forces=eval_forces,
+            aggregation=aggregation,
+            reference_member=reference_member,
+        )
 
     def to_aenet_ascii(
         self,

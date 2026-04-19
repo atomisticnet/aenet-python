@@ -217,6 +217,12 @@ the single-member ``TorchANNPotential`` workflow:
    )
    print(result.metadata_path)
    print([member.seed for member in result.members])
+   print(result)
+
+   member_results = result.trainouts
+   member_0_errors = member_results[0].errors
+   committee_table = result.to_dataframe()
+   committee_stats = result.stats
 
 Committee runs materialize a stable output layout:
 
@@ -241,6 +247,14 @@ committee implementation, the main reproducibility pattern is a shared
 ``split_seed`` with distinct per-member ``seed`` values derived from
 ``base_seed`` or from ``member_seeds``.
 
+``TorchCommitteeTrainResult`` mirrors the single-network ``TrainOut`` summary
+style where possible. ``print(result)`` reports the mean and standard
+deviation of each available final metric across completed committee members.
+``result.stats`` exposes the same aggregate values programmatically,
+``result.to_dataframe()`` returns one row per member, and ``member.trainout``
+or ``result.trainouts`` rebuilds the familiar per-member ``TrainOut`` objects
+from the persisted ``history.json`` files.
+
 Committee Inference and ASCII Export
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -255,6 +269,13 @@ committee-wide ASCII export helper:
 
    print(first_result.energy_mean, first_result.energy_std)
    print(first_result.member_energies)
+   print(predictions.member_outputs[0].total_energy)
+
+   uncertainty_table = predictions.to_dataframe()
+   most_uncertain = predictions.top_uncertain(n=10)
+
+   dataset_predictions = reloaded.predict_dataset(test_dataset)
+   dataset_uncertainty_table = dataset_predictions.to_dataframe()
 
    members = reloaded.to_aenet_ascii(
        Path("ascii_committee"),
@@ -263,10 +284,19 @@ committee-wide ASCII export helper:
    )
    print(members[0])
 
-``predict()`` returns one
-:class:`aenet.mlip.ensemble.AenetEnsembleResult` per input structure and
-reuses the same ``aggregation='mean'`` / ``aggregation='reference'``
-semantics as the existing Fortran-backed ensemble interfaces.
+``predict()`` and the dataset-backed ``predict_dataset()`` return a list-like
+``TorchCommitteePredictResult``. Iterating over it or indexing it returns one
+:class:`aenet.mlip.ensemble.AenetEnsembleResult` per input structure, so
+existing list-style code remains valid. The result also keeps the per-member
+:class:`aenet.io.predict.PredictOut` objects in ``member_outputs`` and
+provides ``to_dataframe()``, ``sort_by()``, and ``top_uncertain()`` helpers
+for uncertainty-driven structure selection. Dataset-backed prediction tracks
+both split-local ``index`` and root-dataset ``source_index`` where possible.
+When ``eval_forces=False``, it follows the cached-feature
+``TorchANNPotential.predict_dataset()`` path. When ``eval_forces=True``, each
+member falls back to materialized structures, so the dataset must expose raw
+structures through ``get_structure()``, ``structures``, or a supported
+``Subset`` wrapper.
 
 The maintained notebook ``notebooks/example-05-torch-training.ipynb`` now
 includes a TiO2 committee-training example that trains a small committee,

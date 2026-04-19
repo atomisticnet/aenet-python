@@ -16,7 +16,10 @@ from aenet.torch_training import (
     HDF5StructureDataset,
     Structure,
     TorchCommitteeConfig,
+    TorchCommitteeMemberResult,
     TorchCommitteePotential,
+    TorchCommitteePredictResult,
+    TorchCommitteeTrainResult,
     TorchTrainingConfig,
 )
 from aenet.torch_training.dataset import CachedStructureDataset
@@ -113,6 +116,84 @@ def test_committee_config_validates_member_seeds():
 
 
 @pytest.mark.cpu
+def test_committee_result_summary_uses_completed_finite_metrics(tmp_path: Path):
+    """Committee result summaries should skip failed and unavailable metrics."""
+    result = TorchCommitteeTrainResult(
+        output_dir=tmp_path,
+        metadata_path=tmp_path / "committee_metadata.json",
+        execution_mode="sequential",
+        members=[
+            TorchCommitteeMemberResult(
+                member_index=0,
+                seed=1,
+                split_seed=None,
+                device="cpu",
+                member_dir=tmp_path / "member_000",
+                model_path=tmp_path / "member_000" / "model.pt",
+                history_json_path=None,
+                history_csv_path=None,
+                summary_path=None,
+                checkpoint_dir=None,
+                status="completed",
+                metrics={
+                    "final_MAE_train": 1.0,
+                    "final_RMSE_train": 2.0,
+                    "final_MAE_test": None,
+                    "final_RMSE_test": float("nan"),
+                },
+            ),
+            TorchCommitteeMemberResult(
+                member_index=1,
+                seed=2,
+                split_seed=None,
+                device="cpu",
+                member_dir=tmp_path / "member_001",
+                model_path=tmp_path / "member_001" / "model.pt",
+                history_json_path=None,
+                history_csv_path=None,
+                summary_path=None,
+                checkpoint_dir=None,
+                status="completed",
+                metrics={
+                    "final_MAE_train": 3.0,
+                    "final_RMSE_train": 4.0,
+                },
+            ),
+            TorchCommitteeMemberResult(
+                member_index=2,
+                seed=3,
+                split_seed=None,
+                device="cpu",
+                member_dir=tmp_path / "member_002",
+                model_path=None,
+                history_json_path=None,
+                history_csv_path=None,
+                summary_path=None,
+                checkpoint_dir=None,
+                status="failed",
+                metrics={"final_MAE_train": 100.0},
+                error="boom",
+            ),
+        ],
+    )
+
+    stats = result.stats
+    assert stats["final_MAE_train"]["mean"] == pytest.approx(2.0)
+    assert stats["final_MAE_train"]["std"] == pytest.approx(1.0)
+    assert stats["final_MAE_train"]["n"] == 2
+    assert stats["final_RMSE_train"]["mean"] == pytest.approx(3.0)
+    assert "final_MAE_test" not in stats
+    assert "final_RMSE_test" not in stats
+
+    summary = str(result)
+    assert "final_MAE_train:" in summary
+    assert "final_MAE_test:" not in summary
+    assert "completed_members: 2" in summary
+    assert "failed_members: 1" in summary
+    assert result.trainouts == []
+
+
+@pytest.mark.cpu
 def test_sequential_committee_training_writes_metadata_and_models(tmp_path: Path):
     """Sequential committee runs should persist the standardized layout."""
     descriptor = _make_descriptor()
@@ -148,6 +229,37 @@ def test_sequential_committee_training_writes_metadata_and_models(tmp_path: Path
         assert member.history_json_path is not None and member.history_json_path.exists()
         assert member.history_csv_path is not None and member.history_csv_path.exists()
         assert member.summary_path is not None and member.summary_path.exists()
+
+    assert len(result.completed_members) == 2
+    assert len(result.failed_members) == 0
+
+    stats = result.stats
+    assert stats["final_MAE_train"]["n"] == 2
+    assert stats["final_RMSE_train"]["n"] == 2
+    assert stats["final_MAE_test"]["n"] == 2
+    assert stats["final_RMSE_test"]["n"] == 2
+
+    summary = str(result)
+    assert "Training statistics:" in summary
+    assert "final_MAE_train:" in summary
+    assert "final_RMSE_train:" in summary
+    assert "\u00b1" in summary
+    assert "completed_members: 2" in summary
+    assert "failed_members: 0" in summary
+
+    table = result.to_dataframe()
+    assert len(table) == 2
+    assert "final_MAE_train" in table.columns
+    assert "final_RMSE_train" in table.columns
+    assert table["status"].tolist() == ["completed", "completed"]
+
+    trainouts = result.trainouts
+    assert len(trainouts) == 2
+    assert "RMSE_train" in trainouts[0].errors.columns
+    assert result.members[0].trainout is not None
+    assert result.members[0].stats["final_RMSE_train"] == pytest.approx(
+        result.members[0].trainout.stats["final_RMSE_train"]
+    )
 
 
 @pytest.mark.cpu
@@ -319,12 +431,84 @@ def test_committee_can_load_saved_members_and_aggregate_predictions(tmp_path: Pa
     assert reloaded.member_model_paths() == [
         member.model_path for member in result.members if member.model_path is not None
     ]
+    assert isinstance(predictions, TorchCommitteePredictResult)
+    assert len(predictions.member_outputs) == 2
+    assert len(predictions.member_outputs[0].total_energy) == 2
+    assert predictions.indices == [0, 1]
+    assert predictions.source_indices == [None, None]
     assert len(predictions) == 2
     assert isinstance(predictions[0], AenetEnsembleResult)
     assert predictions[0].num_members == 2
     assert predictions[0].forces is not None
     assert predictions[0].member_forces is not None
     assert predictions[0].member_forces.shape[0] == 2
+    assert predictions.energy_std.shape == (2,)
+    table = predictions.to_dataframe()
+    assert list(table["index"]) == [0, 1]
+    assert "energy_std" in table.columns
+    assert "member_energies" in table.columns
+
+
+@pytest.mark.cpu
+def test_committee_predict_dataset_supports_subset_metadata(tmp_path: Path):
+    """Dataset-backed committee prediction should preserve subset metadata."""
+    descriptor = _make_descriptor()
+    structures = _make_structures()
+    dataset = CachedStructureDataset(
+        structures=structures,
+        descriptor=descriptor,
+        show_progress=False,
+    )
+    subset = torch.utils.data.Subset(dataset, [1, 3, 5])
+
+    committee = TorchCommitteePotential(_make_architecture(), descriptor)
+    committee.train(
+        structures=structures,
+        config=_base_training_config(),
+        committee_config=TorchCommitteeConfig(
+            num_members=2,
+            base_seed=52,
+            max_parallel=1,
+            output_dir=tmp_path / "committee_predict_dataset",
+        ),
+    )
+
+    predictions = committee.predict_dataset(subset, eval_forces=False)
+
+    assert isinstance(predictions, TorchCommitteePredictResult)
+    assert len(predictions) == 3
+    assert len(predictions.member_outputs) == 2
+    assert len(predictions.member_outputs[0].total_energy) == 3
+    assert predictions.indices == [0, 1, 2]
+    assert predictions.source_indices == [1, 3, 5]
+    assert predictions.identifiers == [
+        "struct_1.xsf",
+        "struct_3.xsf",
+        "struct_5.xsf",
+    ]
+    assert predictions.energy_mean.shape == (3,)
+    assert predictions.energy_std.shape == (3,)
+
+    table = predictions.to_dataframe()
+    assert list(table["source_index"]) == [1, 3, 5]
+    assert list(table["identifier"]) == predictions.identifiers
+    sorted_table = predictions.sort_by("energy_std")
+    top_table = predictions.top_uncertain(n=2)
+    assert len(sorted_table) == 3
+    assert len(top_table) == 2
+    assert sorted_table["energy_std"].is_monotonic_decreasing
+
+    force_predictions = committee.predict_dataset(subset, eval_forces=True)
+    assert len(force_predictions) == 3
+    assert len(force_predictions.member_outputs) == 2
+    assert force_predictions.member_outputs[0].forces is not None
+    assert force_predictions[0].forces is not None
+    assert force_predictions[0].member_forces is not None
+    assert force_predictions[0].force_uncertainty is not None
+    assert force_predictions.max_force_uncertainty.shape == (3,)
+    force_table = force_predictions.to_dataframe()
+    assert "max_force_uncertainty" in force_table.columns
+    assert force_table["max_force_uncertainty"].notna().all()
 
 
 @pytest.mark.cpu
