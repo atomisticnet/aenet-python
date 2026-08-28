@@ -4,8 +4,9 @@ This file is the high-level index of active, repository-wide issues. Detailed
 descriptions live under [`issues/`](issues/). Local implementation work is
 tracked separately in the untracked `LOCAL_ISSUES.md` file.
 
-**Last issue created:** 35  
-**Next issue ID:** 36
+**Last issue created:** 36
+
+**Next issue ID:** 37
 
 ## Active issues
 
@@ -13,6 +14,7 @@ tracked separately in the untracked `LOCAL_ISSUES.md` file.
 | --- | --- | --- |
 | [13](issues/13-hdf5-force-data-coverage.md) | Medium | Add build-time controls for persisted force-data coverage in HDF5 datasets |
 | [28](issues/28-mixed-memory-training.md) | Medium | Implement a real mixed-memory training mode for large force-training datasets |
+| [36](issues/36-structure-library-generation.md) | Medium | Provide an end-to-end structure-library generation workflow |
 
 ## Legacy migration notes
 
