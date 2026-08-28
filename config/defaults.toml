@@ -1,0 +1,4 @@
+# ./config/defaults.toml
+
+# Shared repository-wide configuration defaults belong here.
+# This file may remain empty if no defaults are currently required.

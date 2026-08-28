@@ -24,15 +24,19 @@ notebooks/example-01-outputs/
 notebooks/example-05-outputs/
 notebooks/example-08-outputs/
 
-debug/
-profiling/
-fortran/
-dev-notes/
-.vscode/
 
 # Sphinx build and generated files
 docs/_build/
 docs/api/generated/
 docs/source/api/generated/
 
-AGENTS.md
+# local dev environment
+config/local.toml
+LOCAL_ISSUES.md
+CLOSED_LOCAL_ISSUES.md
+dev-notes/
+debug/
+profiling/
+fortran/
+.vscode/
+bak/

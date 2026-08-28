@@ -1,0 +1,28 @@
+# Local Issues
+
+This untracked file records fine-grained technical work currently in progress.
+Copy this template to `LOCAL_ISSUES.md`. Use stable IDs prefixed with `L`, and
+move completed entries to the untracked `CLOSED_LOCAL_ISSUES.md` after their
+work has been committed.
+
+**Last local issue created:** L0
+
+## L1: Short imperative summary
+
+**Status:** Open  
+**Related global issue:** #13 (if applicable)
+
+### Problem
+
+Describe the concrete, locally scoped problem or implementation task.
+
+### Acceptance criteria
+
+- State the observable condition for completion.
+- Include relevant tests, lint, or documentation checks.
+
+### Notes
+
+Record short-lived implementation context here. Put extended diagnostics and
+experiments in `dev-notes/` and link them when useful.
+

@@ -1,0 +1,19 @@
+# ./config/local.toml.example
+
+# Uncomment and adapt exactly one environment configuration below.
+
+# Example: Python virtual environment
+# [environment]
+# run_command = "./venv/bin/python"
+
+# Example: use conda from the current/global installation
+# [environment]
+# run_command = "conda run"
+
+# Example: specific micromamba-managed environment
+# [environment]
+# run_command = "/Users/user/.local/bin/micromamba run -p ./cenv"
+
+# Example: uv-managed environment
+# [environment]
+# run_command = "uv run"
