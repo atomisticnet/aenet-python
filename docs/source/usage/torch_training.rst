@@ -38,11 +38,17 @@ Jupyter notebooks with examples can be found in the `notebooks
 <https://github.com/atomisticnet/aenet-python/tree/master/notebooks>`_
 directory within the repository.
 
-For the maintained PyTorch training walkthrough, including the file-backed TiO2
-workflow, explicit ``CachedStructureDataset`` usage, fixed train/test splits,
-dataset-backed prediction, and committee training, see
+For the maintained general PyTorch training walkthrough, including the
+file-backed TiO2 workflow, explicit ``CachedStructureDataset`` usage, fixed
+train/test splits, and dataset-backed prediction, see
 `example-05-torch-training.ipynb
 <https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-05-torch-training.ipynb>`_.
+
+For an end-to-end committee workflow with deterministic data partitions,
+persisted metadata, held-out evaluation, error-versus-spread diagnostics, and
+uncertainty-based ranking, see
+`example-09-ensemble-training-and-evaluation.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-09-ensemble-training-and-evaluation.ipynb>`_.
 
 If you need to construct ``atomic_energies`` programmatically before
 training or before building a large HDF5 dataset, see
@@ -298,10 +304,12 @@ member falls back to materialized structures, so the dataset must expose raw
 structures through ``get_structure()``, ``structures``, or a supported
 ``Subset`` wrapper.
 
-The maintained notebook ``notebooks/example-05-torch-training.ipynb`` now
-includes a TiO2 committee-training example that trains a small committee,
-reloads it from ``committee_metadata.json``, inspects aggregated uncertainty,
-and exports the member manifest for later Fortran-backed ensemble inference.
+The maintained notebook ``notebooks/example-05-torch-training.ipynb`` includes
+a compact committee-training example. The dedicated
+``notebooks/example-09-ensemble-training-and-evaluation.ipynb`` tutorial
+extends that example with deterministic train/validation/test partitions,
+reload from ``committee_metadata.json``, held-out accuracy metrics,
+error-versus-spread diagnostics, and uncertainty-driven ranking.
 
 ``to_aenet_ascii()`` exports each committee member into a stable layout and
 returns the member manifest expected by

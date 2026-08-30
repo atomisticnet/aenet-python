@@ -12,6 +12,7 @@ Available notebooks:
 - `example-06-torch-inference.ipynb`: inference with the PyTorch implementation
 - `example-07-neighbor-list.ipynb`: neighbor-list usage with `TorchNeighborList`
 - `example-08-libaenet-interface.ipynb`: direct `libaenet` and ASE-based workflows
+- `example-09-ensemble-training-and-evaluation.ipynb`: reproducible PyTorch committee training, held-out evaluation, and uncertainty ranking
 
 Supporting files:
 

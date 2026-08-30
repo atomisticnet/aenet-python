@@ -133,6 +133,8 @@ jobs:
             notebook_name: example-05-torch-training
           - notebook: notebooks/example-07-neighbor-list.ipynb
             notebook_name: example-07-neighbor-list
+          - notebook: notebooks/example-09-ensemble-training-and-evaluation.ipynb
+            notebook_name: example-09-ensemble-training-and-evaluation
 
     steps:
       - name: Check out repository

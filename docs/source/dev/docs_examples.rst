@@ -59,6 +59,7 @@ Repeat the same pattern for:
 
 - ``notebooks/example-05-torch-training.ipynb``
 - ``notebooks/example-07-neighbor-list.ipynb``
+- ``notebooks/example-09-ensemble-training-and-evaluation.ipynb``
 
 This avoids overwriting the source ``.ipynb`` files. Some notebooks still
 write side-effect artifacts such as HDF5 files or checkpoints relative to the
@@ -82,7 +83,8 @@ The repository CI is split into three layers so failures are easy to localize:
   warning-clean HTML builds
 - notebook checks: execution of the maintained notebook-first examples listed
   above via ``nbconvert --execute`` from a disposable worktree with a
-  temporary output directory
+  temporary output directory; the ensemble notebook uses the same 600-second
+  timeout as the other PyTorch examples
 
 The current base docs-testing environment explicitly supports the PyTorch /
 PyG-backed pages by installing ``torch`` plus the matching
