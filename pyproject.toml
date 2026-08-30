@@ -42,6 +42,9 @@ pyg = [
     "torch-scatter>=2.1.2",
     "torch-cluster>=1.6.3",
 ]
+sampling = [
+    "scikit-learn>=1.3.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=3.0.0",

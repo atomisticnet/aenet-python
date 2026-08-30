@@ -59,6 +59,7 @@ Repeat the same pattern for:
 
 - ``notebooks/example-05-torch-training.ipynb``
 - ``notebooks/example-07-neighbor-list.ipynb``
+- ``notebooks/example-09-sampled-structures-downselection.ipynb``
 
 This avoids overwriting the source ``.ipynb`` files. Some notebooks still
 write side-effect artifacts such as HDF5 files or checkpoints relative to the
@@ -86,7 +87,9 @@ The repository CI is split into three layers so failures are easy to localize:
 
 The current base docs-testing environment explicitly supports the PyTorch /
 PyG-backed pages by installing ``torch`` plus the matching
-``torch-scatter`` and ``torch-cluster`` wheels.
+``torch-scatter`` and ``torch-cluster`` wheels.  It also installs the
+``sampling`` extra so representative k-means examples can import
+scikit-learn.
 
 Examples that require ``pymatgen`` remain optional for now and are outside the
 current base docs-example CI slice. The same is true for Fortran-backed or

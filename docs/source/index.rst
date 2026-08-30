@@ -82,6 +82,7 @@ Tools for Data Generation and Acquisition
    usage/structure_manipulation
    usage/transformations_basic
    usage/transformations_advanced
+   usage/representative_sampling
    usage/data_acquisition
    usage/commandline
 

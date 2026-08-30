@@ -1,0 +1,34 @@
+{
+  "archive": "sampled_structures.tar.xz",
+  "archive_sha256": "00e5f8d8313f05a92a96e775e11a33b66fe5c8d37aab0b62319be0562f67a5e2",
+  "format": "xsf",
+  "num_atoms_per_structure": 64,
+  "num_structures": 20000,
+  "structures_by_temperature": {
+    "550K": 5000,
+    "700K": 5000,
+    "850K": 5000,
+    "1000K": 5000
+  },
+  "source_structure": "NaCl_2x2x2.vasp",
+  "source_structure_sha256": "d39f89084f4498e55af847cbd0e527ddfdfe6f45e7d8b06c81d98aaefafcf923",
+  "generation": {
+    "calculator": "FairChem UMA",
+    "model": "uma-s-1p1",
+    "task": "omat",
+    "device": "cuda",
+    "ensemble": "NPT",
+    "external_stress": 0.0,
+    "timestep_fs": 2.0,
+    "equilibration_ps": 20.0,
+    "production_ps": 100.0,
+    "production_frames_per_temperature": 5000,
+    "velocity_random_seed": null
+  },
+  "descriptor_cutoffs_angstrom": {
+    "angular_fitted": 3.735,
+    "angular_used": 3.75,
+    "radial_fitted": 4.77,
+    "radial_used": 4.8
+  }
+}

@@ -37,7 +37,7 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
           micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
           micromamba run -n "${ENV_NAME}" python -m pip install \
             torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
@@ -70,7 +70,7 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
           micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
           micromamba run -n "${ENV_NAME}" python -m pip install \
             torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
@@ -133,6 +133,8 @@ jobs:
             notebook_name: example-05-torch-training
           - notebook: notebooks/example-07-neighbor-list.ipynb
             notebook_name: example-07-neighbor-list
+          - notebook: notebooks/example-09-sampled-structures-sampling.ipynb
+            notebook_name: example-09-sampled-structures-sampling
 
     steps:
       - name: Check out repository
@@ -152,7 +154,7 @@ jobs:
       - name: Install project and dependencies
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
-          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev]"
+          micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
           micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
           micromamba run -n "${ENV_NAME}" python -m pip install \
             torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"

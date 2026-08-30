@@ -12,6 +12,8 @@ Available notebooks:
 - `example-06-torch-inference.ipynb`: inference with the PyTorch implementation
 - `example-07-neighbor-list.ipynb`: neighbor-list usage with `TorchNeighborList`
 - `example-08-libaenet-interface.ipynb`: direct `libaenet` and ASE-based workflows
+- `example-09-sampled-structures-downselection.ipynb`: representative and random
+  sampling of UMA-generated NaCl structures, including PCA and t-SNE analysis
 
 Supporting files:
 
@@ -20,3 +22,5 @@ Supporting files:
 - `pt-TiO2/`: PyTorch and ASCII TiO2 model files
 - `nn-TiO2/`: ASCII neural-network potential files
 - `xsf/` and `xsf-TiO2/`: example XSF structure datasets
+- `data/NaCl-sampled-structures/`: the compressed 20,000-structure NaCl
+  dataset, generation/conversion/cutoff-analysis provenance, and analysis report

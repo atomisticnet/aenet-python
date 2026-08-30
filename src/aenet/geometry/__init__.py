@@ -8,11 +8,18 @@ Utility functions have been moved to aenet.geometry.utils and should be
 imported from there in new code.
 """
 
-from .structure import AtomicStructure
-from .interpolation import interpolate
 from . import utils
+from .interpolation import interpolate
+from .sampling import random_subset, representative_subset
+from .structure import AtomicStructure
 
-__all__ = ['AtomicStructure', 'interpolate', 'utils']
+__all__ = [
+    "AtomicStructure",
+    "interpolate",
+    "random_subset",
+    "representative_subset",
+    "utils",
+]
 
 
 def __getattr__(name):
@@ -25,12 +32,13 @@ def __getattr__(name):
     """
     if hasattr(utils, name):
         import warnings
+
         warnings.warn(
             f"Importing '{name}' from aenet.geometry is deprecated and "
             f"will be removed in a future version. "
             f"Use 'from aenet.geometry.utils import {name}' instead.",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
         return getattr(utils, name)
     raise AttributeError(f"module 'aenet.geometry' has no attribute '{name}'")

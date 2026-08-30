@@ -9,6 +9,7 @@ This section provides detailed API documentation for the aenet-python package.
    reference_energies
    trainset
    transformations
+   sampling
    torch_featurize
    torch_training_builders
    torch_training_committee
@@ -36,6 +37,13 @@ Structure Transformations
    Structure transformation framework for generating structural variations.
    Includes deterministic transformations (displacement, volume, strain)
    and stochastic transformations.
+
+Representative Sampling
+-----------------------
+
+:doc:`sampling`
+   Feature-matrix sampling utilities that return source-row indices for
+   representative k-means and random subsets.
 
 PyTorch Featurization
 ---------------------

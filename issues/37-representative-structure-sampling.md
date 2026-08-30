@@ -184,13 +184,12 @@ sampling have different data-source and policy concerns. Documentation should
 show how to connect `global_moment_fingerprint(...)`, an explicit
 scikit-learn `StandardScaler`, and `representative_subset(...)`.
 
-Add a tracked example notebook, provisionally
-`notebooks/example-09-representative-sampling.ipynb`, that runs from a clean
-checkout using tracked structures under `notebooks/xsf-TiO2/`. The notebook
-may use the PyTorch featurization framework and the concrete
-`aenet.torch_featurize.ChebyshevDescriptor` settings given above; it does not
-need to exercise the compiled Fortran backend. It should demonstrate the
-complete workflow:
+Add a tracked example notebook,
+`notebooks/example-09-sampled-structures-downselection.ipynb`, that runs from a
+clean checkout using the tracked NaCl archive under
+`notebooks/data/NaCl-sampled-structures/`. The notebook may use the PyTorch
+featurization framework; it does not need to exercise the compiled Fortran
+backend. It should demonstrate the complete workflow:
 
 1. load and featurize the structures;
 2. calculate one global moment representation per structure;
