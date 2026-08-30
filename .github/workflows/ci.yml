@@ -135,6 +135,8 @@ jobs:
             notebook_name: example-07-neighbor-list
           - notebook: notebooks/example-09-sampled-structures-sampling.ipynb
             notebook_name: example-09-sampled-structures-sampling
+          - notebook: notebooks/example-09-ensemble-training-and-evaluation.ipynb
+            notebook_name: example-09-ensemble-training-and-evaluation
 
     steps:
       - name: Check out repository
