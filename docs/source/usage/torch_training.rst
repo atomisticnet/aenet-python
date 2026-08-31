@@ -47,8 +47,8 @@ train/test splits, and dataset-backed prediction, see
 For an end-to-end committee workflow with deterministic data partitions,
 persisted metadata, held-out evaluation, error-versus-spread diagnostics, and
 uncertainty-based ranking, see
-`example-09-ensemble-training-and-evaluation.ipynb
-<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-09-ensemble-training-and-evaluation.ipynb>`_.
+`example-10-ensemble-training-and-evaluation.ipynb
+<https://github.com/atomisticnet/aenet-python/blob/master/notebooks/example-10-ensemble-training-and-evaluation.ipynb>`_.
 
 If you need to construct ``atomic_energies`` programmatically before
 training or before building a large HDF5 dataset, see
@@ -306,7 +306,7 @@ structures through ``get_structure()``, ``structures``, or a supported
 
 The maintained notebook ``notebooks/example-05-torch-training.ipynb`` includes
 a compact committee-training example. The dedicated
-``notebooks/example-09-ensemble-training-and-evaluation.ipynb`` tutorial
+``notebooks/example-10-ensemble-training-and-evaluation.ipynb`` tutorial
 extends that example with deterministic train/validation/test partitions,
 reload from ``committee_metadata.json``, held-out accuracy metrics,
 error-versus-spread diagnostics, and uncertainty-driven ranking.

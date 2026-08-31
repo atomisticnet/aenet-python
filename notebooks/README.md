@@ -14,7 +14,7 @@ Available notebooks:
 - `example-08-libaenet-interface.ipynb`: direct `libaenet` and ASE-based workflows
 - `example-09-sampled-structures-downselection.ipynb`: representative and random
   sampling of UMA-generated NaCl structures, including PCA and t-SNE analysis
-- `example-09-ensemble-training-and-evaluation.ipynb`: reproducible PyTorch committee training, held-out evaluation, and uncertainty ranking
+- `example-10-ensemble-training-and-evaluation.ipynb`: reproducible PyTorch committee training, held-out evaluation, and uncertainty ranking
 
 Supporting files:
 

@@ -22,8 +22,8 @@
     "best_val_loss": null,
     "epochs_recorded": 500.0
   },
-  "model_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-09-outputs/committee_run/member_001/model.pt",
-  "history_json_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-09-outputs/committee_run/member_001/history.json",
-  "history_csv_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-09-outputs/committee_run/member_001/history.csv",
+  "model_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-10-outputs/committee_run/member_001/model.pt",
+  "history_json_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-10-outputs/committee_run/member_001/history.json",
+  "history_csv_path": "/Users/aurban/Documents/Cline/aenet-python/notebooks/example-10-outputs/committee_run/member_001/history.csv",
   "checkpoint_dir": null
 }

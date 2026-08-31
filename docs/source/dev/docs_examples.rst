@@ -60,7 +60,7 @@ Repeat the same pattern for:
 - ``notebooks/example-05-torch-training.ipynb``
 - ``notebooks/example-07-neighbor-list.ipynb``
 - ``notebooks/example-09-sampled-structures-downselection.ipynb``
-- ``notebooks/example-09-ensemble-training-and-evaluation.ipynb``
+- ``notebooks/example-10-ensemble-training-and-evaluation.ipynb``
 
 This avoids overwriting the source ``.ipynb`` files. Some notebooks still
 write side-effect artifacts such as HDF5 files or checkpoints relative to the
