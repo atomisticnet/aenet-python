@@ -63,6 +63,23 @@ def test_random_subset_accepts_legacy_random_state():
     assert np.array_equal(first, second)
 
 
+def test_random_subset_does_not_inspect_representation_values():
+    """Random sampling should depend only on the representation row count."""
+    representations = np.array(
+        [[np.nan], [np.inf], ["not-a-number"]],
+        dtype=object,
+    )
+
+    selected = random_subset(
+        representations,
+        num_structures=2,
+        random_state=7,
+    )
+
+    assert selected.shape == (2,)
+    assert len(np.unique(selected)) == 2
+
+
 def test_full_size_subset_returns_all_indices():
     """Asking for all rows should not run a down-selection algorithm."""
     features = np.arange(12, dtype=float).reshape(4, 3)
@@ -81,17 +98,28 @@ def test_full_size_subset_returns_all_indices():
         (np.ones((2, 2, 2)), "2D array"),
         ([], "2D array"),
         ([[], []], "at least one feature"),
+        ([[1.0], [1.0, 2.0]], "numeric 2D array-like"),
+    ],
+)
+def test_sampling_rejects_invalid_representation_shapes(bad_features, message):
+    """Both samplers should reject inputs without a usable row shape."""
+    with pytest.raises(ValueError, match=message):
+        random_subset(bad_features, num_structures=1)
+
+
+@pytest.mark.parametrize(
+    "bad_features, message",
+    [
         ([[0.0], [np.nan]], "finite"),
         ([[0.0], [np.inf]], "finite"),
         ([[1.0], [1.0 + 2.0j]], "real-valued"),
         ([[1.0], ["not-a-number"]], "numeric 2D array-like"),
-        ([[1.0], [1.0, 2.0]], "numeric 2D array-like"),
     ],
 )
-def test_sampling_rejects_invalid_representations(bad_features, message):
-    """Malformed representation matrices should fail before sampling."""
+def test_representative_subset_rejects_invalid_values(bad_features, message):
+    """K-means inputs must remain finite, real, and numeric."""
     with pytest.raises(ValueError, match=message):
-        random_subset(bad_features, num_structures=1)
+        representative_subset(bad_features, num_structures=1)
 
 
 @pytest.mark.parametrize(
@@ -162,6 +190,20 @@ def test_representative_subset_ties_choose_lowest_source_index():
 
     assert 0 in selected
     assert len(np.unique(selected)) == 2
+
+
+def test_representative_subset_does_not_tie_nearby_distances():
+    """A slightly farther row must not be treated as an exact tie."""
+    features = np.array([[2.000001], [2.0], [0.0]])
+
+    selected = representative_subset(
+        features,
+        num_structures=1,
+        random_state=0,
+        n_init=1,
+    )
+
+    assert np.array_equal(selected, np.array([1]))
 
 
 def test_representative_subset_rejects_degenerate_clusters():

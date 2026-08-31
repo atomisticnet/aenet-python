@@ -56,9 +56,16 @@ Consequently, the scripts document and reproduce the protocol but cannot
 regenerate the archived coordinates byte for byte. This limitation is why the
 complete XSF dataset is tracked.
 
-Run `uma_md.py` from a directory such as `550K/run`, with the VASP file in that
-directory. The parent directory supplies the temperature. Then convert the
-trajectory directly into the tracked naming scheme:
+Run `uma_md.py` from a directory such as `550K/run`. The parent directory
+supplies the temperature. When the run directory contains multiple VASP files,
+select the intended input explicitly:
+
+```bash
+python ../../scripts/uma_md.py --structure NaCl_2x2x2.vasp
+```
+
+The `--structure` option may be omitted when exactly one `*.vasp` file is
+present. Then convert the trajectory directly into the tracked naming scheme:
 
 ```bash
 python scripts/traj_to_xsf.py --output-dir sampled_structures

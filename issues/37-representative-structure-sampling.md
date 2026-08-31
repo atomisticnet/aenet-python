@@ -2,7 +2,7 @@
 
 **Type:** Feature
 **Priority:** Medium
-**Status:** Open
+**Status:** Implemented and validated; pending final commit
 **Created:** 2026-08-28
 
 ## Problem
@@ -133,8 +133,10 @@ datasets.
 
 The first implementation should:
 
-1. Accept a two-dimensional, finite, real-valued array-like object with one row
-   per structure and a positive integer `num_structures`.
+1. Accept a two-dimensional array-like object with one row per structure and a
+   positive integer `num_structures`. Representative sampling additionally
+   requires finite, real-valued numeric features; random sampling validates
+   only the population shape and subset size.
 2. Fit scikit-learn k-means with `n_clusters=num_structures` and documented
    reproducibility controls, including `random_state` and an explicit or
    documented `n_init` policy.
@@ -168,9 +170,9 @@ implementation:
 - which random-state inputs are supported, such as integer seeds and NumPy
   generators, and whether either function mutates caller-provided generator
   state;
-- validation and error messages for zero samples, non-finite values,
-  inconsistent row lengths, non-integer counts, and requests larger than the
-  input pool;
+- validation and error messages for zero samples, inconsistent row lengths,
+  non-integer counts, and requests larger than the input pool, plus non-finite
+  or nonnumeric feature values for representative sampling;
 - behavior when duplicate feature rows or degenerate clusters prevent the
   fitted model from producing the requested number of distinct populated
   clusters; and
@@ -186,25 +188,25 @@ scikit-learn `StandardScaler`, and `representative_subset(...)`.
 
 Add a tracked example notebook,
 `notebooks/example-09-sampled-structures-downselection.ipynb`, that runs from a
-clean checkout using the tracked NaCl archive under
-`notebooks/data/NaCl-sampled-structures/`. The notebook may use the PyTorch
-featurization framework; it does not need to exercise the compiled Fortran
-backend. It should demonstrate the complete workflow:
+clean checkout using the tracked NaCl archive and precomputed feature matrix
+under `notebooks/data/NaCl-sampled-structures/`. It should demonstrate a
+concise, human-readable sampling and down-selection workflow:
 
-1. load and featurize the structures;
-2. calculate one global moment representation per structure;
-3. standardize the feature matrix, explaining why standardization matters for
+1. load the tracked feature matrix and its mapping to source structures;
+2. standardize the feature matrix, explaining why standardization matters for
    Euclidean k-means;
-4. request a reproducible representative subset;
-5. request an equal-size reproducible random subset as a baseline;
-6. apply both sets of returned indices to the source structures; and
-7. summarize or visualize how representative and random sampling cover the
+3. request a reproducible representative subset;
+4. request an equal-size reproducible random subset as a baseline;
+5. apply both sets of returned indices to the source structures; and
+6. summarize or visualize how representative and random sampling cover the
    feature space relative to the full dataset.
 
-The notebook should use fixed seeds, expose all relevant descriptor and
-scaling settings, state the optional extras needed to run it, avoid private
-inputs and hidden execution state, and be covered by an appropriate execution
-check.
+The notebook should use fixed seeds, expose the relevant scaling and sampling
+settings, avoid private inputs and hidden execution state, and be covered by an
+appropriate execution check. The data README and generation scripts should
+record the descriptor and global-moment settings used to produce the tracked
+features. Rebuilding those features may use the optional PyTorch featurization
+framework, but running the maintained notebook should not require PyTorch.
 
 ## Acceptance criteria
 
@@ -234,8 +236,10 @@ check.
   NumPy version scope.
 - The feature-scaling policy, distance metric, tie-breaking behavior, result
   ordering, and degenerate-cluster behavior are documented and tested.
-- Invalid population or subset sizes, malformed feature matrices, and
-  non-finite values fail with clear exceptions.
+- Invalid population or subset sizes and malformed two-dimensional populations
+  fail with clear exceptions. Representative sampling also rejects non-finite,
+  complex, and nonnumeric feature values clearly; random sampling does not
+  inspect row values.
 - scikit-learn is an optional dependency exposed through a documented project
   extra; importing core `aenet` functionality continues to work without it.
 - Calling `representative_subset` without scikit-learn raises a clear
@@ -246,15 +250,16 @@ check.
   replacement, uniqueness, reproducibility, boundary sizes, ties or duplicate
   rows, validation failures, and missing optional dependency behavior.
 - A tracked notebook under `notebooks/` runs from a clean checkout with tracked
-  inputs and demonstrates featurization, global moment representations,
-  explicit feature standardization, reproducible representative and random
-  sampling, comparison of their feature-space coverage, and application of the
-  returned indices to the source structures.
-- The notebook uses the PyTorch featurization framework with documented
-  optional dependencies; no equivalent Fortran-backend notebook is required.
+  structures and precomputed global-moment features. It demonstrates explicit
+  feature standardization, reproducible representative and random sampling,
+  comparison of their feature-space coverage, and application of the returned
+  indices to the source structures.
+- The notebook remains focused on the public sampling workflow and does not
+  require PyTorch at execution time. The tracked data documentation records the
+  optional PyTorch feature-generation protocol and descriptor settings.
 - The notebook explains the effect of feature scaling on Euclidean k-means,
-  records all descriptor, scaler, and random-seed settings, and is covered by
-  an appropriate execution check.
+  records all scaler and random-seed settings, and is covered by an appropriate
+  execution check.
 - Sphinx API and user documentation explain the same end-to-end workflow and
   link to or align with the maintained notebook.
 - The implementation does not introduce a required PyTorch dependency.
@@ -281,3 +286,21 @@ check.
   described as solving a formal global maximum-diversity objective.
 - Implementation should begin on a dedicated issue branch and be divided into
   local issues after the API decisions above have been agreed.
+
+## Implementation receipt
+
+- Added public representative and random row-selection helpers with explicit
+  validation, reproducibility controls, optional scikit-learn loading, and
+  source-index return semantics.
+- Added the maintained NaCl down-selection notebook and tracked structures,
+  precomputed global-moment features, provenance scripts, and documentation.
+- Simplified the notebook around the public sampling workflow while retaining
+  feature-generation settings and provenance in the data bundle documentation.
+- Corrected representative selection so only exactly equal centroid distances
+  use source-index tie-breaking; nearby unequal distances select the true
+  nearest row.
+- Made random sampling validate only population shape and subset size, removed
+  the out-of-scope elbow-analysis implementation, and made UMA VASP input
+  discovery reject ambiguous directories unless `--structure` is supplied.
+- Validated 212 geometry tests, focused Ruff checks, optional-dependency
+  isolation, 121 Sphinx doctests, and a warning-as-error Sphinx HTML build.

@@ -6,7 +6,9 @@ temperature, for example ``550K/run``.  The original runs did not record a
 random seed, so the tracked XSF archive is the authoritative dataset.
 """
 
-import sys
+from __future__ import annotations
+
+import argparse
 import time
 from pathlib import Path
 
@@ -27,8 +29,41 @@ if production_steps % production_frames != 0:
     )
 
 
+def select_vasp_file(
+    folder: Path,
+    structure: Path | None = None,
+) -> Path:
+    """Return an explicit or uniquely discovered VASP structure path."""
+    if structure is not None:
+        structure_path = structure
+        if not structure_path.is_absolute():
+            structure_path = folder / structure_path
+        if not structure_path.is_file():
+            raise FileNotFoundError(f"VASP file not found: {structure_path}")
+        return structure_path
+
+    vasp_files = sorted(folder.glob("*.vasp"))
+    if not vasp_files:
+        raise FileNotFoundError(
+            f"no .vasp file found in directory: {folder}"
+        )
+    if len(vasp_files) > 1:
+        raise ValueError(
+            "multiple .vasp files found; select one with --structure"
+        )
+    return vasp_files[0]
+
+
 def main() -> None:
     """Run equilibration and production MD at the directory temperature."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--structure",
+        type=Path,
+        help="VASP input file; required when the working directory has several.",
+    )
+    args = parser.parse_args()
+
     from ase import units
     from ase.io import read, write
     from ase.io.trajectory import TrajectoryWriter
@@ -43,21 +78,7 @@ def main() -> None:
     T_target = int(temperature_name_from_parent(folder))
     temperature_label = f"{T_target}K"
 
-    vasp_files = list(folder.glob("*.vasp"))
-    if not vasp_files:
-        print(
-            "ERROR: No .vasp file found in the current directory.",
-            file=sys.stderr,
-            flush=True,
-        )
-        sys.exit(1)
-    elif len(vasp_files) > 1:
-        print(
-            f"WARNING: Multiple .vasp files found, using {vasp_files[0].name}",
-            flush=True,
-        )
-
-    vasp_file = vasp_files[0]
+    vasp_file = select_vasp_file(folder, args.structure)
     print(f"Using VASP file: {vasp_file.name}", flush=True)
 
     atoms = read(vasp_file)

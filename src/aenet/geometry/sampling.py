@@ -1,6 +1,6 @@
 """Feature-matrix sampling utilities for structure collections.
 
-The functions in this module operate on numeric representations with one row
+The functions in this module operate on representation matrices with one row
 per source structure.  They return integer source-row indices for the caller to
 apply to paths, in-memory structures, training sets, or other externally
 managed collections.
@@ -16,11 +16,11 @@ import numpy as np
 SKLEARN_INSTALL_HINT = "pip install 'aenet[sampling]'"
 
 
-def _validate_representations(
+def _validate_population(
     representations: Any,
     num_structures: int,
 ) -> np.ndarray:
-    """Return a validated floating-point representation matrix."""
+    """Return an array with a validated structure-row population."""
     if not isinstance(num_structures, Integral) or isinstance(
         num_structures,
         bool,
@@ -35,28 +35,38 @@ def _validate_representations(
         raise ValueError(
             "representations must be a numeric 2D array-like object"
         ) from exc
+    if raw.ndim != 2:
+        raise ValueError(
+            "representations must be a 2D array with one row per structure"
+        )
+    if raw.shape[0] == 0:
+        raise ValueError("representations must contain at least one row")
+    if raw.shape[1] == 0:
+        raise ValueError("representations must contain at least one feature")
+    if num_structures > raw.shape[0]:
+        raise ValueError(
+            "num_structures must be less than or equal to the number of rows"
+        )
+
+    return raw
+
+
+def _validate_representations(
+    representations: Any,
+    num_structures: int,
+) -> np.ndarray:
+    """Return a validated floating-point representation matrix."""
+    raw = _validate_population(representations, num_structures)
     if np.iscomplexobj(raw):
         raise ValueError("representations must be real-valued")
 
     try:
-        features = np.asarray(representations, dtype=float)
+        features = np.asarray(raw, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError(
             "representations must be a numeric 2D array-like object"
         ) from exc
 
-    if features.ndim != 2:
-        raise ValueError(
-            "representations must be a 2D array with one row per structure"
-        )
-    if features.shape[0] == 0:
-        raise ValueError("representations must contain at least one row")
-    if features.shape[1] == 0:
-        raise ValueError("representations must contain at least one feature")
-    if num_structures > features.shape[0]:
-        raise ValueError(
-            "num_structures must be less than or equal to the number of rows"
-        )
     if not np.all(np.isfinite(features)):
         raise ValueError("representations must contain only finite values")
 
@@ -78,9 +88,9 @@ def random_subset(
     Parameters
     ----------
     representations : array-like of shape (n_structures, n_features)
-        Numeric representation matrix with one row per source structure.  The
-        representation values are validated for shape and finiteness but are
-        not otherwise inspected by the random sampler.
+        Representation matrix with one row per source structure.  Only its
+        two-dimensional shape and row count are inspected; representation
+        values do not affect random sampling.
     num_structures : int
         Number of source rows to select.  Must be positive and no larger than
         the number of rows in ``representations``.
@@ -94,8 +104,8 @@ def random_subset(
         One-dimensional integer array containing selected source-row indices in
         ascending source order.
     """
-    features = _validate_representations(representations, num_structures)
-    n_samples = features.shape[0]
+    population = _validate_population(representations, num_structures)
+    n_samples = population.shape[0]
     if num_structures == n_samples:
         return _sorted_all_indices(n_samples)
 
@@ -148,6 +158,11 @@ def representative_subset(
         One-dimensional integer array containing selected source-row indices in
         ascending source order.
 
+    Notes
+    -----
+    If multiple structures have exactly the same computed distance to a
+    centroid, the structure with the lowest source index is selected.
+
     Raises
     ------
     ImportError
@@ -193,9 +208,7 @@ def representative_subset(
             member_features - centers[cluster_id],
             axis=1,
         )
-        minimum = np.min(distances)
-        tied = member_indices[np.isclose(distances, minimum)]
-        selected.append(int(np.min(tied)))
+        selected.append(int(member_indices[np.argmin(distances)]))
 
     unique_selected = np.unique(np.asarray(selected, dtype=np.intp))
     if unique_selected.size != num_structures:

@@ -14,7 +14,10 @@ selection:
 
    pip install "aenet[sampling]"
 
-Random baseline sampling only requires NumPy.
+Random baseline sampling only requires NumPy.  It uses the representation
+matrix only as a population of rows, so the values stored in those rows do not
+affect sampling.  Representative sampling requires finite real-valued
+features.
 
 Sampling From Feature Matrices
 ------------------------------
@@ -140,6 +143,10 @@ For example:
 k-means centroid.  It returns actual source indices, not centroid vectors or
 synthetic structures.
 
+If two assigned structures have exactly the same computed distance to a
+centroid, the structure with the lower source index is selected.  Nearby but
+unequal distances are not treated as ties.
+
 Boundary And Degenerate Cases
 -----------------------------
 
@@ -154,9 +161,10 @@ degenerate representations.
 Maintained NaCl Example
 -----------------------
 
-``notebooks/example-09-sampled-structures-downselection.ipynb`` demonstrates the
-complete workflow on UMA-generated NaCl snapshots.  Its tracked data bundle is
-stored under ``notebooks/data/NaCl-sampled-structures/`` and contains:
+``notebooks/example-09-sampled-structures-downselection.ipynb`` demonstrates a
+complete sampling and down-selection workflow on UMA-generated NaCl snapshots.
+Its tracked data bundle is stored under
+``notebooks/data/NaCl-sampled-structures/`` and contains:
 
 - one XZ-compressed archive with 20,000 XSF structures, split evenly among
   550 K, 700 K, 850 K, and 1000 K;

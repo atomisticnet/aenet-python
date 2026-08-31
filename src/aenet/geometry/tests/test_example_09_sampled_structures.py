@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 NOTEBOOK_PATH = (
@@ -180,6 +181,37 @@ def test_generation_protocol_matches_manifest(monkeypatch):
         module.production_frames
         == manifest["production_frames_per_temperature"]
     )
+
+
+def test_uma_md_selects_the_only_vasp_file(tmp_path, monkeypatch):
+    module = _load_script("uma_md", monkeypatch)
+    structure_path = tmp_path / "NaCl.vasp"
+    structure_path.touch()
+
+    assert module.select_vasp_file(tmp_path) == structure_path
+
+
+def test_uma_md_requires_explicit_choice_for_multiple_vasp_files(
+    tmp_path,
+    monkeypatch,
+):
+    module = _load_script("uma_md", monkeypatch)
+    first = tmp_path / "a.vasp"
+    second = tmp_path / "b.vasp"
+    first.touch()
+    second.touch()
+
+    with pytest.raises(ValueError, match="multiple .vasp files"):
+        module.select_vasp_file(tmp_path)
+
+    assert module.select_vasp_file(tmp_path, Path("b.vasp")) == second
+
+
+def test_uma_md_rejects_missing_vasp_file(tmp_path, monkeypatch):
+    module = _load_script("uma_md", monkeypatch)
+
+    with pytest.raises(FileNotFoundError, match="no .vasp file"):
+        module.select_vasp_file(tmp_path)
 
 
 def test_cutoff_analysis_balances_separated_shells(monkeypatch):
