@@ -30,5 +30,31 @@
     "angular_used": 3.75,
     "radial_fitted": 4.77,
     "radial_used": 4.8
+  },
+  "precomputed_features": {
+    "archive": "sampled_structure_features.npz",
+    "archive_sha256": "ed4c22dc0ba2065320c503b3ddd84102929f400a3b2b61b2422a68e1ae8e07fa",
+    "dtype": "float64",
+    "shape": [
+      20000,
+      60
+    ],
+    "descriptor": {
+      "species": [
+        "Na",
+        "Cl"
+      ],
+      "rad_order": 10,
+      "rad_cutoff": 4.8,
+      "ang_order": 3,
+      "ang_cutoff": 3.75,
+      "min_cutoff": 0.5
+    },
+    "global_moment_settings": {
+      "outer_moment": 1,
+      "inner_moment": 1,
+      "weighted": true,
+      "append_weighted": true
+    }
   }
 }

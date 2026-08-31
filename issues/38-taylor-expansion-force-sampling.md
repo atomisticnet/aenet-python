@@ -53,6 +53,11 @@ The paper considers two first-order sampling strategies:
 - displace all atoms with small random vectors, remove the net center-of-mass
   translation, and constrain each atomic displacement by a maximum magnitude.
 
+Issue 38 will use the paper for the Taylor-labeling method but will implement
+the local statistical sampling workflow with the repository's existing random
+and D-optimal displacement transformations. The signed single-atom Cartesian
+strategy from the paper is not part of the initial implementation.
+
 The reported results establish useful design constraints rather than universal
 defaults:
 
@@ -79,20 +84,20 @@ workflow:
 - The XSF reader and writer preserve total energies and force components, and
   the tracked structures under `notebooks/xsf-TiO2/` provide a practical
   force-bearing Ti--O dataset for a maintained example.
-- `AtomDisplacementTransformation` provides deterministic single-atom
-  Cartesian displacements, but it currently yields only the positive `x`,
-  `y`, and `z` directions (`3N`, not the paper's signed choices) and copied
-  structures retain labels that become stale after coordinate mutation. It
-  cannot be used as the Taylor augmentation API without explicit label
-  replacement and signed-direction semantics.
 - `RandomDisplacementTransformation` already supports seeded generation,
   optional translation removal, and orthonormal or independent random
   patterns. Its magnitude is normalized using an RMS convention over all
-  Cartesian components, not the paper's per-atom maximum-displacement bound.
-  `DOptimalDisplacementTransformation` is also available, but it is not needed
-  to implement the two methods evaluated in the paper.
-- `aenet.staticdata` contains atomic masses that can support a precise
-  mass-weighted center-of-mass translation removal convention.
+  Cartesian components, and its translation removal subtracts the arithmetic
+  mean displacement rather than a mass-weighted center of mass.
+- `DOptimalDisplacementTransformation` already initializes an ensemble through
+  `RandomDisplacementTransformation`, then uses the existing SciPy optimizer to
+  maximize a regularized log-determinant diversity criterion. It supports
+  seeded generation, fixed output count, RMS control, translation removal, and
+  zero ensemble-mean enforcement.
+- Both transformations are public from `aenet.geometry.transformations` and
+  return displaced `AtomicStructure` copies. Taylor augmentation must use their
+  returned coordinates, replace stale copied labels, and must not implement a
+  separate displacement algorithm in the training layer.
 - `StructureDataset`, `CachedStructureDataset`, and
   `HDF5StructureDataset` already support energy-only training. The HDF5 source
   abstraction permits one logical `SourceRecord` to load multiple structures,
@@ -128,8 +133,9 @@ The active issues have the following boundaries with this work:
   responsible for force-derived training labels and must not grow into a
   general structure-generation or electronic-structure workflow.
 - Issue 37 concerns representative and random down-selection from a feature
-  matrix. It is not a prerequisite, and representative selection of Taylor
-  samples is not part of the initial implementation.
+  matrix. It is not a prerequisite. The D-optimal strategy in this issue
+  optimizes displacement-space diversity before Taylor labeling; it is not
+  descriptor-based representative down-selection of an existing dataset.
 
 ## Impact
 
@@ -160,6 +166,9 @@ The public API should separate augmentation policy from ANN optimization
 policy. A provisional in-memory workflow is:
 
 ```python
+from aenet.geometry.transformations import (
+    RandomDisplacementTransformation,
+)
 from aenet.torch_training import (
     TaylorExpansionConfig,
     TorchANNPotential,
@@ -171,12 +180,14 @@ from aenet.torch_training import (
 train_references, validation_references = split_reference_structures(...)
 
 taylor_config = TaylorExpansionConfig(
-    strategy="random",
-    displacement=0.01,
-    samples_per_reference=24,
+    transformation=RandomDisplacementTransformation(
+        rms=0.01,
+        max_structures=24,
+        random_state=42,
+        orthonormalize=False,
+        remove_translations=True,
+    ),
     include_reference=True,
-    remove_center_of_mass=True,
-    seed=42,
 )
 
 train_structures = list(
@@ -196,6 +207,12 @@ potential.train(
     config=training_config,
 )
 ```
+
+The same orchestration must accept `DOptimalDisplacementTransformation` for
+D-optimal Taylor sampling. Accepting a transformation object keeps displacement
+generation and its parameters in `aenet.geometry.transformations`; the Taylor
+layer owns only reference-label validation, energy construction, provenance,
+and dataset integration.
 
 The exact names can change during API review, but the implementation should
 cover the following stages.
@@ -242,54 +259,66 @@ The function should:
 - make the force/sign convention explicit in the API documentation and unit
   tests.
 
-### 3. Provide paper-aligned local displacement strategies
+### 3. Reuse random and D-optimal displacement transformations
 
-Support the two initial strategies independently of ANN featurization:
+Support two local sampling strategies independently of ANN featurization. Both
+must use the public implementations from `aenet.geometry.transformations`.
 
-1. **Signed Cartesian single-atom sampling**
-   - Enumerate stable `(atom, axis, sign)` choices for displacements of
-     `+delta` and `-delta`.
-   - Permit a reproducible subset through `samples_per_reference`; reject a
-     request above the `6N` unique signed choices unless replacement is an
-     explicit future option.
-   - Use the same applied displacement in the Taylor energy calculation.
+1. **Random displacement sampling**
+   - Use `RandomDisplacementTransformation` rather than reimplementing random
+     coordinate generation in the Taylor layer.
+   - Use `orthonormalize=False` for the maintained independent-random baseline;
+     document the existing orthonormal mode if the public Taylor API permits it.
+   - Map the requested augmentation count to `max_structures`, displacement
+     magnitude to `rms`, and reproducibility to `random_state`.
+   - Use the transformation's existing arithmetic-mean translation removal
+     when `remove_translations=True` and document that this is not mass-weighted.
+   - Detect or clearly document degenerate cases, such as removing all
+     translational displacement from a one-atom structure.
 
-2. **Bounded random all-atom sampling**
-   - Draw independent isotropic random displacement patterns with an explicit,
-     documented NumPy distribution.
-   - Remove the common mass-weighted center-of-mass translation when requested,
-     using the package's atomic-mass table. Define a clear error or fallback
-     for unknown species.
-   - Rescale or reject a processed pattern so every applied atomic displacement
-     satisfies `norm(delta_R_i) <= displacement`.
-   - Define behavior for one-atom structures and degenerate zero vectors.
-   - Support integer seeds and, if NumPy generators are accepted, document
-     whether caller-owned generator state is advanced.
+2. **D-optimal displacement sampling**
+   - Use `DOptimalDisplacementTransformation`, which initializes candidates
+     through `RandomDisplacementTransformation` and optimizes their regularized
+     log-determinant displacement-space diversity.
+   - Map the requested augmentation count to `n_structures` and expose or
+     document `rms`, `random_state`, `remove_translations`,
+     `enforce_zero_mean`, `max_iter`, `tol`, and `logdet_regularization`.
+   - Preserve the transformation's existing fallback to the projected random
+     ensemble when optimization does not improve the D-optimal objective.
+   - Validate the existing `n_structures >= 2` contract and any degenerate
+     structure/constraint combination before yielding partial Taylor output.
+   - Treat transformation optimization time as part of augmentation cost, not
+     ANN training time.
 
-Do not silently reuse the current RMS parameter as a maximum-displacement
-parameter. If the existing transformation classes are extended and reused,
-their old behavior must remain backward compatible, the RMS convention noted
-in Issue 36 must be resolved explicitly, and transformed labels must never be
-left stale.
+For both strategies, calculate Taylor labels from the actual child-minus-parent
+coordinates returned by the transformation after RMS scaling, translation
+removal, zero-mean projection, and any D-optimal optimization. Every child must
+have its copied parent energy and forces replaced so no stale label survives.
 
-The displacement magnitude should be required rather than assigned a
-material-independent scientific default. Documentation may use values from the
-paper as examples, but it must require validation for the user's material and
-reference method.
+RMS displacement should be required rather than assigned a material-independent
+scientific default. Values from the paper may be used as starting points, but
+their maximum-per-atom convention is not identical to the transformations'
+RMS-over-Cartesian-components convention and must not be presented as directly
+equivalent.
 
 ### 4. Define dataset size, ordering, and reproducibility
 
-- Interpret `samples_per_reference` as the number of approximate children per
-  exact parent. With `include_reference=True`, each parent contributes one
-  exact record plus that many approximate records.
+- Treat `RandomDisplacementTransformation.max_structures` and
+  `DOptimalDisplacementTransformation.n_structures` as the requested number of
+  approximate children per exact parent. If a higher-level
+  `samples_per_reference` option remains, it must map to those native parameters
+  without creating a second sampling implementation.
+- With `include_reference=True`, each parent contributes one exact record plus
+  the number of children actually yielded by its transformation. Record any
+  shortfall, including the orthonormal random mode's dimensionality limit.
 - Preserve deterministic parent order and deterministic child order. Repeated
-  generation with the same ordered parents and seed must reproduce coordinates,
-  labels, identifiers, and output order under the documented NumPy version
-  scope.
-- Define seed derivation per parent so that generation is stable and auditable.
-  At minimum, identical ordered input must reproduce exactly; preferably,
-  stable parent identifiers should isolate one parent's random stream from
-  unrelated insertions elsewhere in the source collection.
+  generation with the same ordered parents and transformation configuration
+  must reproduce coordinates, labels, identifiers, and output order under the
+  documented NumPy/SciPy version scope.
+- Define how transformation instances and their `random_state` generators are
+  created per parent so fresh, equivalently initialized runs are stable and
+  auditable. Document whether a caller-owned generator advances and whether
+  inserting an unrelated parent changes later random streams.
 - Detect and report exact duplicate displacements within a parent. General
   near-duplicate or descriptor-based selection belongs to Issues 36/37 and is
   not required here.
@@ -341,8 +370,7 @@ generation:
 - keep `sampling_policy="uniform"` in the reference workflow so the requested
   exact-to-approximate data multiple has clear weighting semantics;
 - retain each exact parent once when `include_reference=True` and give each
-  derived energy the same sample weight in the initial implementation, matching
-  the paper's augmentation concept;
+  derived energy the same sample weight in the initial implementation;
 - reuse `CachedStructureDataset` or persisted HDF5 features where appropriate;
 - verify that the direct `compute_force_loss` path, force graph/triplet
   materialization, and persisted derivative caches are not reached during
@@ -361,8 +389,9 @@ Add a controlled comparison using identical parent splits, architecture,
 normalization, optimizer settings, epoch budgets, and random seeds:
 
 1. exact-energy-only training on the parent structures;
-2. Taylor-augmented energy-only training; and
-3. direct energy-plus-force training using the existing implementation on a
+2. random-displacement Taylor energy-only training;
+3. D-optimal-displacement Taylor energy-only training; and
+4. direct energy-plus-force training using the existing implementation on a
    small enough subset for the comparison to be practical.
 
 Evaluate all models on the same untouched exact validation/test parents. Use
@@ -375,14 +404,16 @@ Evaluate all models on the same untouched exact validation/test parents. Use
 - augmentation/build time and stored dataset size, separately from ANN
   optimization time.
 
-Benchmark several displacement magnitudes and augmentation multiples. Select
-parameters only from validation results, reserve the final test split for one
-unbiased comparison, and report when Taylor noise begins to worsen energy
-accuracy. The acceptance target should be a demonstrated force-accuracy
-improvement over exact-energy-only training with lower training cost or memory
-than direct force supervision for at least one maintained workflow. Do not
-promise the paper's numerical speedup or error reduction for this codebase
-without measuring it.
+Benchmark several RMS displacement magnitudes and augmentation multiples. Use
+matched RMS values and child counts when comparing random and D-optimal
+sampling, and report the D-optimal optimizer settings, convergence/fallback
+behavior, and additional generation time. Select parameters only from
+validation results, reserve the final test split for one unbiased comparison,
+and report when Taylor noise begins to worsen energy accuracy. The acceptance
+target should be a demonstrated force-accuracy improvement over
+exact-energy-only training with lower training cost or memory than direct force
+supervision for at least one maintained workflow. Do not promise the paper's
+numerical speedup or error reduction for this codebase without measuring it.
 
 ### 9. Document an executable end-to-end example
 
@@ -394,13 +425,15 @@ of the force-bearing TiO2 structures under `notebooks/xsf-TiO2/`. It should:
 2. split exact parents before augmentation;
 3. visualize or summarize the applied displacement and Taylor energy-change
    distributions;
-4. generate a seeded Taylor-augmented training set;
+4. generate seeded random and D-optimal Taylor-augmented training sets through
+   the existing transformations;
 5. train a single ANN with `force_weight=0.0`;
 6. train the exact-energy-only baseline with matched settings;
 7. optionally run the small direct-force baseline where execution time permits;
 8. evaluate energy and force errors on untouched parents; and
 9. report timing, memory where available, all seeds, descriptor settings,
-   architecture, displacement, and augmentation multiple.
+   architecture, RMS displacement, augmentation multiple, and D-optimal
+   optimizer settings.
 
 Add aligned Sphinx API and usage documentation and a focused profiling script
 or extend the existing training profiler. The notebook and documentation must
@@ -411,23 +444,32 @@ run from a clean checkout without private data or hidden state.
 - A documented public API generates local Taylor-expanded training records
   from force-bearing reference structures using
   `E_child = E_parent - sum_i delta_R_i dot F_i`.
+- All child coordinates are generated by `RandomDisplacementTransformation` or
+  `DOptimalDisplacementTransformation` from
+  `aenet.geometry.transformations`; the Taylor layer contains no independent
+  displacement algorithm.
 - Missing energies, missing or malformed forces, non-finite labels, invalid
   displacement parameters, and inconsistent atom counts fail with clear
   errors before partial generation.
 - Generated children preserve species, atom order, cell, and PBC, own
   independent coordinate arrays, carry finite approximate energies, and do not
   retain parent force labels.
-- The signed Cartesian strategy provides deterministic positive and negative
-  axis choices with an unambiguous count and ordering.
-- The random all-atom strategy is isotropic under its documented distribution,
-  is reproducible with a fixed seed, removes the documented translation mode,
-  and respects the per-atom maximum-displacement bound after all processing.
+- The random strategy uses the existing independent-random mode for the
+  maintained baseline, is reproducible with a fixed `random_state`, removes the
+  documented arithmetic-mean translation mode, and achieves the configured RMS
+  displacement.
+- The D-optimal strategy produces the configured `n_structures`, is
+  reproducible under the documented NumPy/SciPy scope, satisfies its RMS,
+  translation, and zero-ensemble-mean constraints, and preserves the existing
+  random-ensemble fallback when optimization does not improve log-determinant
+  diversity.
 - The energy correction is calculated from the displacement actually applied
   to each child; analytic tests verify the sign and demonstrate the expected
   second-order truncation error for a smooth test potential.
-- `samples_per_reference`, original-structure inclusion, zero-force handling,
-  output ordering, identifier construction, duplicate handling, and random-
-  state behavior are documented and tested.
+- Native transformation output counts, any higher-level
+  `samples_per_reference` mapping, original-structure inclusion, zero-force
+  handling, output ordering, identifier construction, duplicate handling, and
+  random-state behavior are documented and tested.
 - Exact parents are partitioned before augmentation, or a tested group-aware
   split provides equivalent guarantees; no parent or child family crosses the
   train/validation/test boundary.
@@ -441,17 +483,17 @@ run from a clean checkout without private data or hidden state.
   descriptor-derivative materialization are not invoked during optimization.
 - Atomic reference energies, feature/energy normalization, checkpoint/resume,
   and model export retain the documented energy-only behavior.
-- Unit tests cover the Taylor primitive, both displacement strategies,
-  reproducibility, immutability, label clearing, periodic structures,
-  near-zero forces, validation failures, stable identifiers, and parent-aware
-  splitting.
+- Unit tests cover the Taylor primitive, random and D-optimal transformation
+  integration, reproducibility, RMS and projection constraints, immutability,
+  label clearing, periodic structures, near-zero forces, validation failures,
+  stable identifiers, and parent-aware splitting.
 - Integration tests cover in-memory augmentation, HDF5 build/reopen, persisted
   energy features, one small energy-only ANN training run on derived labels,
   and force prediction on untouched labeled structures.
-- A maintained benchmark compares exact-energy-only, Taylor-augmented
-  energy-only, and feasible direct-force training with matched splits and
-  settings, reporting energy/force error, time, memory, augmentation cost, and
-  dataset size.
+- A maintained benchmark compares exact-energy-only, random-Taylor,
+  D-optimal-Taylor, and feasible direct-force training with matched splits and
+  settings, reporting energy/force error, time, memory, augmentation cost,
+  optimizer/fallback status, and dataset size.
 - At least one maintained benchmark demonstrates improved held-out force
   accuracy over exact-energy-only training while using less training time or
   peak memory than direct force training.
@@ -471,7 +513,8 @@ run from a clean checkout without private data or hidden state.
 - Running DFT or another electronic-structure method to obtain missing exact
   energies or forces.
 - Second- or higher-order Taylor expansions requiring Hessians.
-- Normal-mode, D-optimal, or descriptor-selected Taylor displacements.
+- Signed Cartesian single-atom, normal-mode, or descriptor-selected Taylor
+  displacements.
 - Automatic selection of a universally optimal displacement or augmentation
   multiple.
 - Species-specific displacement limits, selective substructure refinement, or
@@ -495,6 +538,6 @@ run from a clean checkout without private data or hidden state.
   The current coordinate transformations should be audited for this label-
   invalidation invariant wherever they are reused.
 - Development should begin on a dedicated Issue 38 branch and be divided into
-  local issues covering the label primitive, displacement generation,
-  provenance/splitting, HDF5 integration, trainer integration, tests,
-  benchmark, and documentation.
+  local issues covering the label primitive, existing-transformation
+  integration, provenance/splitting, HDF5 integration, trainer integration,
+  tests, benchmark, and documentation.

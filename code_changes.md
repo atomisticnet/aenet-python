@@ -145,3 +145,42 @@ Added Issue 37's representation-matrix sampling API.
   full-size selection, invalid inputs, k-means representative selection,
   deterministic tie-breaking, degenerate clusters, and missing optional
   dependency behavior.
+## 2026-08-30: Bundled NaCl Precomputed Features
+
+### Files Changed
+
+- `notebooks/data/NaCl-sampled-structures/sampled_structure_features.npz`
+- `notebooks/data/NaCl-sampled-structures/dataset_manifest.json`
+- `notebooks/data/NaCl-sampled-structures/README.md`
+- `notebooks/example-09-sampled-structures-downselection.ipynb`
+- `notebooks/README.md`
+- `src/aenet/geometry/tests/test_example_09_sampled_structures.py`
+- `code_changes.md`
+
+### Summary
+
+- Added the precomputed `(20000, 60)` NaCl global-moment Chebyshev feature
+  matrix alongside the XSF source archive.
+- Made the tracked feature archive the notebook default, while preserving
+  `FEATURE_FILE = None` as the explicit local-rebuild option and accepting
+  absolute paths to compatible external archives.
+- Restored the notebook's PCA variance target to the documented and tested 90%.
+- Documented the descriptor settings, moment settings, file schema, checksum,
+  and relationship between feature rows and source structures.
+
+### Assumptions And Limitations
+
+- The archived `paths` values retain their HPC provenance. The notebook uses
+  their filenames for structure identity and temperature labels; rebuilding or
+  copying source files still uses the tracked XSF archive.
+- The binary feature archive is approximately 7.9 MB.
+
+### Tests
+
+- Extended `test_example_09_sampled_structures.py` to verify the feature
+  archive checksum, keys, shape, dtype, finite values, source indices, and exact
+  filename correspondence with all 20,000 tracked XSF members.
+- All 7 focused tests passed.
+- The notebook completed end to end with the bundled archive and its default
+  100-candidate smoke configuration; four PCA components retained 90.65% of
+  variance before t-SNE.

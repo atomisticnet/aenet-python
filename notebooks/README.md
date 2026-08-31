@@ -24,4 +24,5 @@ Supporting files:
 - `nn-TiO2/`: ASCII neural-network potential files
 - `xsf/` and `xsf-TiO2/`: example XSF structure datasets
 - `data/NaCl-sampled-structures/`: the compressed 20,000-structure NaCl
-  dataset, generation/conversion/cutoff-analysis provenance, and analysis report
+  dataset, precomputed Chebyshev features, generation/conversion/cutoff-analysis
+  provenance, and analysis report

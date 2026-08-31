@@ -25,6 +25,23 @@ Extract it with:
 tar -xJf sampled_structures.tar.xz
 ```
 
+## Precomputed Features
+
+`sampled_structure_features.npz` contains the global-moment Chebyshev
+fingerprints for all 20,000 tracked structures. Its `features` array has shape
+`(20000, 60)`; `paths` preserves the source filenames used to label rows, and
+`source_indices` maps each row to its original sorted input index. The notebook
+loads this file by default so the full analysis does not repeat featurization.
+
+The features were generated on CPU with `float64`, radial order 10 and cutoff
+4.8 Angstrom, angular order 3 and cutoff 3.75 Angstrom, and minimum cutoff 0.5
+Angstrom. Global moments used outer and inner moment 1 with weighted moments
+enabled and appended. The file SHA-256 is
+`ed4c22dc0ba2065320c503b3ddd84102929f400a3b2b61b2422a68e1ae8e07fa`.
+
+Set `FEATURE_FILE = None` in the notebook to rebuild the same representation
+from `sampled_structures.tar.xz` instead.
+
 ## Generation Protocol
 
 `NaCl_2x2x2.vasp` is the 64-atom starting structure. For each temperature,

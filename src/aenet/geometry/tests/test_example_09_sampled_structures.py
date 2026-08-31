@@ -6,6 +6,8 @@ import tarfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
+import numpy as np
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 NOTEBOOK_PATH = (
     REPO_ROOT / "notebooks" / "example-09-sampled-structures-downselection.ipynb"
@@ -68,6 +70,35 @@ def test_tracked_archive_matches_manifest():
     )
 
 
+def test_precomputed_features_match_manifest_and_structure_archive():
+    manifest = json.loads(
+        (DATA_DIR / "dataset_manifest.json").read_text(encoding="utf-8")
+    )
+    feature_manifest = manifest["precomputed_features"]
+    feature_path = DATA_DIR / feature_manifest["archive"]
+    digest = hashlib.sha256(feature_path.read_bytes()).hexdigest()
+
+    with np.load(feature_path, allow_pickle=False) as data:
+        assert set(data.files) == {"features", "paths", "source_indices"}
+        features = data["features"]
+        paths = data["paths"].astype(str)
+        source_indices = data["source_indices"]
+
+    with tarfile.open(DATA_DIR / manifest["archive"], mode="r:xz") as archive:
+        xsf_names = sorted(
+            Path(member.name).name
+            for member in archive.getmembers()
+            if member.isfile() and member.name.endswith(".xsf")
+        )
+
+    assert digest == feature_manifest["archive_sha256"]
+    assert list(features.shape) == feature_manifest["shape"]
+    assert str(features.dtype) == feature_manifest["dtype"]
+    assert np.isfinite(features).all()
+    assert [Path(path).name for path in paths] == xsf_names
+    assert np.array_equal(source_indices, np.arange(manifest["num_structures"]))
+
+
 def test_notebook_uses_only_tracked_or_explicit_feature_inputs():
     notebook, source = _notebook_source()
 
@@ -75,7 +106,8 @@ def test_notebook_uses_only_tracked_or_explicit_feature_inputs():
     assert all(not cell.get("outputs") for cell in notebook["cells"])
     assert "data/NaCl-sampled-structures" in source
     assert "sampled_structures.tar.xz" in source
-    assert "FEATURE_FILE = None" in source
+    assert 'FEATURE_FILE = "sampled_structure_features.npz"' in source
+    assert "Set to None to rebuild from XSF" in source
     assert "structure_generation/sampled_structures" not in source
     assert "down_selection/sampled_feature_outputs" not in source
     assert "rad_cutoff=4.8" in source
