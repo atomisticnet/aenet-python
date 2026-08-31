@@ -84,6 +84,23 @@ clearer. Prefer named configuration objects and readable keyword arguments.
 After consequential steps, show compact diagnostics or assert important
 invariants so failures are understandable.
 
+Treat notebook code as a teaching surface rather than production
+orchestration. Prefer one concrete, linear happy path that a reader can follow
+top to bottom and adapt without tracing conditional state across distant
+cells. Keep setup proportional to the lesson: move alternative pipelines,
+defensive validation for tracked inputs, reusable infrastructure, and advanced
+configuration into tested helpers, supporting documentation, or clearly
+optional follow-up material. Do not add configuration switches that change the
+meaning or data flow of later cells merely to make one notebook cover more use
+cases.
+
+Favor locally understandable cells over generalized abstractions. A reader
+should be able to identify the scientific operation taught by a cell without
+first understanding archive-management machinery, fallback branches, or
+several layers of configuration. Repetition may be consolidated when the
+result remains more obvious than a helper abstraction, but minimizing line
+count is not itself the goal.
+
 ## Handle optional capabilities explicitly
 
 - State PyTorch and matching PyG extension requirements prominently in

@@ -169,6 +169,7 @@ The notebook executes on a deterministic 100-structure slice with 25 snapshots
 per temperature by default, so it remains useful on a workstation and in CI.
 Set ``NUM_CANDIDATES=None`` and
 ``NUM_SELECTED=2000`` in its configuration cell to reproduce the full
-20,000-to-2,000 down-selection.  A precomputed ``.npz`` feature file from an
-HPC run can be assigned to ``FEATURE_FILE`` to skip local featurization while
-retaining the same scaling, sampling, PCA, and t-SNE analysis.
+20,000-to-2,000 down-selection.  The notebook uses the tracked precomputed
+feature matrix so its executable path stays focused on scaling, sampling,
+source-file extraction, coverage metrics, and PCA visualization.  The data
+bundle README records the feature-generation settings and provenance.

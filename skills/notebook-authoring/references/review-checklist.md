@@ -38,6 +38,12 @@ to satisfy a checklist item.
 - Execution does not depend on variables created by omitted or reordered cells.
 - There are no empty, stale debugging, or accidental scratch cells.
 - Imports, variable names, and configurations are readable.
+- The executable core follows one direct, human-readable path without
+  unnecessary fallback branches or configuration switches.
+- Data preparation, validation, and infrastructure do not dominate the
+  scientific operation being taught.
+- Each code cell can be understood locally without tracing substantial
+  conditional state across the notebook.
 - Each substantial code cell advances one conceptual step.
 - Important invariants have compact checks where a silent failure would be
   misleading.

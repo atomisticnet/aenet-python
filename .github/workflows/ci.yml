@@ -133,8 +133,8 @@ jobs:
             notebook_name: example-05-torch-training
           - notebook: notebooks/example-07-neighbor-list.ipynb
             notebook_name: example-07-neighbor-list
-          - notebook: notebooks/example-09-sampled-structures-sampling.ipynb
-            notebook_name: example-09-sampled-structures-sampling
+          - notebook: notebooks/example-09-sampled-structures-downselection.ipynb
+            notebook_name: example-09-sampled-structures-downselection
           - notebook: notebooks/example-10-ensemble-training-and-evaluation.ipynb
             notebook_name: example-10-ensemble-training-and-evaluation
 

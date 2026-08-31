@@ -29,7 +29,7 @@ tar -xJf sampled_structures.tar.xz
 
 `sampled_structure_features.npz` contains the global-moment Chebyshev
 fingerprints for all 20,000 tracked structures. Its `features` array has shape
-`(20000, 60)`; `paths` preserves the source filenames used to label rows, and
+`(20000, 60)`; `paths` stores safe archive-relative XSF member names, and
 `source_indices` maps each row to its original sorted input index. The notebook
 loads this file by default so the full analysis does not repeat featurization.
 
@@ -37,10 +37,12 @@ The features were generated on CPU with `float64`, radial order 10 and cutoff
 4.8 Angstrom, angular order 3 and cutoff 3.75 Angstrom, and minimum cutoff 0.5
 Angstrom. Global moments used outer and inner moment 1 with weighted moments
 enabled and appended. The file SHA-256 is
-`ed4c22dc0ba2065320c503b3ddd84102929f400a3b2b61b2422a68e1ae8e07fa`.
+`c2b5011738e971a24e4f99bc2fd98d25fb237d5ded798a8a225201404a057c0e`.
 
-Set `FEATURE_FILE = None` in the notebook to rebuild the same representation
-from `sampled_structures.tar.xz` instead.
+The maintained notebook loads this archive directly to keep the sampling
+tutorial concise. Rebuilding the representations requires extracting
+`sampled_structures.tar.xz` and applying the descriptor and global-moment
+settings recorded above with the PyTorch featurization workflow.
 
 ## Generation Protocol
 

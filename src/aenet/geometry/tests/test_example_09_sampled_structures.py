@@ -13,6 +13,7 @@ NOTEBOOK_PATH = (
     REPO_ROOT / "notebooks" / "example-09-sampled-structures-downselection.ipynb"
 )
 DATA_DIR = REPO_ROOT / "notebooks" / "data" / "NaCl-sampled-structures"
+CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _notebook_source() -> tuple[dict, str]:
@@ -95,7 +96,12 @@ def test_precomputed_features_match_manifest_and_structure_archive():
     assert list(features.shape) == feature_manifest["shape"]
     assert str(features.dtype) == feature_manifest["dtype"]
     assert np.isfinite(features).all()
-    assert [Path(path).name for path in paths] == xsf_names
+    assert paths.tolist() == [f"sampled_structures/{name}" for name in xsf_names]
+    assert all(
+        not PurePosixPath(path).is_absolute()
+        and ".." not in PurePosixPath(path).parts
+        for path in paths
+    )
     assert np.array_equal(source_indices, np.arange(manifest["num_structures"]))
 
 
@@ -103,24 +109,55 @@ def test_notebook_uses_only_tracked_or_explicit_feature_inputs():
     notebook, source = _notebook_source()
 
     assert notebook["nbformat"] == 4
-    assert all(not cell.get("outputs") for cell in notebook["cells"])
+    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    execution_counts = [cell["execution_count"] for cell in code_cells]
+    code_line_counts = [
+        len("".join(cell["source"]).splitlines()) for cell in code_cells
+    ]
+
+    assert execution_counts == list(range(1, len(code_cells) + 1))
+    assert any(cell.get("outputs") for cell in code_cells)
+    assert len(code_cells) <= 8
+    assert sum(code_line_counts) <= 120
+    assert max(code_line_counts) <= 30
     assert "data/NaCl-sampled-structures" in source
     assert "sampled_structures.tar.xz" in source
-    assert 'FEATURE_FILE = "sampled_structure_features.npz"' in source
-    assert "Set to None to rebuild from XSF" in source
+    assert "sampled_structure_features.npz" in source
     assert "structure_generation/sampled_structures" not in source
     assert "down_selection/sampled_feature_outputs" not in source
-    assert "rad_cutoff=4.8" in source
-    assert "ang_cutoff=3.75" in source
+    assert "FEATURE_FILE" not in source
+    assert "ChebyshevDescriptor" not in source
+    assert "HDF5StructureDataset" not in source
+    assert "TemporaryDirectory" not in source
+    assert "archive.extract(structure_labels[index]" in source
+    assert 'example-09-outputs" / "selected-structures' in source
+    assert "all(path.is_file() for path in selected_structure_paths)" in source
+    assert "/burg-archive/" not in NOTEBOOK_PATH.read_text(encoding="utf-8")
+
+
+def test_ci_notebook_matrix_references_tracked_notebooks():
+    ci_source = CI_PATH.read_text(encoding="utf-8")
+    notebook_paths = [
+        line.split("notebook:", 1)[1].strip()
+        for line in ci_source.splitlines()
+        if line.lstrip().startswith("- notebook:")
+    ]
+
+    assert notebook_paths
+    assert all((REPO_ROOT / path).is_file() for path in notebook_paths)
+    assert (
+        "notebooks/example-09-sampled-structures-downselection.ipynb"
+        in notebook_paths
+    )
 
 
 def test_notebook_keeps_sampling_and_visualization_spaces_separate():
     _, source = _notebook_source()
 
-    assert "PCA_VARIANCE_TARGET = 0.90" in source
     assert "representative_subset(\n    scaled_features" in source
-    assert ").fit_transform(pca_reduced_features)" in source
-    assert 'path.stem.rsplit("_", 1)[-1]' in source
+    assert "PCA(n_components=2).fit_transform(scaled_features)" in source
+    assert "TSNE" not in source
+    assert 'Path(label).stem.rsplit("_", 1)[-1]' in source
 
 
 def test_conversion_script_uses_archive_filename_contract(monkeypatch):

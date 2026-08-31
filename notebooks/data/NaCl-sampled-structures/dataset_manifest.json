@@ -33,7 +33,7 @@
   },
   "precomputed_features": {
     "archive": "sampled_structure_features.npz",
-    "archive_sha256": "ed4c22dc0ba2065320c503b3ddd84102929f400a3b2b61b2422a68e1ae8e07fa",
+    "archive_sha256": "c2b5011738e971a24e4f99bc2fd98d25fb237d5ded798a8a225201404a057c0e",
     "dtype": "float64",
     "shape": [
       20000,
