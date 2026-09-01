@@ -4,9 +4,9 @@ This file is the high-level index of active, repository-wide issues. Detailed
 descriptions live under [`issues/`](issues/). Local implementation work is
 tracked separately in the untracked `LOCAL_ISSUES.md` file.
 
-**Last issue created:** 38
+**Last issue created:** 40
 
-**Next issue ID:** 39
+**Next issue ID:** 41
 
 ## Active issues
 
@@ -17,6 +17,12 @@ tracked separately in the untracked `LOCAL_ISSUES.md` file.
 | [36](issues/36-structure-library-generation.md) | Medium | Provide an end-to-end structure-library generation workflow |
 | [37](issues/37-representative-structure-sampling.md) | Medium | Implement representative and random structure sampling |
 | [38](issues/38-taylor-expansion-force-sampling.md) | Medium | Implement force-informed local Taylor sampling for ANN training |
+| [40](issues/40-fix-graph-periodic-displacements.md) | High | Fix periodic displacement reconstruction in graph-based descriptors |
+
+## Reserved issue IDs
+
+- Issue 39 is reserved for the uncertainty-quantification ensemble milestone
+  that follows Issue 38. It has not yet been drafted and is not active.
 
 ## Legacy migration notes
 

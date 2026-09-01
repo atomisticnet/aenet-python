@@ -32,6 +32,16 @@ __all__ = [
     "train_test_split",
     "HDF5StructureDataset",
     "train_test_split_dataset",
+    # Taylor force-informed energy augmentation
+    "TaylorExpansionConfig",
+    "TaylorSampleRecord",
+    "TaylorSamplingResult",
+    "TaylorSourceCollection",
+    "generate_taylor_samples",
+    "iter_taylor_records",
+    "iter_taylor_structures",
+    "split_reference_structures",
+    "taylor_energy",
     # Model and trainer
     "EnergyModelAdapter",
     "TorchANNPotential",
@@ -72,6 +82,24 @@ _NAME_TO_SPEC: dict[str, tuple[str, str]] = {
     "train_test_split": (".dataset", "train_test_split"),
     "HDF5StructureDataset": (".hdf5_dataset", "HDF5StructureDataset"),
     "train_test_split_dataset": (".dataset", "train_test_split_dataset"),
+    # Taylor force-informed energy augmentation
+    "TaylorExpansionConfig": (
+        ".taylor_sampling", "TaylorExpansionConfig"
+    ),
+    "TaylorSampleRecord": (".taylor_sampling", "TaylorSampleRecord"),
+    "TaylorSamplingResult": (".taylor_sampling", "TaylorSamplingResult"),
+    "TaylorSourceCollection": (".taylor_sampling", "TaylorSourceCollection"),
+    "generate_taylor_samples": (
+        ".taylor_sampling", "generate_taylor_samples"
+    ),
+    "iter_taylor_records": (".taylor_sampling", "iter_taylor_records"),
+    "iter_taylor_structures": (
+        ".taylor_sampling", "iter_taylor_structures"
+    ),
+    "split_reference_structures": (
+        ".taylor_sampling", "split_reference_structures"
+    ),
+    "taylor_energy": (".taylor_sampling", "taylor_energy"),
     # model adapter and trainer
     "EnergyModelAdapter": (".model_adapter", "EnergyModelAdapter"),
     "TorchANNPotential": (".trainer", "TorchANNPotential"),
