@@ -25,34 +25,47 @@
 - Install required development tools in the configured development environment
   as needed.
 
+# Repository skills
+
+Use the applicable workflow under `./skills/`:
+
+- `issue-workflow`: Plan, implement, review, validate, and close work tracked
+  by global or local issues.
+- `code-review`: Review commits, branches, diffs, or working-tree changes.
+- `documentation`: Create or substantially revise Sphinx documentation,
+  public API docstrings, and maintained documentation examples.
+- `notebook-authoring`: Create or substantially revise maintained notebooks.
+
+Read the selected skill's `SKILL.md` completely before starting its workflow.
+When multiple skills apply, use `issue-workflow` as the coordinating workflow
+and the specialized skill for the relevant deliverable.
+
 # Development workflow
 
+- Always begin development work with a planning stage. Do not modify code in
+  that stage, and obtain user approval before implementation unless the user
+  has explicitly approved the proposed plan.
 - Use a test-driven development workflow.
-- Always begin with a planning stage.
-- Do not modify code during the planning stage.
-- Review relevant global and local issues before planning implementation.
+- For work tracked by a global or local issue, follow
+  `./skills/issue-workflow/SKILL.md`. It governs issue review, scope splitting,
+  planning and approval, implementation, the pre-commit review gate,
+  validation, closure, and commit handoff.
 - For procedural workflows such as debugging, building, or testing, follow the
   corresponding instructions in `./skills/`, when available.
-- Ask before proceeding from planning to implementation unless explicitly
-  instructed otherwise.
 
 ## During implementation
 
-- Code edits are permitted.
-- Add or modify unit tests for new or changed functionality.
 - Keep changes scoped to the current logical unit of work.
-- Make sure all relevant tests pass.
-- Run the relevant `ruff` checks.
 - Ask questions when requirements are ambiguous or progress is blocked.
-- Make sure docstrings in modified code sections are complete and up to date.
-- Revise the Sphinx documentation when APIs or documented behavior change.
+- Apply `./skills/references/engineering-standards.md` for implementation,
+  tests, documentation, dependencies, and repository hygiene.
 
 ## When finalizing a task
 
-- Run the relevant tests and validation checks.
-- Summarize the work performed.
-- Record any remaining limitations or follow-up work.
-- Update or close related issues as appropriate.
+- Complete the validation and review required by the applicable workflow.
+- Summarize the work and record remaining limitations or follow-up work.
+- Update or close related issues only when their acceptance criteria and
+  closure requirements are satisfied.
 - Propose a Git commit message. When closing a global issue, reference
   the relevant issue ID.
 - Do not commit to the Git repo without confirmation from the user.

@@ -9,6 +9,11 @@ Review changes as a maintainer of `aenet-python`. Follow `AGENTS.md`, including
 its issue-tracking and validation conventions. A review is read-only unless the
 user separately requests implementation of fixes.
 
+Before reviewing, read and apply
+[the shared engineering standards](../references/engineering-standards.md).
+This skill adds review-specific evidence, severity, and reporting rules rather
+than defining a separate implementation standard.
+
 ## Establish the review contract
 
 Resolve the exact review boundary: named commits, a branch relative to its
