@@ -48,6 +48,15 @@ jobs:
             pytest -q -m "not docs_examples" \
             --ignore=src/aenet/mlip/tests
 
+      - name: Run optional-backend documentation examples
+        run: |
+          micromamba run -n "${ENV_NAME}" pytest -q -m docs_examples
+
+      - name: Run Sphinx doctest
+        run: |
+          micromamba run -n "${ENV_NAME}" \
+            python -m sphinx -b doctest docs/source docs/build/doctest
+
   docs:
     name: Docs
     runs-on: ubuntu-latest
@@ -71,18 +80,12 @@ jobs:
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
           micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
-          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
-          micromamba run -n "${ENV_NAME}" python -m pip install \
-            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
 
-      - name: Run pytest docs examples
-        run: |
-          micromamba run -n "${ENV_NAME}" pytest -q -m docs_examples
-
-      - name: Run Sphinx doctest
+      - name: Run backend-neutral documentation examples
         run: |
           micromamba run -n "${ENV_NAME}" \
-            python -m sphinx -b doctest docs/source docs/build/doctest
+            pytest -q -m docs_examples \
+            src/aenet/geometry/tests src/aenet/tests
 
       - name: Run warning-clean Sphinx HTML build
         run: |

@@ -19,14 +19,15 @@ drift in the supported runnable subset.
 Running the Checks
 ------------------
 
-Use the ``aenet-torch`` environment for docs example testing.
+The warning-clean HTML build and backend-neutral examples require only the
+core, development, and sampling dependencies. PyTorch-backed examples and the
+complete Sphinx doctest set require the optional PyTorch / PyG stack.
 
 Run Sphinx doctest:
 
 .. code-block:: bash
 
-   /Users/aurban/.local/bin/micromamba run -n aenet-torch \
-       python -m sphinx -b doctest docs/source docs/build/doctest
+   python -m sphinx -b doctest docs/source docs/build/doctest
 
 This executes ``.. doctest::`` blocks in the rendered documentation and reports
 failures by document name.
@@ -35,23 +36,20 @@ Run pytest-backed docs example tests:
 
 .. code-block:: bash
 
-   /Users/aurban/.local/bin/micromamba run -n aenet-torch \
-       pytest -m docs_examples
+   pytest -m docs_examples
 
 Use a file path for a narrower loop while editing a single page:
 
 .. code-block:: bash
 
-   /Users/aurban/.local/bin/micromamba run -n aenet-torch \
-       pytest -q src/aenet/geometry/tests/test_docs_transformations_basic.py
+   pytest -q src/aenet/geometry/tests/test_docs_transformations_basic.py
 
 Run the maintained notebook-first examples without mutating tracked notebooks:
 
 .. code-block:: bash
 
    mkdir -p /tmp/aenet-doc-notebooks
-   /Users/aurban/.local/bin/micromamba run -n aenet-torch \
-       python -m jupyter nbconvert --to notebook --execute \
+   python -m jupyter nbconvert --to notebook --execute \
        notebooks/example-04-torch-featurization.ipynb \
        --output-dir /tmp/aenet-doc-notebooks
 
@@ -77,20 +75,21 @@ CI Coverage
 
 The repository CI is split into three layers so failures are easy to localize:
 
-- general unit tests: ``pytest -q -m "not docs_examples"``
-  with ``src/aenet/mlip/tests`` excluded from the base CI environment because
-  those tests require a configured ``libaenet`` installation
-- docs checks: ``pytest -q -m docs_examples`` plus Sphinx doctest and
-  warning-clean HTML builds
+- optional-backend tests: ``pytest -q -m "not docs_examples"`` followed by
+  ``pytest -q -m docs_examples`` and Sphinx doctest in an environment with
+  PyTorch and the matching PyG extensions; ``src/aenet/mlip/tests`` remains
+  excluded because those tests require a configured ``libaenet`` installation
+- backend-neutral docs checks: the geometry and core ``docs_examples`` tests
+  plus a warning-clean HTML build with Sphinx mocking optional backends
 - notebook checks: execution of the maintained notebook-first examples listed
   above via ``nbconvert --execute`` from a disposable worktree with a
   temporary output directory; the ensemble notebook uses the same 600-second
   timeout as the other PyTorch examples
 
-The current base docs-testing environment explicitly supports the PyTorch /
-PyG-backed pages by installing ``torch`` plus the matching
-``torch-scatter`` and ``torch-cluster`` wheels.  It also installs the
-``sampling`` extra so representative k-means examples can import
+The docs build does not install PyTorch or PyG. The optional-backend test job
+installs ``torch`` plus matching ``torch-scatter`` and ``torch-cluster`` wheels
+to execute PyTorch-backed doctests and pytest examples. The docs build installs
+the ``sampling`` extra so representative k-means examples can import
 scikit-learn.
 
 Examples that require ``pymatgen`` remain optional for now and are outside the

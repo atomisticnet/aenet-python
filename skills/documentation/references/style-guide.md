@@ -65,6 +65,15 @@ Identify requirements for PyTorch, matching PyTorch Geometric extensions,
 compiled ænet components, GPUs, or other optional packages without making
 them appear to be base-package requirements.
 
+The standard Sphinx HTML build must succeed without PyTorch, PyTorch Geometric
+extensions, or other optional backends installed. Mock optional imports for
+autodoc where necessary. Backend-neutral examples must not import an optional
+backend. PyTorch-specific pages may show and import PyTorch, but their
+executable examples belong in the optional-backend test environment rather
+than the standard documentation-build environment. Adding an optional package
+to the standard documentation environment requires an explicit, documented
+justification.
+
 ## Public API and docstrings
 
 Every supported public function, class, method, property, and alternative
