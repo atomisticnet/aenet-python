@@ -14,7 +14,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 
-
 try:
     from torch_cluster import radius, radius_graph
 
@@ -231,8 +230,9 @@ class TorchNeighborList:
             Dictionary containing:
             - 'edge_index': (2, num_edges) neighbor pairs [source, target]
             - 'distances': (num_edges,) pairwise distances in Angstroms
-            - 'offsets': (num_edges, 3) cell offsets (None for isolated
-                 systems)
+            - 'offsets': (num_edges, 3) integer image offsets relative to
+              fractional positions wrapped into the primary cell (None for
+              isolated systems)
             - 'num_neighbors': (N,) number of neighbors per atom
         """
         if cell is None:
@@ -366,7 +366,8 @@ class TorchNeighborList:
         -------
             edge_index: (2, num_edges) neighbor pairs [source, target]
             distances: (num_edges,) pairwise distances in Angstroms
-            offsets: (num_edges, 3) cell offset vectors for each edge
+            offsets: (num_edges, 3) integer image offsets relative to
+                fractional positions wrapped into the primary cell
         """
         backend = getattr(self, "pbc_backend", "legacy")
         if backend == "ghost":
@@ -633,13 +634,15 @@ class TorchNeighborList:
         positions = positions.to(self.device).to(self.dtype)
         cell = cell.to(self.device).to(self.dtype)
 
-        # Convert to Cartesian if needed
+        # All PBC backends expose offsets relative to wrapped fractional
+        # positions.  Keeping the deprecated backend on this convention makes
+        # its results interchangeable with the default ghost backend.
         if fractional:
-            cart_positions = positions @ cell
+            positions_frac = positions
         else:
-            # Use original Cartesian positions without wrapping to keep
-            # offsets consistent with the absolute coordinates returned.
-            cart_positions = positions
+            positions_frac = positions @ torch.linalg.inv(cell)
+        positions_frac = torch.remainder(positions_frac, 1.0)
+        cart_positions = positions_frac @ cell
 
         # Determine search range in each direction
         search_cells = self._determine_search_cells(cell, pbc)
@@ -990,7 +993,8 @@ class TorchNeighborList:
             Dictionary containing:
             - 'indices': (num_neighbors,) neighbor atom indices
             - 'distances': (num_neighbors,) distances to neighbors
-            - 'offsets': (num_neighbors, 3) cell offsets (or None)
+            - 'offsets': (num_neighbors, 3) integer image offsets relative to
+              fractional positions wrapped into the primary cell (or None)
             - 'coordinates': (num_neighbors, 3) neighbor coordinates
                 (only if return_coordinates=True)
 
@@ -1092,8 +1096,14 @@ class TorchNeighborList:
         if return_coordinates:
             coordinates = positions[neighbor_indices]
             if offsets is not None and cell is not None:
-                # Apply PBC offsets: convert to float and apply cell matrix
-                coordinates = coordinates + (offsets.to(self.dtype) @ cell)
+                if fractional:
+                    positions_frac = positions
+                else:
+                    positions_frac = positions @ torch.linalg.inv(cell)
+                positions_frac = torch.remainder(positions_frac, 1.0)
+                coordinates = (
+                    positions_frac[neighbor_indices] + offsets.to(self.dtype)
+                ) @ cell
 
         result_dict = {
             "indices": neighbor_indices,

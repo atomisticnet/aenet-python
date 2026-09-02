@@ -2,7 +2,7 @@
 
 **Type:** Bug
 **Priority:** High
-**Status:** Open
+**Status:** Closed
 **Created:** 2026-09-01
 
 ## Problem
@@ -167,3 +167,26 @@ in Issue 38. It is limited to periodic displacement reconstruction and the
 resulting descriptor-path inconsistency; it does not implement Taylor sampling,
 Gaussian-process regression, or the ensemble uncertainty-quantification work
 reserved for Issue 39.
+
+## Completion receipt
+
+- **Branch:** `codex/issue-40-periodic-graph-displacements`
+- **Relevant commit:** `b1f465b` (`Fix periodic graph displacements (#40)`)
+- Graph displacement reconstruction now uses wrapped fractional coordinates
+  and canonical integer image offsets for periodic structures.
+- The default ghost and deprecated legacy neighbor-list backends now expose the
+  same offset convention, and per-atom returned coordinates use that convention.
+- Regression coverage applies independent multi-cell translations to atoms in
+  orthorhombic and triclinic cells and checks edge alignment, distance/vector
+  agreement, angular descriptors, energies, forces, and position/cell autograd.
+- A direct-force train/save/reload smoke test confirms that training-loop
+  validation agrees with standard-path inference for equivalent periodic images.
+- The affected Issue 38 NaCl direct-force runs are marked for retraining;
+  energy-only and Taylor-expanded runs remain valid with respect to this defect.
+- Validation completed with 316 focused PyTorch tests passing and 7 expected
+  skips. The full suite produced 802 passes and 7 expected skips in the sandbox;
+  its two shared-memory-restricted multiprocessing tests passed separately with
+  the required permission. Focused Ruff checks and a warning-as-error Sphinx
+  HTML build also passed.
+- No unresolved Issue 40 limitations remain. Production direct-force retraining
+  is follow-up scientific work tracked by Issue 38 rather than part of this fix.

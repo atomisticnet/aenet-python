@@ -139,6 +139,15 @@ The active issues have the following boundaries with this work:
 
 ## Impact
 
+### Direct-force baseline validity
+
+The Issue 38 NaCl direct-force production runs completed before Issue 40 was
+resolved used graph-based periodic displacement reconstruction that was not
+invariant to unwrapped atomic images. Those direct-force results must be
+retrained with the Issue 40 fix and must not be used in the maintained
+benchmark. Exact-energy-only and Taylor-expanded energy-only runs use the
+standard descriptor path and are not invalidated by this specific defect.
+
 A supported Taylor-sampling workflow would:
 
 - convert force information already available from reference calculations into

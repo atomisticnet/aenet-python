@@ -177,7 +177,9 @@ class TestReturnCoordinates:
         result_manual = nbl.get_neighbors_of_atom(0, positions, cell=cell)
         neighbor_idx = result_manual["indices"].cpu().numpy()
         offsets = result_manual["offsets"].cpu().numpy()
-        coords_manual = positions[neighbor_idx] + offsets @ cell
+        coords_manual = (
+            np.remainder(positions[neighbor_idx], 1.0) + offsets
+        ) @ cell
 
         # Automatic approach
         result_auto = nbl.get_neighbors_of_atom(
@@ -187,6 +189,33 @@ class TestReturnCoordinates:
 
         # Should be identical
         assert np.allclose(coords_manual, coords_auto)
+
+    def test_return_coordinates_pbc_is_invariant_to_input_image(self):
+        """Cartesian neighbor coordinates use the wrapped-offset contract."""
+        cell = np.eye(3) * 10.0
+        wrapped = np.array([[9.8, 0.0, 0.0], [0.2, 0.0, 0.0]])
+        unwrapped = np.array([[9.8, 0.0, 0.0], [10.2, 0.0, 0.0]])
+        nbl = TorchNeighborList(cutoff=1.0, device="cpu")
+
+        results = [
+            nbl.get_neighbors_of_atom(
+                0,
+                positions,
+                cell=cell,
+                fractional=False,
+                return_coordinates=True,
+            )
+            for positions in (wrapped, unwrapped)
+        ]
+
+        assert torch.equal(results[0]["offsets"], results[1]["offsets"])
+        assert torch.allclose(
+            results[0]["coordinates"], results[1]["coordinates"]
+        )
+        assert torch.allclose(
+            results[0]["coordinates"],
+            torch.tensor([[10.2, 0.0, 0.0]], dtype=torch.float64),
+        )
 
 
 class TestFromAtomicStructure:

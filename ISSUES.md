@@ -16,7 +16,6 @@ tracked separately in the untracked `LOCAL_ISSUES.md` file.
 | [28](issues/28-mixed-memory-training.md) | Medium | Implement a real mixed-memory training mode for large force-training datasets |
 | [36](issues/36-structure-library-generation.md) | Medium | Provide an end-to-end structure-library generation workflow |
 | [38](issues/38-taylor-expansion-force-sampling.md) | Medium | Implement force-informed local Taylor sampling for ANN training |
-| [40](issues/40-fix-graph-periodic-displacements.md) | High | Fix periodic displacement reconstruction in graph-based descriptors |
 
 ## Reserved issue IDs
 

@@ -138,6 +138,22 @@ positions are interpreted as fractional coordinates by default. Pass
    # Offsets show which periodic images each neighbor belongs to
    print(result['offsets'])  # tensor([[-1, 0, 0]])
 
+Periodic offsets are integer lattice translations relative to fractional
+coordinates wrapped into the primary cell. This convention is independent of
+the image used for each input atom. For Cartesian positions ``positions``, an
+edge from atom ``i`` to atom ``j`` therefore has displacement
+
+.. math::
+
+   \mathbf{r}_{ij} =
+   ((\operatorname{remainder}(\mathbf{r}\mathbf{A}^{-1}, 1)_j
+   + \mathbf{n}_{ij})\mathbf{A})
+   - \operatorname{remainder}(\mathbf{r}\mathbf{A}^{-1}, 1)_i\mathbf{A},
+
+where :math:`\mathbf{A}` contains the lattice vectors as rows and
+:math:`\mathbf{n}_{ij}` is the returned offset. Applying offsets directly to
+unwrapped Cartesian coordinates does not satisfy this contract.
+
 Advanced Features
 -----------------
 
@@ -180,7 +196,8 @@ and offsets, use ``return_coordinates=True``:
    neighbor_coords = result['coordinates']  # PBC offsets already applied
 
 This is especially convenient for periodic systems, where the neighbor
-list automatically applies cell offsets to compute actual Cartesian coordinates.
+list automatically applies cell offsets to wrapped fractional positions to
+compute Cartesian coordinates in the neighbor image.
 
 Type-Dependent Cutoffs
 ~~~~~~~~~~~~~~~~~~~~~~
