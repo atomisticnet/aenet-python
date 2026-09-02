@@ -11,6 +11,7 @@ This section provides detailed API documentation for the aenet-python package.
    transformations
    sampling
    torch_featurize
+   torch_training_taylor
    torch_training_builders
    torch_training_committee
    torch_training_training
@@ -38,12 +39,11 @@ Structure Transformations
    Includes deterministic transformations (displacement, volume, strain)
    and stochastic transformations.
 
-Representative Sampling
------------------------
+Sampling
+--------
 
 :doc:`sampling`
-   Feature-matrix sampling utilities that return source-row indices for
-   representative k-means and random subsets.
+   Backend-neutral Taylor augmentation plus feature-matrix sampling utilities.
 
 PyTorch Featurization
 ---------------------
@@ -55,6 +55,10 @@ PyTorch Featurization
 
 PyTorch Training (Modular Components)
 --------------------------------------
+
+:doc:`torch_training_taylor`
+   Compatibility adapters for Taylor sampling with PyTorch structures,
+   streaming sources, and HDF5 datasets.
 
 :doc:`torch_training_builders`
    Network and optimizer builder utilities for constructing training components

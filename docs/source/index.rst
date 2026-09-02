@@ -83,6 +83,7 @@ Tools for Data Generation and Acquisition
    usage/transformations_basic
    usage/transformations_advanced
    usage/representative_sampling
+   usage/taylor_sampling
    usage/data_acquisition
    usage/commandline
 

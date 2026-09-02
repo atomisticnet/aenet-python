@@ -156,11 +156,16 @@ A supported Taylor-sampling workflow would:
 
 ## Proposed approach
 
-Add a focused training-data augmentation module, provisionally
-`aenet.torch_training.taylor_sampling`. Keep this separate from
-`aenet.geometry.sampling`, whose representation-based subset-selection
-semantics are different, and from the general structure-library workflow in
-Issue 36.
+Make `aenet.geometry.sampling` the authoritative backend-neutral location for
+Taylor labeling, reference validation, transformation orchestration,
+provenance, reproducibility, and parent-aware splitting. The sampling module
+is intentionally broader than structure-only or representation-row selection.
+Keep conversion for `torch_training.Structure`, source collections, HDF5
+persistence, and trainer-facing behavior in thin
+`aenet.torch_training.taylor_sampling` adapters. Preserve the already
+published `aenet.torch_training` imports as compatibility paths without
+maintaining a second implementation. Keep this work separate from the general
+structure-library workflow in Issue 36.
 
 The public API should separate augmentation policy from ANN optimization
 policy. A provisional in-memory workflow is:
@@ -169,14 +174,19 @@ policy. A provisional in-memory workflow is:
 from aenet.geometry.transformations import (
     RandomDisplacementTransformation,
 )
-from aenet.torch_training import (
+from aenet.geometry.sampling import (
     TaylorExpansionConfig,
-    TorchANNPotential,
-    TorchTrainingConfig,
+    TaylorReference,
     iter_taylor_structures,
+    split_reference_structures,
 )
 
-# Split exact reference parents before generating any children.
+# Wrap one-frame AtomicStructure parents with stable identities, then split
+# exact references before generating any children.
+references = [
+    TaylorReference(parent_id, structure)
+    for parent_id, structure in exact_parents
+]
 train_references, validation_references = split_reference_structures(...)
 
 taylor_config = TaylorExpansionConfig(
@@ -194,6 +204,18 @@ train_structures = list(
     iter_taylor_structures(train_references, config=taylor_config)
 )
 
+from aenet.torch_training import (
+    StructureDataset,
+    TorchANNPotential,
+    TorchTrainingConfig,
+    generate_taylor_samples as generate_torch_taylor_samples,
+)
+
+torch_train_structures = generate_torch_taylor_samples(
+    torch_train_parents,
+    taylor_config,
+    parent_ids=torch_train_parent_ids,
+).structures
 training_config = TorchTrainingConfig(
     force_weight=0.0,
     sampling_policy="uniform",
@@ -202,11 +224,15 @@ training_config = TorchTrainingConfig(
 
 potential = TorchANNPotential(arch, descriptor)
 potential.train(
-    train_dataset=StructureDataset(train_structures, descriptor),
-    test_dataset=StructureDataset(validation_references, descriptor),
+    train_dataset=StructureDataset(torch_train_structures, descriptor),
+    test_dataset=StructureDataset(torch_validation_parents, descriptor),
     config=training_config,
 )
 ```
+
+The final dataset/training portion uses the compatibility adapters from
+`aenet.torch_training`; the neutral example above deliberately remains
+importable without PyTorch.
 
 The same orchestration must accept `DOptimalDisplacementTransformation` for
 D-optimal Taylor sampling. Accepting a transformation object keeps displacement
@@ -219,9 +245,10 @@ cover the following stages.
 
 ### 1. Define the reference-data and result contracts
 
-- Accept `aenet.torch_training.Structure` as the canonical record and reuse
-  the existing conversion helpers for `AtomicStructure` objects and supported
-  structure paths.
+- Accept explicitly identified, single-frame `AtomicStructure` objects as the
+  canonical neutral record. The PyTorch adapter accepts
+  `aenet.torch_training.Structure` and supported conversion inputs while
+  requiring unique names or explicit stable parent IDs.
 - Require one finite total energy and a finite force array of shape `(N, 3)`
   for every parent selected for augmentation. Reject missing or malformed
   labels before generating any children.
@@ -418,7 +445,7 @@ numerical speedup or error reduction for this codebase without measuring it.
 ### 9. Document an executable end-to-end example
 
 Add a tracked notebook, provisionally
-`notebooks/example-10-taylor-force-sampling.ipynb`, using a manageable subset
+`notebooks/example-11-taylor-force-sampling.ipynb`, using a manageable subset
 of the force-bearing TiO2 structures under `notebooks/xsf-TiO2/`. It should:
 
 1. load and validate exact energies and forces;
@@ -444,6 +471,9 @@ run from a clean checkout without private data or hidden state.
 - A documented public API generates local Taylor-expanded training records
   from force-bearing reference structures using
   `E_child = E_parent - sum_i delta_R_i dot F_i`.
+- The authoritative public API is available from `aenet.geometry.sampling`
+  without PyTorch; existing `aenet.torch_training` imports remain tested
+  compatibility adapters for PyTorch structures and datasets.
 - All child coordinates are generated by `RandomDisplacementTransformation` or
   `DOptimalDisplacementTransformation` from
   `aenet.geometry.transformations`; the Taylor layer contains no independent

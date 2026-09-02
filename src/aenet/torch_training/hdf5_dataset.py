@@ -562,9 +562,8 @@ class HDF5StructureDataset(Dataset):
     file containing:
       - A VLArray 'entries/structures': pickled Structure per entry
       - A Table 'entries/meta': metadata per entry
-          columns: source_id(str), frame_idx(int), source_kind(str),
-                   display_name(str), has_forces(bool), n_atoms(int32),
-                   energy(float64), name(str)
+          columns: source identity and frame, structure labels, and versioned
+                   Taylor parent/child provenance when applicable
       - Optionally, a versioned '/torch_cache' container holding persisted
         raw feature payloads and/or sparse local derivative payloads plus
         descriptor-compatibility metadata
@@ -614,6 +613,11 @@ class HDF5StructureDataset(Dataset):
         all atomic references default to ``0.0`` and the provided per-atom
         labels are filtered as-is. This value is persisted in the HDF5
         metadata and restored when the dataset is reopened. Default: None
+    max_forces : float, optional
+        Optional build-time maximum absolute force component in eV/Angstrom.
+        For :class:`TaylorSourceCollection`, this and ``max_energy`` are
+        evaluated on exact parents before augmentation; accepted children are
+        not independently filtered. The value is persisted and restored.
     atomic_energies : dict[str, float], optional
         Optional atomic reference energies owned by this dataset instance.
         For build-mode HDF5 workflows they define build-time filtering

@@ -5,6 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from aenet.geometry.sampling import (
+    TaylorExpansionConfig as GeometryTaylorExpansionConfig,
+)
+from aenet.geometry.sampling import taylor_energy as geometry_taylor_energy
 from aenet.geometry.transformations import (
     AtomDisplacementTransformation,
     DOptimalDisplacementTransformation,
@@ -26,6 +30,21 @@ from aenet.torch_training.hdf5_dataset import HDF5StructureDataset
 from aenet.torch_training.sources import RecordSourceCollection, SourceRecord
 
 _DEFAULT_FORCES = object()
+
+
+def test_legacy_torch_imports_are_compatibility_adapters():
+    """Published torch imports should remain usable after the core move."""
+    assert TaylorExpansionConfig is GeometryTaylorExpansionConfig
+    assert taylor_energy is geometry_taylor_energy
+
+    parent = _parent(name="legacy-parent")
+    result = generate_taylor_samples([parent], _random_config(n_structures=1))
+
+    assert all(isinstance(item, Structure) for item in result.structures)
+    assert [record.label_origin for record in result.records] == [
+        "exact",
+        "taylor",
+    ]
 
 
 def _parent(
@@ -302,6 +321,8 @@ def test_reference_split_is_reproducible_disjoint_and_order_preserving():
         assert indices == sorted(indices)
 
 
+@pytest.mark.cpu
+@pytest.mark.docs_examples
 def test_taylor_source_collection_preserves_parent_mapping_in_hdf5(tmp_path):
     parent = _parent(name="source-parent")
     sources = RecordSourceCollection(
@@ -531,6 +552,8 @@ def test_taylor_source_collection_preserves_chunked_streaming():
     ] == [3, 3]
 
 
+@pytest.mark.cpu
+@pytest.mark.docs_examples
 def test_energy_only_training_does_not_enter_force_loss(monkeypatch):
     descriptor = _small_descriptor()
     parents = [
