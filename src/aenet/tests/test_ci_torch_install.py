@@ -4,6 +4,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INSTALLER = REPOSITORY_ROOT / ".github/scripts/install-torch-stack.sh"
+WORKFLOW = REPOSITORY_ROOT / ".github/workflows/ci.yml"
 
 
 def _run_installer(tmp_path, *, wheel_failure):
@@ -49,3 +50,14 @@ def test_torch_installer_falls_back_to_bounded_source_build(tmp_path):
         "MAX_JOBS=2" in line and "--no-build-isolation" in line
         for line in commands
     )
+
+
+def test_docs_job_collects_only_backend_neutral_example_modules():
+    workflow = WORKFLOW.read_text()
+    docs_job = workflow.split("\n  docs:\n", 1)[1].split(
+        "\n  readthedocs-smoke:\n", 1
+    )[0]
+
+    assert "test_docs_transformations_basic.py" in docs_job
+    assert "test_docs_trainset.py" in docs_job
+    assert "src/aenet/geometry/tests src/aenet/tests" not in docs_job

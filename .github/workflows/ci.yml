@@ -83,7 +83,8 @@ jobs:
         run: |
           micromamba run -n "${ENV_NAME}" \
             pytest -q -m docs_examples \
-            src/aenet/geometry/tests src/aenet/tests
+            src/aenet/geometry/tests/test_docs_transformations_basic.py \
+            src/aenet/tests/test_docs_trainset.py
 
       - name: Run warning-clean Sphinx HTML build
         run: |
