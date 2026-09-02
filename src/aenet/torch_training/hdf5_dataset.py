@@ -88,6 +88,10 @@ _SOURCE_ID_MAX_BYTES = 2048
 _SOURCE_KIND_MAX_BYTES = 64
 _DISPLAY_NAME_MAX_BYTES = 2048
 _STRUCTURE_NAME_MAX_BYTES = 1024
+_TAYLOR_PARENT_ID_MAX_BYTES = 2048
+_TAYLOR_STRATEGY_MAX_BYTES = 32
+_TAYLOR_LABEL_ORIGIN_MAX_BYTES = 16
+_TAYLOR_GENERATION_ID_MAX_BYTES = 128
 
 
 def _descriptor_cache_signature(descriptor) -> dict:
@@ -156,22 +160,26 @@ def _should_keep_structure_for_build(
     struct: Structure,
     *,
     max_energy: float | None,
+    max_forces: float | None,
     atomic_energies: dict[str, float] | None,
 ) -> bool:
-    """Return whether a structure passes HDF5 build-time energy filtering."""
-    if max_energy is None:
-        return True
-    return referenced_energy_per_atom(
-        struct,
-        atomic_energies=atomic_energies,
-    ) <= float(max_energy)
+    """Return whether a structure passes HDF5 build-time filtering."""
+    if max_energy is not None and referenced_energy_per_atom(
+        struct, atomic_energies=atomic_energies
+    ) > float(max_energy):
+        return False
+    if max_forces is not None and struct.has_forces():
+        return bool(np.abs(struct.forces).max() <= float(max_forces))
+    return True
 
 
 def _write_energy_filter_metadata(
     h5: tables.File,
     *,
     max_energy: float | None,
+    max_forces: float | None,
     atomic_energies: dict[str, float] | None,
+    filter_scope: str,
 ) -> None:
     """Persist HDF5 build-time energy-filter semantics for auditability."""
     attrs = h5.root._v_attrs
@@ -183,24 +191,29 @@ def _write_energy_filter_metadata(
         else "zero_reference_fallback"
     )
     attrs.energy_filter_max_referenced_energy_per_atom = (
-        float(max_energy)
-        if max_energy is not None
-        else float("nan")
+        float(max_energy) if max_energy is not None else float("nan")
     )
     attrs.energy_filter_atomic_energies_json = (
         json.dumps(atomic_energies, sort_keys=True, separators=(",", ":"))
         if atomic_energies is not None
         else ""
     )
+    attrs.force_filter_enabled = bool(max_forces is not None)
+    attrs.force_filter_max_absolute_component = (
+        float(max_forces) if max_forces is not None else float("nan")
+    )
+    attrs.structure_filter_scope = filter_scope
+    attrs.taylor_metadata_schema_version = 1
+    attrs.taylor_metadata_format = "aenet.taylor.provenance.v1"
 
 
 def _read_energy_filter_metadata(
     h5: tables.File,
-) -> tuple[float | None, dict[str, float] | None]:
+) -> tuple[float | None, float | None, dict[str, float] | None]:
     """Read persisted HDF5 build-time energy-filter metadata if present."""
     attrs = h5.root._v_attrs
     if not hasattr(attrs, "energy_filter_enabled"):
-        return None, None
+        return None, None, None
 
     max_energy = (
         float(attrs.energy_filter_max_referenced_energy_per_atom)
@@ -211,7 +224,12 @@ def _read_energy_filter_metadata(
         getattr(attrs, "energy_filter_atomic_energies_json", "")
     )
     if not atomic_energies_json:
-        return max_energy, None
+        max_forces = (
+            float(attrs.force_filter_max_absolute_component)
+            if bool(getattr(attrs, "force_filter_enabled", False))
+            else None
+        )
+        return max_energy, max_forces, None
 
     try:
         decoded = json.loads(atomic_energies_json)
@@ -221,10 +239,16 @@ def _read_energy_filter_metadata(
             "atomic_energies JSON."
         ) from exc
 
-    return max_energy, {
-        str(key): float(value)
-        for key, value in decoded.items()
-    }
+    max_forces = (
+        float(attrs.force_filter_max_absolute_component)
+        if bool(getattr(attrs, "force_filter_enabled", False))
+        else None
+    )
+    return (
+        max_energy,
+        max_forces,
+        {str(key): float(value) for key, value in decoded.items()},
+    )
 
 
 def _decode_meta_text(value: object) -> str:
@@ -289,6 +313,12 @@ class _BuildEntryPayload:
     n_atoms: int
     energy: float
     name: str
+    source_frame_idx: int
+    taylor_parent_id: str = ""
+    taylor_child_index: int = -1
+    taylor_strategy: str = ""
+    taylor_label_origin: str = ""
+    taylor_generation_id: str = ""
     feature_values: np.ndarray | None = None
     feature_n_features: int | None = None
     force_derivatives: _PersistedForceDerivativePayload | None = None
@@ -360,6 +390,7 @@ def _prepare_build_payloads_for_source_record(
     persist_features: bool,
     persist_force_derivatives: bool,
     max_energy: float | None,
+    max_forces: float | None,
     atomic_energies: dict[str, float] | None,
 ) -> list[_BuildEntryPayload]:
     """
@@ -381,6 +412,7 @@ def _prepare_build_payloads_for_source_record(
         if not _should_keep_structure_for_build(
             struct,
             max_energy=max_energy,
+            max_forces=max_forces,
             atomic_energies=atomic_energies,
         ):
             continue
@@ -462,6 +494,7 @@ def _prepare_build_payloads_for_source_record(
                 f"(frame {frame_idx})."
             ) from exc
 
+        provenance = getattr(struct, "_aenet_taylor_provenance", {}) or {}
         payloads.append(
             _BuildEntryPayload(
                 source_id=source_id,
@@ -473,6 +506,18 @@ def _prepare_build_payloads_for_source_record(
                 n_atoms=int(struct.n_atoms),
                 energy=_structure_energy_or_nan(struct),
                 name=str(struct.name) if struct.name is not None else "",
+                source_frame_idx=int(
+                    provenance.get("source_frame_idx", frame_idx)
+                ),
+                taylor_parent_id=str(provenance.get("parent_id", "")),
+                taylor_child_index=(
+                    -1
+                    if provenance.get("child_index") is None
+                    else int(provenance["child_index"])
+                ),
+                taylor_strategy=str(provenance.get("strategy", "")),
+                taylor_label_origin=str(provenance.get("label_origin", "")),
+                taylor_generation_id=str(provenance.get("generation_id", "")),
                 feature_values=feature_values,
                 feature_n_features=feature_n_features,
                 force_derivatives=derivative_payload,
@@ -688,10 +733,9 @@ class HDF5StructureDataset(Dataset):
     _FORCE_DERIVATIVE_PAYLOAD_FORMAT = (
         "aenet.torch_training.local_derivatives.v1"
     )
-    _DESCRIPTOR_MANIFEST_SCHEMA_VERSION = (
-        DESCRIPTOR_MANIFEST_SCHEMA_VERSION
-    )
+    _DESCRIPTOR_MANIFEST_SCHEMA_VERSION = DESCRIPTOR_MANIFEST_SCHEMA_VERSION
     _DESCRIPTOR_MANIFEST_FORMAT = DESCRIPTOR_MANIFEST_FORMAT
+
     # --- metadata table schema
     class _MetaRow(tables.IsDescription):
         source_id = tables.StringCol(_SOURCE_ID_MAX_BYTES)
@@ -702,6 +746,14 @@ class HDF5StructureDataset(Dataset):
         n_atoms = tables.Int32Col()
         energy = tables.Float64Col()
         name = tables.StringCol(_STRUCTURE_NAME_MAX_BYTES)
+        source_frame_idx = tables.Int64Col(dflt=-1)
+        taylor_parent_id = tables.StringCol(_TAYLOR_PARENT_ID_MAX_BYTES)
+        taylor_child_index = tables.Int64Col(dflt=-1)
+        taylor_strategy = tables.StringCol(_TAYLOR_STRATEGY_MAX_BYTES)
+        taylor_label_origin = tables.StringCol(_TAYLOR_LABEL_ORIGIN_MAX_BYTES)
+        taylor_generation_id = tables.StringCol(
+            _TAYLOR_GENERATION_ID_MAX_BYTES
+        )
 
     class _ForceDerivativeIndexRow(tables.IsDescription):
         entry_idx = tables.Int64Col()
@@ -724,6 +776,7 @@ class HDF5StructureDataset(Dataset):
         mode: str = "auto",
         *,
         max_energy: float | None = None,
+        max_forces: float | None = None,
         atomic_energies: dict[str, float] | None = None,
         seed: int | None = None,
         in_memory_cache_size: int = 2048,
@@ -739,22 +792,16 @@ class HDF5StructureDataset(Dataset):
         # Build/read configuration
         self._db_path = os.fspath(database_file)
         self._sources = (
-            coerce_source_collection(sources)
-            if sources is not None
-            else None
+            coerce_source_collection(sources) if sources is not None else None
         )
         self._filters = _FiltersConfig(
             compression=compression,
             compression_level=int(compression_level),
         )
-        self.max_energy = (
-            None if max_energy is None else float(max_energy)
-        )
+        self.max_energy = None if max_energy is None else float(max_energy)
+        self.max_forces = None if max_forces is None else float(max_forces)
         self.atomic_energies = (
-            {
-                str(key): float(value)
-                for key, value in atomic_energies.items()
-            }
+            {str(key): float(value) for key, value in atomic_energies.items()}
             if atomic_energies is not None
             else None
         )
@@ -778,13 +825,15 @@ class HDF5StructureDataset(Dataset):
         # Init per mode
         if mode not in ("auto", "build", "load"):
             raise ValueError(
-                f"Invalid mode '{mode}' (must be 'auto'|'build'|'load')")
+                f"Invalid mode '{mode}' (must be 'auto'|'build'|'load')"
+            )
         self._mode = mode
 
         if mode == "load":
             if not os.path.exists(self._db_path):
                 raise FileNotFoundError(
-                    f"HDF5 database not found: {self._db_path}")
+                    f"HDF5 database not found: {self._db_path}"
+                )
             self._open_readonly()  # set _n_entries and force indices
         elif mode == "auto":
             if os.path.exists(self._db_path):
@@ -848,10 +897,28 @@ class HDF5StructureDataset(Dataset):
         source_collection = self._sources
         if source_collection is None:
             raise ValueError("sources must be provided to build_database()")
+        entry_max_energy = self.max_energy
+        entry_max_forces = self.max_forces
+        filter_scope = "entry"
+        parent_filter_hook = getattr(
+            source_collection, "with_parent_filters", None
+        )
+        if callable(parent_filter_hook):
+            source_collection = parent_filter_hook(
+                max_energy=entry_max_energy,
+                max_forces=self.max_forces,
+                atomic_energies=self.atomic_energies,
+            )
+            entry_max_energy = None
+            entry_max_forces = None
+            filter_scope = "parent"
         build_workers = int(build_workers)
         if build_workers < 0:
             raise ValueError("build_workers must be >= 0")
-        if build_workers > 1 and not source_collection.capabilities.supports_parallel_build:
+        if (
+            build_workers > 1
+            and not source_collection.capabilities.supports_parallel_build
+        ):
             raise ValueError(
                 "The configured sources do not support build_workers > 1."
             )
@@ -859,7 +926,9 @@ class HDF5StructureDataset(Dataset):
         persist_descriptor = bool(
             persist_descriptor or persist_features or persist_force_derivatives
         )
-        if (persist_features or persist_force_derivatives) and self.descriptor is None:
+        if (
+            persist_features or persist_force_derivatives
+        ) and self.descriptor is None:
             raise RuntimeError(
                 "Persisting HDF5 cache payloads requires a descriptor "
                 "instance."
@@ -906,17 +975,23 @@ class HDF5StructureDataset(Dataset):
 
             # Create groups and nodes
             entries_group = h5.create_group(
-                "/", "entries", "Serialized entries")
+                "/", "entries", "Serialized entries"
+            )
             vl_struct = h5.create_vlarray(
-                entries_group, "structures",
-                atom=tables.UInt8Atom(), title="Pickled Structures"
+                entries_group,
+                "structures",
+                atom=tables.UInt8Atom(),
+                title="Pickled Structures",
             )
             meta_table = h5.create_table(
-                entries_group, "meta", description=self._MetaRow)
+                entries_group, "meta", description=self._MetaRow
+            )
             _write_energy_filter_metadata(
                 h5,
                 max_energy=self.max_energy,
+                max_forces=self.max_forces,
                 atomic_energies=self.atomic_energies,
+                filter_scope=filter_scope,
             )
             if persist_descriptor:
                 self._create_descriptor_manifest_storage(h5)
@@ -936,6 +1011,7 @@ class HDF5StructureDataset(Dataset):
             # Optional progress bar
             try:
                 from tqdm import tqdm as _tqdm  # type: ignore
+
                 pbar = (
                     _tqdm(
                         total=total_records,
@@ -953,7 +1029,8 @@ class HDF5StructureDataset(Dataset):
                 descriptor=self.descriptor,
                 persist_features=persist_features,
                 persist_force_derivatives=persist_force_derivatives,
-                max_energy=self.max_energy,
+                max_energy=entry_max_energy,
+                max_forces=entry_max_forces,
                 atomic_energies=self.atomic_energies,
             )
             if build_workers <= 1:
@@ -973,7 +1050,9 @@ class HDF5StructureDataset(Dataset):
                     with ThreadPoolExecutor(
                         max_workers=build_workers,
                     ) as executor:
-                        for record_chunk in source_collection.iter_record_chunks(
+                        for (
+                            record_chunk
+                        ) in source_collection.iter_record_chunks(
                             chunk_size=chunk_size,
                         ):
                             for payload_batch in executor.map(
@@ -1079,11 +1158,35 @@ class HDF5StructureDataset(Dataset):
                 value=payload.name,
                 max_bytes=_STRUCTURE_NAME_MAX_BYTES,
             )
+            row["source_frame_idx"] = payload.source_frame_idx
+            row["taylor_parent_id"] = _validated_hdf5_text(
+                field_name="taylor_parent_id",
+                value=payload.taylor_parent_id,
+                max_bytes=_TAYLOR_PARENT_ID_MAX_BYTES,
+            )
+            row["taylor_child_index"] = payload.taylor_child_index
+            row["taylor_strategy"] = _validated_hdf5_text(
+                field_name="taylor_strategy",
+                value=payload.taylor_strategy,
+                max_bytes=_TAYLOR_STRATEGY_MAX_BYTES,
+            )
+            row["taylor_label_origin"] = _validated_hdf5_text(
+                field_name="taylor_label_origin",
+                value=payload.taylor_label_origin,
+                max_bytes=_TAYLOR_LABEL_ORIGIN_MAX_BYTES,
+            )
+            row["taylor_generation_id"] = _validated_hdf5_text(
+                field_name="taylor_generation_id",
+                value=payload.taylor_generation_id,
+                max_bytes=_TAYLOR_GENERATION_ID_MAX_BYTES,
+            )
             row.append()
 
             if payload.feature_values is not None:
                 if payload.feature_n_features is None:
-                    raise RuntimeError("Missing persisted feature shape metadata.")
+                    raise RuntimeError(
+                        "Missing persisted feature shape metadata."
+                    )
                 self._append_feature_cache_payload(
                     h5=h5,
                     entry_idx=entry_idx,
@@ -1370,15 +1473,11 @@ class HDF5StructureDataset(Dataset):
         """Append one worker-safe derivative payload to the cache."""
         index_table = h5.get_node(node_paths["index"])
         cache_row = int(index_table.nrows)
-        h5.get_node(node_paths["radial_center"]).append(
-            payload.radial_center
-        )
+        h5.get_node(node_paths["radial_center"]).append(payload.radial_center)
         h5.get_node(node_paths["radial_neighbor"]).append(
             payload.radial_neighbor
         )
-        h5.get_node(node_paths["radial_grads"]).append(
-            payload.radial_grads
-        )
+        h5.get_node(node_paths["radial_grads"]).append(payload.radial_grads)
         h5.get_node(node_paths["radial_typespin"]).append(
             payload.radial_typespin
         )
@@ -1464,8 +1563,10 @@ class HDF5StructureDataset(Dataset):
         try:
             vl = self._h5.get_node(self._NODE_STRUCTURES)
         except tables.NoSuchNodeError as exc:
-            raise RuntimeError("Invalid database structure: missing "
-                               + f"{self._NODE_STRUCTURES}") from exc
+            raise RuntimeError(
+                "Invalid database structure: missing "
+                + f"{self._NODE_STRUCTURES}"
+            ) from exc
         self._n_entries = int(len(vl))
 
         # Initialize force indices from metadata table
@@ -1475,10 +1576,11 @@ class HDF5StructureDataset(Dataset):
             if bool(row["has_forces"]):
                 self._force_indices_all.append(i)
 
-        loaded_max_energy, loaded_atomic_energies = _read_energy_filter_metadata(
-            self._h5
+        loaded_max_energy, loaded_max_forces, loaded_atomic_energies = (
+            _read_energy_filter_metadata(self._h5)
         )
         self.max_energy = loaded_max_energy
+        self.max_forces = loaded_max_forces
         self.atomic_energies = loaded_atomic_energies
 
         self._initialize_descriptor_manifest_state()
@@ -1571,7 +1673,9 @@ class HDF5StructureDataset(Dataset):
             "descriptor_compat_sha256": str(attrs.descriptor_compat_sha256),
             "storage_dtype": str(attrs.storage_dtype),
             "contains_features": bool(attrs.contains_features),
-            "contains_force_derivatives": bool(attrs.contains_force_derivatives),
+            "contains_force_derivatives": bool(
+                attrs.contains_force_derivatives
+            ),
         }
         self._validate_torch_cache_schema()
 
@@ -1583,7 +1687,9 @@ class HDF5StructureDataset(Dataset):
     def _validate_torch_cache_schema(self) -> dict:
         """Ensure the unified torch cache metadata is supported."""
         if self._torch_cache_info is None:
-            raise RuntimeError("This HDF5 dataset does not contain a torch cache.")
+            raise RuntimeError(
+                "This HDF5 dataset does not contain a torch cache."
+            )
         info = self._torch_cache_info
         if info["schema_version"] != self._TORCH_CACHE_SCHEMA_VERSION:
             raise RuntimeError(
@@ -1593,8 +1699,7 @@ class HDF5StructureDataset(Dataset):
             )
         if info["cache_format"] != self._TORCH_CACHE_FORMAT:
             raise RuntimeError(
-                "Unsupported torch cache format "
-                f"{info['cache_format']!r}."
+                f"Unsupported torch cache format {info['cache_format']!r}."
             )
         return info
 
@@ -1621,7 +1726,9 @@ class HDF5StructureDataset(Dataset):
             "n_angular_features": int(attrs.n_angular_features),
             "multi": bool(attrs.multi),
         }
-        self._force_derivative_node_paths = self._v2_force_derivative_node_paths()
+        self._force_derivative_node_paths = (
+            self._v2_force_derivative_node_paths()
+        )
 
         index = self._h5.get_node(self._NODE_CACHE_FORCE_DERIVATIVE_INDEX)
         for row in index:  # type: ignore[assignment]
@@ -1634,7 +1741,9 @@ class HDF5StructureDataset(Dataset):
         if self._h5 is None:
             return
         try:
-            deriv_group = self._h5.get_node(self._GROUP_LEGACY_FORCE_DERIVATIVES)
+            deriv_group = self._h5.get_node(
+                self._GROUP_LEGACY_FORCE_DERIVATIVES
+            )
         except tables.NoSuchNodeError:
             return
 
@@ -1651,7 +1760,9 @@ class HDF5StructureDataset(Dataset):
             "contains_features": bool(attrs.contains_features),
             "contains_positions": bool(attrs.contains_positions),
         }
-        self._force_derivative_node_paths = self._legacy_force_derivative_node_paths()
+        self._force_derivative_node_paths = (
+            self._legacy_force_derivative_node_paths()
+        )
 
         index = self._h5.get_node(self._NODE_LEGACY_FORCE_DERIVATIVE_INDEX)
         for row in index:  # type: ignore[assignment]
@@ -1659,7 +1770,9 @@ class HDF5StructureDataset(Dataset):
                 row["cache_row"]
             )
 
-    def _validate_cache_descriptor_compatibility(self, info: dict, action: str) -> dict:
+    def _validate_cache_descriptor_compatibility(
+        self, info: dict, action: str
+    ) -> dict:
         """Ensure the persisted cache payload is compatible with the descriptor."""
         self._require_descriptor(action)
         expected = _descriptor_derivative_cache_metadata(self.descriptor)
@@ -1673,7 +1786,9 @@ class HDF5StructureDataset(Dataset):
     def _validate_feature_cache_compatibility(self) -> dict:
         """Ensure the persisted feature cache is supported and compatible."""
         if self._feature_cache_info is None:
-            raise RuntimeError("This HDF5 dataset does not contain persisted features.")
+            raise RuntimeError(
+                "This HDF5 dataset does not contain persisted features."
+            )
         info = self._validate_torch_cache_schema()
         return self._validate_cache_descriptor_compatibility(
             info,
@@ -1690,7 +1805,10 @@ class HDF5StructureDataset(Dataset):
         info = self._force_derivative_cache_info
         if int(info["schema_version"]) == self._TORCH_CACHE_SCHEMA_VERSION:
             self._validate_torch_cache_schema()
-        elif int(info["schema_version"]) != self._FORCE_DERIVATIVE_SCHEMA_VERSION:
+        elif (
+            int(info["schema_version"])
+            != self._FORCE_DERIVATIVE_SCHEMA_VERSION
+        ):
             raise RuntimeError(
                 "Unsupported force-derivative cache schema version "
                 f"{info['schema_version']}."
@@ -1779,7 +1897,11 @@ class HDF5StructureDataset(Dataset):
         Runtime cache entries take precedence when ``cache_features=True``.
         Otherwise, compatible persisted HDF5 features are loaded lazily.
         """
-        if cache_features and feature_cache is not None and idx in feature_cache:
+        if (
+            cache_features
+            and feature_cache is not None
+            and idx in feature_cache
+        ):
             return feature_cache[idx]
 
         if self._feature_cache_info is None:
@@ -1828,7 +1950,9 @@ class HDF5StructureDataset(Dataset):
             self._open_readonly()
         info = self._validate_force_derivative_cache_compatibility()
         if self._force_derivative_node_paths is None:
-            raise RuntimeError("Missing force-derivative node layout metadata.")
+            raise RuntimeError(
+                "Missing force-derivative node layout metadata."
+            )
         cache_row = self._force_derivative_rows_by_entry.get(int(idx))
         if cache_row is None:
             return None
@@ -1842,71 +1966,51 @@ class HDF5StructureDataset(Dataset):
         n_angular_features = int(info["n_angular_features"])
 
         radial_center = np.asarray(
-            self._h5.get_node(node_paths["radial_center"])[
-                cache_row
-            ],
+            self._h5.get_node(node_paths["radial_center"])[cache_row],
             dtype=np.int64,
         )
         radial_neighbor = np.asarray(
-            self._h5.get_node(node_paths["radial_neighbor"])[
-                cache_row
-            ],
+            self._h5.get_node(node_paths["radial_neighbor"])[cache_row],
             dtype=np.int64,
         )
         radial_grads = np.asarray(
-            self._h5.get_node(node_paths["radial_grads"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["radial_grads"])[cache_row]
         ).reshape(n_radial_edges, n_radial_features, 3)
         radial_typespin = np.asarray(
-            self._h5.get_node(node_paths["radial_typespin"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["radial_typespin"])[cache_row]
         )
 
         angular_center = np.asarray(
-            self._h5.get_node(node_paths["angular_center"])[
-                cache_row
-            ],
+            self._h5.get_node(node_paths["angular_center"])[cache_row],
             dtype=np.int64,
         )
         angular_j = np.asarray(
-            self._h5.get_node(node_paths["angular_neighbor_j"])[
-                cache_row
-            ],
+            self._h5.get_node(node_paths["angular_neighbor_j"])[cache_row],
             dtype=np.int64,
         )
         angular_k = np.asarray(
-            self._h5.get_node(node_paths["angular_neighbor_k"])[
-                cache_row
-            ],
+            self._h5.get_node(node_paths["angular_neighbor_k"])[cache_row],
             dtype=np.int64,
         )
         angular_grads_i = np.asarray(
-            self._h5.get_node(node_paths["angular_grads_i"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["angular_grads_i"])[cache_row]
         ).reshape(n_angular_triplets, n_angular_features, 3)
         angular_grads_j = np.asarray(
-            self._h5.get_node(node_paths["angular_grads_j"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["angular_grads_j"])[cache_row]
         ).reshape(n_angular_triplets, n_angular_features, 3)
         angular_grads_k = np.asarray(
-            self._h5.get_node(node_paths["angular_grads_k"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["angular_grads_k"])[cache_row]
         ).reshape(n_angular_triplets, n_angular_features, 3)
         angular_typespin = np.asarray(
-            self._h5.get_node(node_paths["angular_typespin"])[
-                cache_row
-            ]
+            self._h5.get_node(node_paths["angular_typespin"])[cache_row]
         )
 
         radial_block: dict[str, torch.Tensor | None] = {
             "center_idx": torch.from_numpy(radial_center).to(torch.int64),
             "neighbor_idx": torch.from_numpy(radial_neighbor).to(torch.int64),
-            "dG_drij": torch.from_numpy(radial_grads).to(self.descriptor.dtype),
+            "dG_drij": torch.from_numpy(radial_grads).to(
+                self.descriptor.dtype
+            ),
             "neighbor_typespin": (
                 torch.from_numpy(radial_typespin).to(self.descriptor.dtype)
                 if bool(info["multi"])
@@ -2017,6 +2121,13 @@ class HDF5StructureDataset(Dataset):
 
         meta = self._h5.get_node(self._NODE_META)
         row = meta[int(idx)]
+        columns = set(meta.colnames)
+        frame_idx = int(row["frame_idx"])
+        child_index = (
+            int(row["taylor_child_index"])
+            if "taylor_child_index" in columns
+            else -1
+        )
         return {
             "source_id": _decode_meta_text(row["source_id"]),
             "frame_idx": int(row["frame_idx"]),
@@ -2026,6 +2137,36 @@ class HDF5StructureDataset(Dataset):
             "has_forces": bool(row["has_forces"]),
             "n_atoms": int(row["n_atoms"]),
             "energy": float(row["energy"]),
+            "source_frame_idx": (
+                int(row["source_frame_idx"])
+                if "source_frame_idx" in columns
+                else frame_idx
+            ),
+            "taylor_parent_id": (
+                _decode_meta_text(row["taylor_parent_id"])
+                if "taylor_parent_id" in columns
+                else ""
+            )
+            or None,
+            "taylor_child_index": None if child_index < 0 else child_index,
+            "taylor_strategy": (
+                _decode_meta_text(row["taylor_strategy"])
+                if "taylor_strategy" in columns
+                else ""
+            )
+            or None,
+            "taylor_label_origin": (
+                _decode_meta_text(row["taylor_label_origin"])
+                if "taylor_label_origin" in columns
+                else ""
+            )
+            or None,
+            "taylor_generation_id": (
+                _decode_meta_text(row["taylor_generation_id"])
+                if "taylor_generation_id" in columns
+                else ""
+            )
+            or None,
         }
 
     def get_structure_identifier(self, idx: int) -> str:

@@ -137,9 +137,40 @@ def test_random_sampling_is_reproducible_without_advancing_prototype_rng():
     second = generate_taylor_samples([parent], config)
 
     first_positions = [record.structure.positions for record in first.records]
-    second_positions = [record.structure.positions for record in second.records]
+    second_positions = [
+        record.structure.positions for record in second.records
+    ]
     for positions_a, positions_b in zip(first_positions, second_positions):
         assert np.array_equal(positions_a, positions_b)
+
+
+def test_adapter_parent_stream_is_stable_under_unrelated_insertion():
+    config = _random_config(n_structures=2)
+
+    original = generate_taylor_samples(
+        [_parent(name="a"), _parent(name="b")],
+        config,
+    )
+    inserted = generate_taylor_samples(
+        [_parent(name="x"), _parent(name="a"), _parent(name="b")],
+        config,
+    )
+
+    original_b = [
+        record.structure.positions
+        for record in original.records
+        if record.parent_id == "b" and record.label_origin == "taylor"
+    ]
+    inserted_b = [
+        record.structure.positions
+        for record in inserted.records
+        if record.parent_id == "b" and record.label_origin == "taylor"
+    ]
+    assert len(original_b) == len(inserted_b)
+    assert all(
+        np.array_equal(before, after)
+        for before, after in zip(original_b, inserted_b)
+    )
 
 
 def test_doptimal_sampling_preserves_native_constraints_and_labels():
@@ -265,7 +296,9 @@ def test_reference_split_is_reproducible_disjoint_and_order_preserving():
     assert not names[0] & names[2]
     assert not names[1] & names[2]
     for split in first:
-        indices = [int(structure.name.rsplit("-", 1)[-1]) for structure in split]
+        indices = [
+            int(structure.name.rsplit("-", 1)[-1]) for structure in split
+        ]
         assert indices == sorted(indices)
 
 
@@ -310,10 +343,26 @@ def test_taylor_source_collection_preserves_parent_mapping_in_hdf5(tmp_path):
     assert [item["frame_idx"] for item in metadata] == [0, 1, 2]
     assert [item["has_forces"] for item in metadata] == [True, False, False]
     assert metadata[0]["name"].endswith("::exact")
+    assert metadata[0]["taylor_parent_id"] == (
+        "reference/source-parent.xsf#frame=0"
+    )
+    assert metadata[0]["taylor_child_index"] is None
+    assert metadata[0]["taylor_strategy"] == "random"
+    assert metadata[0]["taylor_label_origin"] == "exact"
+    assert metadata[0]["source_frame_idx"] == 0
     assert all(
         item["name"].startswith("source-parent::taylor:random:")
         for item in metadata[1:]
     )
+    assert [item["taylor_child_index"] for item in metadata[1:]] == [0, 1]
+    assert all(
+        item["taylor_parent_id"] == "reference/source-parent.xsf#frame=0"
+        for item in metadata[1:]
+    )
+    assert all(
+        item["taylor_label_origin"] == "taylor" for item in metadata[1:]
+    )
+    assert len({item["taylor_generation_id"] for item in metadata}) == 1
     dataset.close()
 
     reopened = HDF5StructureDataset(
@@ -324,7 +373,124 @@ def test_taylor_source_collection_preserves_parent_mapping_in_hdf5(tmp_path):
     assert len(reopened) == 3
     assert reopened.has_persisted_features()
     assert not reopened.has_persisted_force_derivatives()
+    reopened_metadata = [
+        reopened.get_entry_metadata(index) for index in range(3)
+    ]
+    assert reopened_metadata == metadata
     reopened.close()
+
+
+def test_taylor_hdf5_energy_filter_rejects_complete_parent_family(tmp_path):
+    parent = _parent(
+        name="high-energy",
+        energy=10.0,
+        forces=np.array([[100.0, 0.0, 0.0], [-100.0, 0.0, 0.0]]),
+    )
+    sources = RecordSourceCollection(
+        [SourceRecord("high.xsf", lambda: parent, source_kind="memory")]
+    )
+    dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=tmp_path / "filtered.h5",
+        sources=TaylorSourceCollection(
+            sources,
+            _random_config(n_structures=20),
+        ),
+        mode="build",
+        max_energy=0.0,
+    )
+
+    dataset.build_database(show_progress=False)
+
+    assert len(dataset) == 0
+    dataset.close()
+
+
+def test_taylor_hdf5_keeps_all_children_of_accepted_parent(tmp_path):
+    parent = _parent(
+        name="accepted",
+        energy=-1.0,
+        forces=np.array([[100.0, 0.0, 0.0], [-100.0, 0.0, 0.0]]),
+    )
+    sources = RecordSourceCollection(
+        [SourceRecord("accepted.xsf", lambda: parent, source_kind="memory")]
+    )
+    dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=tmp_path / "accepted.h5",
+        sources=TaylorSourceCollection(
+            sources,
+            _random_config(n_structures=20),
+        ),
+        mode="build",
+        max_energy=0.0,
+    )
+
+    dataset.build_database(show_progress=False)
+
+    assert len(dataset) == 21
+    assert any(
+        dataset.get_entry_metadata(index)["energy"] > 0.0
+        for index in range(len(dataset))
+    )
+    dataset.close()
+
+
+def test_taylor_hdf5_force_filter_rejects_complete_parent_family(tmp_path):
+    parent = _parent(
+        name="high-force",
+        energy=-1.0,
+        forces=np.array([[2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]]),
+    )
+    sources = RecordSourceCollection(
+        [SourceRecord("force.xsf", lambda: parent, source_kind="memory")]
+    )
+    dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=tmp_path / "force-filtered.h5",
+        sources=TaylorSourceCollection(sources, _random_config()),
+        mode="build",
+        max_forces=1.0,
+    )
+
+    dataset.build_database(show_progress=False)
+
+    assert len(dataset) == 0
+    dataset.close()
+
+
+def test_taylor_hdf5_preserves_original_frame_identity(tmp_path):
+    parents = [_parent(name="same-name"), _parent(name="same-name")]
+    sources = RecordSourceCollection(
+        [SourceRecord("trajectory.xsf", lambda: parents, source_kind="memory")]
+    )
+    dataset = HDF5StructureDataset(
+        descriptor=None,
+        database_file=tmp_path / "frames.h5",
+        sources=TaylorSourceCollection(
+            sources,
+            _random_config(n_structures=1),
+        ),
+        mode="build",
+    )
+
+    dataset.build_database(show_progress=False)
+
+    metadata = [dataset.get_entry_metadata(index) for index in range(4)]
+    assert [item["source_frame_idx"] for item in metadata] == [0, 0, 1, 1]
+    assert [item["taylor_parent_id"] for item in metadata] == [
+        "trajectory.xsf#frame=0",
+        "trajectory.xsf#frame=0",
+        "trajectory.xsf#frame=1",
+        "trajectory.xsf#frame=1",
+    ]
+    assert [item["taylor_label_origin"] for item in metadata] == [
+        "exact",
+        "taylor",
+        "exact",
+        "taylor",
+    ]
+    dataset.close()
 
 
 def test_taylor_source_collection_preserves_chunked_streaming():
@@ -340,7 +506,7 @@ def test_taylor_source_collection_preserves_chunked_streaming():
             self.requested_chunk_sizes.append(chunk_size)
             records = list(self.iter_records())
             for start in range(0, len(records), chunk_size):
-                yield records[start:start + chunk_size]
+                yield records[start : start + chunk_size]
 
     sources = ChunkedSources(
         [
@@ -361,9 +527,7 @@ def test_taylor_source_collection_preserves_chunked_streaming():
         ["b"],
     ]
     assert [
-        len(record.load_structures())
-        for chunk in chunks
-        for record in chunk
+        len(record.load_structures()) for chunk in chunks for record in chunk
     ] == [3, 3]
 
 
