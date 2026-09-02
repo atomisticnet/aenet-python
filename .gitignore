@@ -23,6 +23,7 @@ notebooks/run/
 notebooks/example-01-outputs/
 notebooks/example-05-outputs/
 notebooks/example-08-outputs/
+notebooks/example-10-outputs/
 
 
 # Sphinx build and generated files
