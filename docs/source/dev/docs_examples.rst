@@ -88,8 +88,11 @@ The repository CI is split into three layers so failures are easy to localize:
 
 The docs build does not install PyTorch or PyG. The optional-backend test job
 installs ``torch`` plus matching ``torch-scatter`` and ``torch-cluster`` wheels
-to execute PyTorch-backed doctests and pytest examples. The docs build installs
-the ``sampling`` extra so representative k-means examples can import
+to execute PyTorch-backed doctests and pytest examples. CI uses CPU-only
+PyTorch, prefers prebuilt PyG wheels, and falls back to a bounded CPU source
+build if the external wheel index is unavailable. Conditional CUDA examples
+in maintained notebooks are skipped when CUDA is absent. The docs build
+installs the ``sampling`` extra so representative k-means examples can import
 scikit-learn.
 
 Examples that require ``pymatgen`` remain optional for now and are outside the

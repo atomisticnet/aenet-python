@@ -38,9 +38,7 @@ jobs:
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
           micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
-          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
-          micromamba run -n "${ENV_NAME}" python -m pip install \
-            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
+          bash .github/scripts/install-torch-stack.sh
 
       - name: Run general pytest suite
         run: |
@@ -160,9 +158,7 @@ jobs:
         run: |
           micromamba run -n "${ENV_NAME}" python -m pip install --upgrade pip
           micromamba run -n "${ENV_NAME}" python -m pip install -e ".[dev,sampling]"
-          micromamba run -n "${ENV_NAME}" python -m pip install "torch==${TORCH_VERSION}"
-          micromamba run -n "${ENV_NAME}" python -m pip install \
-            torch-scatter torch-cluster -f "${PYG_WHEEL_URL}"
+          bash .github/scripts/install-torch-stack.sh
 
       - name: Prepare disposable notebook worktree
         run: |
