@@ -177,7 +177,9 @@ class TestReturnCoordinates:
         result_manual = nbl.get_neighbors_of_atom(0, positions, cell=cell)
         neighbor_idx = result_manual["indices"].cpu().numpy()
         offsets = result_manual["offsets"].cpu().numpy()
-        coords_manual = positions[neighbor_idx] + offsets @ cell
+        coords_manual = (
+            np.remainder(positions[neighbor_idx], 1.0) + offsets
+        ) @ cell
 
         # Automatic approach
         result_auto = nbl.get_neighbors_of_atom(

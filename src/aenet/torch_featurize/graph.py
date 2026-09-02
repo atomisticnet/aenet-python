@@ -48,11 +48,20 @@ def _compute_r_ij(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     """
-    Compute displacement vectors r_ij with optional periodic offsets.
+    Compute displacement vectors using the neighbor-list image convention.
+
+    Periodic offsets are relative to fractional coordinates wrapped into the
+    primary cell.  Cartesian positions may therefore lie in arbitrary
+    periodic images.
     """
     pos = positions.to(dtype)
     if cell is not None and offsets is not None:
-        r_ij = (pos[j_idx] + offsets.to(dtype) @ cell.to(dtype)) - pos[i_idx]
+        cell = cell.to(dtype)
+        fractional = torch.remainder(pos @ torch.linalg.inv(cell), 1.0)
+        r_ij = (
+            (fractional[j_idx] + offsets.to(dtype)) @ cell
+            - fractional[i_idx] @ cell
+        )
     else:
         r_ij = pos[j_idx] - pos[i_idx]
     return r_ij

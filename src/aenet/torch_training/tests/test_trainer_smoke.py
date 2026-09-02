@@ -99,6 +99,48 @@ def make_descriptor_H(dtype=torch.float64):
     )
 
 
+def make_periodic_image_equivalent_structures_H():
+    """Return one wrapped and one independently translated configuration."""
+    cell = np.array(
+        [[10.0, 0.0, 0.0], [1.5, 9.0, 0.0], [0.7, 1.1, 8.0]],
+        dtype=np.float64,
+    )
+    fractional = np.array(
+        [[0.98, 0.25, 0.30], [0.02, 0.28, 0.30], [0.96, 0.38, 0.35]],
+        dtype=np.float64,
+    )
+    translations = np.array(
+        [[0, 0, 0], [2, -1, 0], [-1, 0, 1]], dtype=np.float64
+    )
+    structures = []
+    for positions in (fractional @ cell, (fractional + translations) @ cell):
+        structures.append(
+            Structure(
+                positions=positions,
+                species=["H", "H", "H"],
+                energy=0.25,
+                forces=np.zeros_like(positions),
+                cell=cell,
+                pbc=np.ones(3, dtype=bool),
+            )
+        )
+    return structures
+
+
+def make_periodic_descriptor_H(dtype=torch.float64):
+    """Return a compact descriptor with a nontrivial angular block."""
+    return ChebyshevDescriptor(
+        species=["H"],
+        rad_order=1,
+        rad_cutoff=2.0,
+        ang_order=1,
+        ang_cutoff=2.0,
+        min_cutoff=0.1,
+        device="cpu",
+        dtype=dtype,
+    )
+
+
 def _payload_source_collection(
     source_ids: list[str],
     payloads: list[Structure | list[Structure]],
@@ -298,6 +340,57 @@ def test_force_training_smoke(tmp_path: Path):
     assert ckpt_dir.exists()
     files = list(ckpt_dir.glob("checkpoint_epoch_*.pt"))
     assert len(files) >= 1
+
+
+@pytest.mark.cpu
+def test_direct_force_validation_matches_reloaded_standard_inference(
+    tmp_path: Path,
+):
+    """Training and reloaded inference agree for equivalent periodic images."""
+    structures = make_periodic_image_equivalent_structures_H()
+    descriptor = make_periodic_descriptor_H(dtype=torch.float64)
+    pot = TorchANNPotential(
+        arch=make_arch_H(descriptor), descriptor=descriptor
+    )
+    cfg = TorchTrainingConfig(
+        iterations=1,
+        testpercent=50,
+        force_weight=0.5,
+        force_fraction=1.0,
+        force_sampling="fixed",
+        normalize_features=False,
+        normalize_energy=False,
+        atomic_energies={"H": 0.0},
+        memory_mode="cpu",
+        device="cpu",
+        save_energies=False,
+        save_forces=False,
+        checkpoint_dir=None,
+        checkpoint_interval=0,
+        max_checkpoints=None,
+        save_best=False,
+        use_scheduler=False,
+        show_progress=False,
+        seed=17,
+    )
+
+    result = pot.train(structures=structures, config=cfg)
+    model_path = tmp_path / "periodic-force-model.pt"
+    pot.save(model_path)
+    reloaded = TorchANNPotential.from_file(model_path, device="cpu")
+    prediction = reloaded.predict(structures, eval_forces=True)
+
+    predicted_energies = np.asarray(prediction.total_energy)
+    assert np.allclose(
+        predicted_energies[0], predicted_energies[1], rtol=1e-10, atol=1e-10
+    )
+    assert np.allclose(
+        prediction.forces[0], prediction.forces[1], rtol=1e-10, atol=1e-10
+    )
+    expected_validation_rmse = abs(predicted_energies[0] - 0.25) / 3
+    assert result.errors["RMSE_test"].iloc[-1] == pytest.approx(
+        expected_validation_rmse, rel=1e-10, abs=1e-10
+    )
 
 
 @pytest.mark.cpu
