@@ -1,9 +1,8 @@
-"""Feature-matrix sampling utilities for structure collections.
+"""Sampling utilities for structure selection and local augmentation.
 
-The functions in this module operate on representation matrices with one row
-per source structure.  They return integer source-row indices for the caller to
-apply to paths, in-memory structures, training sets, or other externally
-managed collections.
+The subset-selection functions operate on representation matrices and return
+source-row indices. Taylor sampling instead generates force-informed local
+configurations through the public geometry transformations.
 """
 
 from __future__ import annotations
@@ -12,6 +11,32 @@ from numbers import Integral
 from typing import Any
 
 import numpy as np
+
+from ._taylor_sampling import (
+    TaylorExpansionConfig,
+    TaylorReference,
+    TaylorSampleRecord,
+    TaylorSamplingResult,
+    generate_taylor_samples,
+    iter_taylor_records,
+    iter_taylor_structures,
+    split_reference_structures,
+    taylor_energy,
+)
+
+__all__ = [
+    "TaylorExpansionConfig",
+    "TaylorReference",
+    "TaylorSampleRecord",
+    "TaylorSamplingResult",
+    "generate_taylor_samples",
+    "iter_taylor_records",
+    "iter_taylor_structures",
+    "random_subset",
+    "representative_subset",
+    "split_reference_structures",
+    "taylor_energy",
+]
 
 SKLEARN_INSTALL_HINT = "pip install 'aenet[sampling]'"
 
