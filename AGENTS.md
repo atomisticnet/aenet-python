@@ -85,8 +85,10 @@
 - Treat each local issue as one logical unit of work; it may, but need
   not, map one-to-one to a Git commit.
 - Move completed local issues to the untracked file
-  `CLOSED_LOCAL_ISSUES.md` after the corresponding work has been
-  committed.  This file is not archival and may occasionally be purged.
+  `CLOSED_LOCAL_ISSUES.md` after validation, when the corresponding work is
+  ready to commit. Include a completion receipt describing the implementation
+  and validation. The final commit hash need not be known in advance. This
+  file is not archival and may occasionally be purged.
 
 # Development notes
 
