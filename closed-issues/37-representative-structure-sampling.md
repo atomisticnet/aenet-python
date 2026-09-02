@@ -2,7 +2,7 @@
 
 **Type:** Feature
 **Priority:** Medium
-**Status:** Implemented and validated; pending final commit
+**Status:** Closed
 **Created:** 2026-08-28
 
 ## Problem
@@ -304,3 +304,21 @@ framework, but running the maintained notebook should not require PyTorch.
   discovery reject ambiguous directories unless `--structure` is supplied.
 - Validated 212 geometry tests, focused Ruff checks, optional-dependency
   isolation, 121 Sphinx doctests, and a warning-as-error Sphinx HTML build.
+
+## Completion receipt
+
+- **Branch:** `master`
+- **Relevant commits:**
+  - `e5095b2` (`Added issue #37 related to structure data down-selection`)
+  - `5878c0c` (`Addressed issue #37 related to structure data down-selection Draft 1`)
+  - `037e0cc` (`Further Edits to Address Issue 37`)
+  - `13e24f6` (`Simplify representative sampling tutorial (#37)`)
+  - `7866fd2` (`Finalize representative structure sampling (#37)`)
+- **Validation:** 36 focused sampling, notebook, and provenance tests; all 212
+  geometry tests; focused Ruff checks; optional-dependency isolation; 121
+  Sphinx doctests; and a warning-as-error Sphinx HTML build.
+- **Resolution:** Added the documented backend-independent representative and
+  random row-selection API, maintained NaCl sampling notebook and data
+  provenance, optional scikit-learn integration, and regression coverage for
+  selection correctness, reproducibility, validation, and ambiguous input
+  discovery. The final remediation commit is present on `origin/master`.
